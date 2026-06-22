@@ -20,6 +20,7 @@
     "seed:test": "tsx src/seed-test-accounts.ts",
     "seed:bulk": "tsx src/seed-bulk.ts",
     "seed:backfill": "tsx src/seed-backfill-baseline.ts",
+    "seed:teachers": "tsx src/seed-replace-teachers.ts",
     "studio": "drizzle-kit studio"
   },
   "dependencies": {

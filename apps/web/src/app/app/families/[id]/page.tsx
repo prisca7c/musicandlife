@@ -158,15 +158,21 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
   );
 }
 
+interface FamilyInvoice { id: string; number: string; status: string; total: number; issuedOn: string; dueDate: string; }
+
+const INVOICE_STATUS_COLORS: Record<string, string> = { draft: 'default', sent: 'trial', paid: 'active', void: 'withdrawn' };
+
 export default function FamilyDetailPage() {
   const params = useParams<{ id: string }>();
   const [family, setFamily] = useState<FamilyDetail | null>(null);
+  const [invoices, setInvoices] = useState<FamilyInvoice[]>([]);
   const [showAddStudent, setShowAddStudent] = useState(false);
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   function load() {
     apiFetch<FamilyDetail>(`/families/${params.id}`, { token: tok() }).then(setFamily).catch(() => {});
+    apiFetch<FamilyInvoice[]>(`/invoices?familyId=${params.id}`, { token: tok() }).then(setInvoices).catch(() => {});
   }
   useEffect(() => { load(); }, [params.id]);
 
@@ -234,11 +240,6 @@ export default function FamilyDetailPage() {
                 <dd className="font-medium">{family.autoInvoice ? 'Yes' : 'No'}</dd>
               </div>
             </dl>
-            <Link href={`/app/billing?familyId=${family.id}`}
-              className="mt-4 block text-sm font-semibold hover:underline"
-              style={{ color: 'var(--sage)' }}>
-              View invoices →
-            </Link>
           </div>
           {family.guardians.length > 0 && (
             <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
@@ -289,6 +290,45 @@ export default function FamilyDetailPage() {
                       </Link>
                     </td>
                     <td><Badge variant={s.status}>{s.status}</Badge></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="data-table-wrap overflow-hidden mt-6">
+            <div className="px-5 py-3.5 border-b" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+              <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>
+                Invoices ({invoices.length})
+              </h2>
+            </div>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Invoice #</th>
+                  <th>Issued</th>
+                  <th>Due</th>
+                  <th style={{ textAlign: 'right' }}>Total</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.length === 0 && (
+                  <tr><td colSpan={5} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+                    No invoices yet.
+                  </td></tr>
+                )}
+                {invoices.map(i => (
+                  <tr key={i.id}>
+                    <td>
+                      <Link href={`/app/billing/${i.id}`} className="font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}>
+                        {i.number}
+                      </Link>
+                    </td>
+                    <td style={{ color: 'var(--txt3)' }}>{i.issuedOn}</td>
+                    <td style={{ color: 'var(--txt3)' }}>{i.dueDate}</td>
+                    <td className="font-semibold" style={{ textAlign: 'right' }}>£{(i.total / 100).toFixed(2)}</td>
+                    <td><Badge variant={INVOICE_STATUS_COLORS[i.status]}>{i.status}</Badge></td>
                   </tr>
                 ))}
               </tbody>

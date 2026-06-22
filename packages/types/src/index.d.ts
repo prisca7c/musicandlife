@@ -11,9 +11,9 @@ export declare const LESSON_RATES: Record<string, Record<number, number>>;
 export declare function lessonRate(lessonType: 'private' | 'group', durationMin: number): number;
 /** Returns the term total in pence (lessons × rate), with optional 5% advance-payment discount */
 export declare function termTotal(ratePerSession: number, lessonCount: number, discount5pct?: boolean): number;
-export declare const PRIVATE_INSTRUMENTS: readonly ["guitar", "piano", "violin", "drums", "bass", "cello", "viola", "vocal"];
+export declare const PRIVATE_INSTRUMENTS: readonly ["guitar", "piano", "violin", "drums", "bass guitar", "cello", "viola", "vocal"];
 export declare const GROUP_INSTRUMENTS: readonly ["guitar", "ukulele", "suzuki violin", "ensemble"];
-export declare const ALL_INSTRUMENTS: readonly ("guitar" | "piano" | "violin" | "drums" | "bass" | "cello" | "viola" | "vocal" | "ukulele" | "suzuki violin" | "ensemble")[];
+export declare const ALL_INSTRUMENTS: readonly ("guitar" | "piano" | "violin" | "drums" | "bass guitar" | "cello" | "viola" | "vocal" | "ukulele" | "suzuki violin" | "ensemble")[];
 export type PrivateInstrument = (typeof PRIVATE_INSTRUMENTS)[number];
 export type GroupInstrument = (typeof GROUP_INSTRUMENTS)[number];
 export declare const WEEKDAYS: readonly ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];

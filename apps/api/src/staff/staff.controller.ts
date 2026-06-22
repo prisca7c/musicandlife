@@ -31,6 +31,12 @@ export class StaffController {
     return this.staff.findAll(user.orgId);
   }
 
+  @Get('me')
+  @Roles('teacher')
+  findMe(@CurrentUser() user: RequestUser) {
+    return this.staff.findByUserId(user.orgId, user.userId);
+  }
+
   @Post()
   @Roles('manager')
   create(@CurrentUser() user: RequestUser, @Body() dto: CreateStaffDto) {

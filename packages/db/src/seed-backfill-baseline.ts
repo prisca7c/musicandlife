@@ -11,8 +11,10 @@ config({ path: join(__dirname, '../../../.env') });
 import { eq, isNull } from 'drizzle-orm';
 import {
   createDb, organizations, terms, rooms, enrollments, lessons, attendance,
-  lessonCredits, invoices, invoiceLineItems, payments,
+  lessonCredits, invoices, invoiceLineItems, payments, staffMembers,
 } from './index';
+
+function dateStr(d: Date) { return d.toISOString().split('T')[0]!; }
 
 const db = createDb(process.env.DATABASE_URL!);
 
@@ -46,6 +48,7 @@ async function main() {
   console.log(`Backfilling lessons for ${toBackfill.length} enrollments…`);
   const now = new Date();
   let lessonCount = 0, attendanceCount = 0;
+  const lessonsByEnrollment = new Map<string, { startsAt: Date; teacherId: string | null }[]>();
 
   for (const en of toBackfill) {
     const rule = en.scheduleRule as { weekday: string; startTime: string } | null;
@@ -64,6 +67,9 @@ async function main() {
         status, termId: activeTerm?.id ?? undefined,
       }).returning();
       lessonCount++;
+      const arr = lessonsByEnrollment.get(en.id) ?? [];
+      arr.push({ startsAt, teacherId: en.teacherId ?? null });
+      lessonsByEnrollment.set(en.id, arr);
 
       if (status === 'completed') {
         await db.insert(attendance).values({ organizationId: orgId, lessonId: lesson!.id, status: 'present' });
@@ -78,16 +84,25 @@ async function main() {
     ]);
   }
 
-  // One paid invoice per affected family
+  // One paid invoice per affected family, itemized per lesson, sorted earliest first
+  const allStaff = await db.query.staffMembers.findMany({ where: eq(staffMembers.organizationId, orgId) });
+  const teacherById = new Map(allStaff.map(t => [t.id, `${t.firstName} ${t.lastName}`]));
   const studentsForEnrollments = await Promise.all(
     toBackfill.map(en => db.query.students.findFirst({ where: (s, { eq }) => eq(s.id, en.studentId) })),
   );
-  const byFamily = new Map<string, { studentName: string; rate: number }[]>();
+  const byFamily = new Map<string, { description: string; amount: number; date: Date }[]>();
   toBackfill.forEach((en, i) => {
     const stu = studentsForEnrollments[i];
     if (!stu) return;
     const arr = byFamily.get(stu.familyId) ?? [];
-    arr.push({ studentName: `${stu.firstName} ${stu.lastName}`, rate: en.rate });
+    for (const lesson of lessonsByEnrollment.get(en.id) ?? []) {
+      const teacherName = lesson.teacherId ? teacherById.get(lesson.teacherId) ?? 'Unassigned' : 'Unassigned';
+      arr.push({
+        description: `${dateStr(lesson.startsAt)} — ${stu.firstName} ${stu.lastName}, ${en.instrument} with ${teacherName}`,
+        amount: en.rate,
+        date: lesson.startsAt,
+      });
+    }
     byFamily.set(stu.familyId, arr);
   });
 
@@ -95,13 +110,14 @@ async function main() {
   const due = new Date(now.getTime() + 7 * 86400000).toISOString().split('T')[0]!;
   let n = 9000;
   for (const [familyId, items] of byFamily) {
-    const total = items.reduce((s, i) => s + i.rate * 4, 0);
+    items.sort((a, b) => a.date.getTime() - b.date.getTime());
+    const total = items.reduce((s, i) => s + i.amount, 0);
     const [inv] = await db.insert(invoices).values({
       organizationId: orgId, familyId, mode: 'monthly_statement', termId: activeTerm?.id,
       number: `INV-${n++}`, issuedOn: today, dueDate: due, status: 'paid', total,
     }).returning();
     await db.insert(invoiceLineItems).values(
-      items.map(i => ({ organizationId: orgId, invoiceId: inv!.id, description: `${i.studentName} — 4 lessons`, amount: i.rate * 4 })),
+      items.map(i => ({ organizationId: orgId, invoiceId: inv!.id, description: i.description, amount: i.amount })),
     );
     await db.insert(payments).values({
       organizationId: orgId, familyId, invoiceId: inv!.id, method: 'bank_transfer', amount: total,

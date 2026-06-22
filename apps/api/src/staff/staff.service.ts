@@ -31,6 +31,14 @@ export class StaffService {
     });
   }
 
+  /** A teacher's own staff record — used so the calendar can auto-assign them without exposing the full roster. */
+  async findByUserId(orgId: string, userId: string) {
+    return this.db.db.query.staffMembers.findFirst({
+      where: and(eq(staffMembers.userId, userId), eq(staffMembers.organizationId, orgId)),
+      columns: { id: true, firstName: true, lastName: true },
+    });
+  }
+
   async findOne(orgId: string, id: string) {
     const member = await this.db.db.query.staffMembers.findFirst({
       where: and(eq(staffMembers.id, id), eq(staffMembers.organizationId, orgId)),

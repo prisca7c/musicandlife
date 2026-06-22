@@ -24,7 +24,7 @@ const s = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 22,
   },
-  logo: { width: 165, height: 72 },
+  logo: { width: 225, height: 98 },
   titleBlock: { alignItems: 'flex-end' },
   invoiceTitle: {
     fontFamily: 'Helvetica-Bold',

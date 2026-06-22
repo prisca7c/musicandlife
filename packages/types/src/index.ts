@@ -39,7 +39,7 @@ export const PRIVATE_INSTRUMENTS = [
   'piano',
   'violin',
   'drums',
-  'bass',
+  'bass guitar',
   'cello',
   'viola',
   'vocal',

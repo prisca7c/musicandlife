@@ -121,12 +121,14 @@ async function main() {
     studentsLeft -= n;
   }
 
+  const familyLastNames: string[] = [];
   const familyRows = familyPlans.map((_, i) => {
     const lastName = pick(LAST_NAMES);
     const contactFirst = pick([...BOY_NAMES, ...GIRL_NAMES]);
+    familyLastNames.push(lastName);
     return {
       organizationId: orgId,
-      name: `${lastName} Family`,
+      name: `${contactFirst} ${lastName} Family`,
       contactName: `${contactFirst} ${lastName}`,
       email: `${contactFirst.toLowerCase()}.${lastName.toLowerCase()}${i}@example.com`,
       phone: `07${randInt(700000000, 999999999)}`,
@@ -139,7 +141,7 @@ async function main() {
   const studentRows: { familyId: string; firstName: string; lastName: string; dob: string; status: 'trial' | 'active' | 'paused' | 'withdrawn'; lastName2: string }[] = [];
   for (let i = 0; i < insertedFamilies.length; i++) {
     const fam = insertedFamilies[i]!;
-    const lastName = fam.name!.replace(' Family', '');
+    const lastName = familyLastNames[i]!;
     const count = familyPlans[i]!.studentCount;
     for (let s = 0; s < count; s++) {
       const isGirl = rand() < 0.5;
@@ -289,6 +291,12 @@ async function main() {
     const arr = studentsByFamily.get(s.familyId) ?? [];
     arr.push(s); studentsByFamily.set(s.familyId, arr);
   }
+  const teacherById = new Map(allTeachers.map(t => [t.id, `${t.firstName} ${t.lastName}`]));
+  const lessonsByEnrollment = new Map<string, typeof lessonRows>();
+  for (const l of lessonRows) {
+    const arr = lessonsByEnrollment.get(l.enrollmentId) ?? [];
+    arr.push(l); lessonsByEnrollment.set(l.enrollmentId, arr);
+  }
 
   let invoiceNum = 1;
   const today = dateStr(now);
@@ -297,13 +305,22 @@ async function main() {
 
   for (const fam of insertedFamilies) {
     const famStudents = studentsByFamily.get(fam.id) ?? [];
-    const lineItemDefs: { description: string; amount: number }[] = [];
+    const lineItemDefs: { description: string; amount: number; date: Date }[] = [];
     for (const stu of famStudents) {
       for (const en of enrollByStudent.get(stu.id) ?? []) {
-        lineItemDefs.push({ description: `${stu.firstName} ${stu.lastName} — ${en.instrument} (${en.lessonType}) × 4`, amount: en.rate * 4 });
+        const enLessons = lessonsByEnrollment.get(en.id) ?? [];
+        for (const lesson of enLessons) {
+          const teacherName = lesson.teacherId ? teacherById.get(lesson.teacherId) ?? 'Unassigned' : 'Unassigned';
+          lineItemDefs.push({
+            description: `${dateStr(lesson.startsAt)} — ${stu.firstName} ${stu.lastName}, ${en.instrument} with ${teacherName}`,
+            amount: en.rate,
+            date: lesson.startsAt,
+          });
+        }
       }
     }
     if (lineItemDefs.length === 0) continue;
+    lineItemDefs.sort((a, b) => a.date.getTime() - b.date.getTime());
     billedFamilies++;
     const total = lineItemDefs.reduce((s, l) => s + l.amount, 0);
     const r = rand();

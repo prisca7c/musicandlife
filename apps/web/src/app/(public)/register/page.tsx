@@ -206,7 +206,7 @@ export default function RegisterPage() {
         studentEmail: data.studentEmail || undefined,
         familyName: data.familyType === 'existing' && selectedFamily
           ? selectedFamily.name
-          : `${data.guardianLastName} Family`,
+          : `${data.guardianFirstName} ${data.guardianLastName} Family`,
         contactName: data.familyType === 'existing' && selectedFamily
           ? selectedFamily.name
           : `${data.guardianFirstName} ${data.guardianLastName}`,
@@ -480,7 +480,13 @@ export default function RegisterPage() {
               <div className="flex items-center gap-2.5 text-lg font-bold tracking-tight">
                 <Music size={20} color="var(--sage)" /> Instruments &amp; Lessons
               </div>
-              <p className="text-[13px] text-[var(--txt3)] mt-1.5">Select all the lessons you&apos;re interested in. You can always change these later.</p>
+              <p className="text-[13px] text-[var(--txt3)] mt-1.5">
+                Select all the lessons you&apos;re interested in. You can always change these later. Not sure which instrument to pick?{' '}
+                <a href="https://www.musicandlife.co.uk/music-lessons" target="_blank" rel="noopener noreferrer"
+                  className="font-semibold hover:underline" style={{ color: 'var(--sage)' }}>
+                  Learn more about our lessons
+                </a>.
+              </p>
             </div>
             <div className="px-7 py-6">
               {/* Private */}

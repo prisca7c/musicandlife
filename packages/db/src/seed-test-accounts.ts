@@ -93,9 +93,9 @@ async function main() {
     console.log('  created guardian membership');
   }
 
-  // Link to Johnson Family
+  // Link to the Johnson family
   const johnson = await db.query.families.findFirst({
-    where: and(eq(families.organizationId, orgId), eq(families.name, 'Johnson Family')),
+    where: and(eq(families.organizationId, orgId), eq(families.contactName, 'Claire Johnson')),
   });
   if (johnson) {
     const existingG = await db.query.guardians.findFirst({

@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { eq, and, gte, lte, count, sum } from 'drizzle-orm';
+import { eq, and, gte, lte, count, sum, inArray } from 'drizzle-orm';
 import {
   students, staffMembers, families, lessons, attendance,
   invoices, ledgerEntries, enrollments, terms, lessonCredits,
@@ -11,7 +11,8 @@ import { DbService } from '../db/db.service';
 export class ReportsService {
   constructor(private readonly db: DbService) {}
 
-  async getDashboardKpis(orgId: string) {
+  /** Pass scopeTeacherId for the teacher portal: limits every metric to that teacher's own students/lessons and hides studio-wide financials. */
+  async getDashboardKpis(orgId: string, scopeTeacherId?: string) {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
@@ -20,6 +21,22 @@ export class ReportsService {
     weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
     weekStart.setHours(0, 0, 0, 0);
     const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
+
+    // For teacher scoping: resolve the set of students this teacher actually teaches via enrollments.
+    let scopedStudentIds: string[] | null = null;
+    if (scopeTeacherId) {
+      const rows = await this.db.db.select({ studentId: enrollments.studentId })
+        .from(enrollments)
+        .where(and(eq(enrollments.organizationId, orgId), eq(enrollments.teacherId, scopeTeacherId)));
+      scopedStudentIds = [...new Set(rows.map(r => r.studentId))];
+    }
+
+    const lessonScope = scopeTeacherId
+      ? and(eq(lessons.organizationId, orgId), eq(lessons.teacherId, scopeTeacherId))
+      : eq(lessons.organizationId, orgId);
+    const enrollmentScope = scopeTeacherId
+      ? and(eq(enrollments.organizationId, orgId), eq(enrollments.status, 'active'), eq(enrollments.teacherId, scopeTeacherId))
+      : and(eq(enrollments.organizationId, orgId), eq(enrollments.status, 'active'));
 
     const [
       studentCounts,
@@ -32,69 +49,76 @@ export class ReportsService {
       termsList,
       enrollmentByInstrument,
     ] = await Promise.all([
-      // Students by status
-      this.db.db.select({ status: students.status, count: count() })
-        .from(students)
-        .where(eq(students.organizationId, orgId))
-        .groupBy(students.status),
+      // Students by status (scoped to the teacher's own students if applicable)
+      scopeTeacherId
+        ? (scopedStudentIds!.length > 0
+          ? this.db.db.select({ status: students.status, count: count() })
+              .from(students)
+              .where(and(eq(students.organizationId, orgId), inArray(students.id, scopedStudentIds!)))
+              .groupBy(students.status)
+          : Promise.resolve([]))
+        : this.db.db.select({ status: students.status, count: count() })
+            .from(students)
+            .where(eq(students.organizationId, orgId))
+            .groupBy(students.status),
 
-      // Family count
-      this.db.db.select({ count: count() })
-        .from(families)
-        .where(eq(families.organizationId, orgId)),
+      // Family count — studio-wide only, not meaningful/shown for a single teacher
+      scopeTeacherId
+        ? Promise.resolve([{ count: 0 }])
+        : this.db.db.select({ count: count() })
+            .from(families)
+            .where(eq(families.organizationId, orgId)),
 
-      // Active staff
-      this.db.db.select({ count: count() })
-        .from(staffMembers)
-        .where(and(eq(staffMembers.organizationId, orgId), eq(staffMembers.status, 'active'))),
+      // Active staff — studio-wide only, not shown for a single teacher
+      scopeTeacherId
+        ? Promise.resolve([{ count: 0 }])
+        : this.db.db.select({ count: count() })
+            .from(staffMembers)
+            .where(and(eq(staffMembers.organizationId, orgId), eq(staffMembers.status, 'active'))),
 
       // Lessons this month
       this.db.db.select({ status: lessons.status, count: count() })
         .from(lessons)
-        .where(and(
-          eq(lessons.organizationId, orgId),
-          gte(lessons.startsAt, monthStart),
-          lte(lessons.startsAt, monthEnd),
-        ))
+        .where(and(lessonScope, gte(lessons.startsAt, monthStart), lte(lessons.startsAt, monthEnd)))
         .groupBy(lessons.status),
 
       // Lessons this week
       this.db.db.select({ status: lessons.status, count: count() })
         .from(lessons)
-        .where(and(
-          eq(lessons.organizationId, orgId),
-          gte(lessons.startsAt, weekStart),
-          lte(lessons.startsAt, weekEnd),
-        ))
+        .where(and(lessonScope, gte(lessons.startsAt, weekStart), lte(lessons.startsAt, weekEnd)))
         .groupBy(lessons.status),
 
-      // Revenue this month (payments)
-      this.db.db.select({ total: sum(ledgerEntries.amount) })
-        .from(ledgerEntries)
-        .where(and(
-          eq(ledgerEntries.organizationId, orgId),
-          eq(ledgerEntries.type, 'payment'),
-          gte(ledgerEntries.occurredAt, monthStart),
-        )),
+      // Revenue this month — studio-wide financials, hidden for teachers
+      scopeTeacherId
+        ? Promise.resolve([{ total: 0 }])
+        : this.db.db.select({ total: sum(ledgerEntries.amount) })
+            .from(ledgerEntries)
+            .where(and(
+              eq(ledgerEntries.organizationId, orgId),
+              eq(ledgerEntries.type, 'payment'),
+              gte(ledgerEntries.occurredAt, monthStart),
+            )),
 
-      // Outstanding invoices
-      this.db.db.select({ total: sum(invoices.total), count: count() })
-        .from(invoices)
-        .where(and(eq(invoices.organizationId, orgId), eq(invoices.status, 'sent'))),
+      // Outstanding invoices — studio-wide financials, hidden for teachers
+      scopeTeacherId
+        ? Promise.resolve([{ total: 0, count: 0 }])
+        : this.db.db.select({ total: sum(invoices.total), count: count() })
+            .from(invoices)
+            .where(and(eq(invoices.organizationId, orgId), eq(invoices.status, 'sent'))),
 
       // Active terms
       this.db.db.query.terms.findMany({
         where: and(eq(terms.organizationId, orgId), eq(terms.status, 'active')),
       }),
 
-      // Enrollment breakdown by instrument (active enrollments only)
+      // Enrollment breakdown by instrument (active enrollments only, scoped to teacher if applicable)
       this.db.db.select({
         instrument: enrollments.instrument,
         lessonType: enrollments.lessonType,
         count: count(),
       })
         .from(enrollments)
-        .where(and(eq(enrollments.organizationId, orgId), eq(enrollments.status, 'active')))
+        .where(enrollmentScope)
         .groupBy(enrollments.instrument, enrollments.lessonType)
         .orderBy(enrollments.instrument),
     ]);
@@ -123,6 +147,7 @@ export class ReportsService {
       .sort((a, b) => b.total - a.total);
 
     return {
+      scoped: !!scopeTeacherId,
       students: { active: activeStudents, trial: trialStudents, total: totalStudents },
       families: familyCount[0]?.count ?? 0,
       staff: staffCount[0]?.count ?? 0,

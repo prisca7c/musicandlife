@@ -1,5 +1,8 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { eq, and } from 'drizzle-orm';
+import { staffMembers } from '@music-life/db';
 import { ReportsService } from './reports.service';
+import { DbService } from '../db/db.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -9,12 +12,19 @@ import type { RequestUser } from '@music-life/types';
 @Controller('reports')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class ReportsController {
-  constructor(private readonly reports: ReportsService) {}
+  constructor(private readonly reports: ReportsService, private readonly db: DbService) {}
 
   @Get('dashboard')
   @Roles('teacher')
-  dashboard(@CurrentUser() user: RequestUser) {
-    return this.reports.getDashboardKpis(user.orgId);
+  async dashboard(@CurrentUser() user: RequestUser) {
+    let scopeTeacherId: string | undefined;
+    if (user.role === 'teacher') {
+      const staff = await this.db.db.query.staffMembers.findFirst({
+        where: and(eq(staffMembers.userId, user.userId), eq(staffMembers.organizationId, user.orgId)),
+      });
+      scopeTeacherId = staff?.id;
+    }
+    return this.reports.getDashboardKpis(user.orgId, scopeTeacherId);
   }
 
   @Get('attendance')

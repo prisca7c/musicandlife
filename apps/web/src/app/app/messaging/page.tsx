@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { Modal } from '@/components/modal';
+import { Search } from 'lucide-react';
 
 interface Thread {
   id: string; subject: string; updatedAt: string;
@@ -48,11 +49,19 @@ function NewThreadModal({ open, onClose, onCreated }: { open: boolean; onClose: 
 
 export default function MessagingPage() {
   const [threads, setThreads] = useState<Thread[]>([]);
+  const [search, setSearch] = useState('');
   const [showNew, setShowNew] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   function load() { apiFetch<Thread[]>('/threads', { token: tok() }).then(setThreads).catch(() => {}); }
   useEffect(() => { load(); }, []);
+
+  const q = search.trim().toLowerCase();
+  const filtered = q ? threads.filter(t =>
+    t.subject.toLowerCase().includes(q) ||
+    t.messages.some(m => m.body.toLowerCase().includes(q)) ||
+    t.participants.some(p => p.user.email.toLowerCase().includes(q))
+  ) : threads;
 
   return (
     <div>
@@ -60,9 +69,25 @@ export default function MessagingPage() {
       <PageHeader title="Messages"
         action={<button onClick={() => setShowNew(true)} className="bg-[var(--sage)] text-white rounded px-4 py-2 text-sm font-medium hover:bg-[var(--sage-dk)]">+ New message</button>} />
 
+      <div className="mb-5 relative">
+        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--txt4)' }}>
+          <Search size={15} />
+        </span>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search people or messages…"
+          className="ui-search pl-9"
+        />
+      </div>
+
       <div className="space-y-2">
-        {threads.length === 0 && <div className="bg-white rounded-lg border px-4 py-12 text-center text-gray-400">No messages yet.</div>}
-        {threads.map(t => (
+        {filtered.length === 0 && (
+          <div className="bg-white rounded-lg border px-4 py-12 text-center text-gray-400">
+            {threads.length === 0 ? 'No messages yet.' : 'No results for that search.'}
+          </div>
+        )}
+        {filtered.map(t => (
           <Link key={t.id} href={`/app/messaging/${t.id}`}
             className="block bg-white rounded-lg border px-4 py-3 hover:shadow-sm transition-shadow">
             <div className="flex items-start justify-between">

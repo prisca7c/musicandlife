@@ -5,6 +5,7 @@ import { apiFetch } from '@/lib/api';
 import { Modal } from '@/components/modal';
 import { Badge } from '@/components/badge';
 import { SearchableSelect } from '@/components/searchable-select';
+import { InstrumentIcon } from '@/components/instrument-icons';
 import { PRIVATE_INSTRUMENTS, GROUP_INSTRUMENTS, lessonRate } from '@music-life/types';
 import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -31,6 +32,14 @@ const DAYS        = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const TOTAL_H     = HOURS.length * PX_PER_HOUR; // 1144px
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+function getRoleFromToken(token?: string): string {
+  try {
+    if (!token) return '';
+    const payload = JSON.parse(atob(token.split('.')[1]!));
+    return payload.role ?? '';
+  } catch { return ''; }
+}
+
 function getWeekStart(date: Date) {
   const d = new Date(date);
   const day = d.getDay();
@@ -92,20 +101,33 @@ function computeLayout(dayLessons: Lesson[]): LessonLayout[] {
 // ─── Instrument colours ───────────────────────────────────────────────────────
 const INSTR_HUE: Record<string, string> = {
   piano: '#3D7A55', violin: '#2B6CB0', guitar: '#B7791F', drums: '#C05621',
-  cello: '#553C9A', viola: '#2C7A7B', bass: '#276749', vocals: '#97266D',
-  ukulele: '#2B6CB0', flute: '#2B6CB0', clarinet: '#2C7A7B', trumpet: '#B7791F',
+  cello: '#553C9A', viola: '#2C7A7B', 'bass guitar': '#276749', vocal: '#97266D',
+  ukulele: '#D69E2E', 'suzuki violin': '#2B6CB0', ensemble: '#718096',
 };
 function instrColor(name?: string | null) { return INSTR_HUE[(name ?? '').toLowerCase()] ?? '#4A5568'; }
 
-// ─── Status colours (bg/border/text) ─────────────────────────────────────────
+// ─── Teacher colours — deterministic hash so each teacher gets a distinct, stable colour ──
+const TEACHER_PALETTE = [
+  '#2B6CB0', '#B7791F', '#553C9A', '#276749', '#C05621',
+  '#97266D', '#2C7A7B', '#9B2C2C', '#1A4971', '#6B46C1',
+  '#975A16', '#22543D',
+];
+function teacherColor(teacherId?: string | null) {
+  if (!teacherId) return '#718096';
+  let hash = 0;
+  for (let i = 0; i < teacherId.length; i++) hash = (hash * 31 + teacherId.charCodeAt(i)) >>> 0;
+  return TEACHER_PALETTE[hash % TEACHER_PALETTE.length]!;
+}
+
+// ─── Status colours (bg/border/text) — scheduled (upcoming) vs completed (done) ───────
 const STATUS_STYLE: Record<string, { bg: string; border: string; text: string }> = {
-  scheduled:           { bg: '#F0FFF4', border: '#9AE6B4', text: '#276749' },
+  scheduled:           { bg: '#EBF4FF', border: '#90BEF0', text: '#2B6CB0' },
   completed:           { bg: '#F0FFF4', border: '#68D391', text: '#22543D' },
   cancelled_no_makeup: { bg: '#FFF5F5', border: '#FC8181', text: '#9B2C2C' },
   cancelled_no_pay:    { bg: '#FFFAF0', border: '#F6AD55', text: '#7B341E' },
   cancelled_teacher:   { bg: '#FFFFF0', border: '#F6E05E', text: '#744210' },
-  cancelled_makeup:    { bg: '#EBF8FF', border: '#90CDF4', text: '#2A4365' },
-  makeup:              { bg: '#EBF8FF', border: '#90CDF4', text: '#2A4365' },
+  cancelled_makeup:    { bg: '#F5F0FF', border: '#C4B5FD', text: '#5B3F9E' },
+  makeup:              { bg: '#F5F0FF', border: '#C4B5FD', text: '#5B3F9E' },
 };
 
 // ─── Lesson block ─────────────────────────────────────────────────────────────
@@ -115,17 +137,18 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
   const left   = `${(lesson.col / lesson.totalCols) * 100}%`;
   const width  = `calc(${(1 / lesson.totalCols) * 100}% - 3px)`;
 
-  const style  = STATUS_STYLE[lesson.status] ?? STATUS_STYLE.scheduled!;
-  const instr  = lesson.enrollment?.instrument;
-  const isGrp  = lesson.enrollment?.lessonType === 'group';
-  const color  = instrColor(instr);
-  const tall   = height >= 52;
-  const xtall  = height >= 72;
+  const style   = STATUS_STYLE[lesson.status] ?? STATUS_STYLE.scheduled!;
+  const instr   = lesson.enrollment?.instrument;
+  const isGrp   = lesson.enrollment?.lessonType === 'group';
+  const tColor  = teacherColor(lesson.teacher?.id);
+  const iColor  = instrColor(instr);
+  const tall    = height >= 52;
+  const xtall   = height >= 72;
 
   return (
     <button
       onClick={onClick}
-      style={{ top, height, left, width, borderLeftColor: color, borderLeftWidth: 3, background: style.bg, borderColor: style.border }}
+      style={{ top, height, left, width, borderLeftColor: tColor, borderLeftWidth: 3, background: style.bg, borderColor: style.border }}
       className="absolute rounded-r-lg border cursor-pointer text-left px-1.5 py-1 overflow-hidden transition-all hover:brightness-95 hover:shadow-md group z-10"
     >
       {/* Time range — always shown */}
@@ -142,7 +165,8 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
       {/* Instrument + type badge */}
       {tall && instr && (
         <p className="flex items-center gap-1 mt-0.5">
-          <span className="text-[10px] font-semibold capitalize truncate" style={{ color }}>
+          <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={11} /></span>
+          <span className="text-[10px] font-semibold capitalize truncate" style={{ color: iColor }}>
             {instr}
           </span>
           <span className={`text-[8px] font-bold px-1 py-px rounded-full leading-none shrink-0
@@ -154,8 +178,11 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
 
       {/* Teacher name */}
       {xtall && lesson.teacher && (
-        <p className="text-[10px] leading-tight truncate mt-px" style={{ color: style.text, opacity: 0.65 }}>
-          {lesson.teacher.firstName} {lesson.teacher.lastName}
+        <p className="flex items-center gap-1 mt-px">
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tColor }} />
+          <span className="text-[10px] leading-tight truncate" style={{ color: style.text, opacity: 0.65 }}>
+            {lesson.teacher.firstName} {lesson.teacher.lastName}
+          </span>
         </p>
       )}
     </button>
@@ -178,6 +205,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   const [duration, setDuration] = useState('60');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [isTeacher, setIsTeacher] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   useEffect(() => {
@@ -185,11 +213,20 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
     setStudentId(''); setTeacherId(''); setRoomId(''); setDuration('60');
     setLessonType('private'); setInstrument('');
     const t = tok();
+    const role = getRoleFromToken(t);
+    const teacherSelf = role === 'teacher';
+    setIsTeacher(teacherSelf);
     Promise.all([
-      apiFetch<StaffMember[]>('/staff', { token: t }).catch(() => []),
+      teacherSelf
+        ? apiFetch<StaffMember | null>('/staff/me', { token: t }).catch(() => null).then(me => me ? [me] : [])
+        : apiFetch<StaffMember[]>('/staff', { token: t }).catch(() => []),
       apiFetch<Student[]>('/students', { token: t }).catch(() => []),
       apiFetch<Room[]>('/rooms', { token: t }).catch(() => []),
-    ]).then(([s, st, r]) => { setStaff(s); setStudentsList(st); setRooms(r); });
+    ]).then(([s, st, r]) => {
+      setStaff(s);
+      setStudentsList(st); setRooms(r);
+      if (teacherSelf && s[0]) setTeacherId(s[0].id);
+    });
   }, [open]);
 
   const instrumentOptions = lessonType === 'private' ? PRIVATE_INSTRUMENTS : GROUP_INSTRUMENTS;
@@ -280,13 +317,15 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
           />
         </div>
 
-        <div>
-          <label className="ui-label">Teacher</label>
-          <SearchableSelect
-            options={staff.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
-            value={teacherId} onChange={setTeacherId} emptyLabel="Unassigned"
-          />
-        </div>
+        {!isTeacher && (
+          <div>
+            <label className="ui-label">Teacher</label>
+            <SearchableSelect
+              options={staff.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+              value={teacherId} onChange={setTeacherId} emptyLabel="Unassigned"
+            />
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="ui-label">Date <span style={{ color: 'var(--coral)' }}>*</span></label>
@@ -461,7 +500,13 @@ export default function CalendarPage() {
   }
   useEffect(() => { load(); }, [weekStart.getTime()]);
   useEffect(() => {
-    apiFetch<StaffMember[]>('/staff', { token: tok() }).then(setStaff).catch(() => {});
+    const t = tok();
+    const role = getRoleFromToken(t);
+    if (role === 'teacher') {
+      apiFetch<StaffMember | null>('/staff/me', { token: t }).then(me => setStaff(me ? [me] : [])).catch(() => {});
+    } else {
+      apiFetch<StaffMember[]>('/staff', { token: t }).then(setStaff).catch(() => {});
+    }
   }, []);
 
   useEffect(() => {
@@ -586,7 +631,13 @@ export default function CalendarPage() {
           Group (G)
         </span>
         <span className="w-px h-4 bg-[var(--bd2)] mx-1" />
-        <span className="text-[11px] text-[var(--txt4)] font-semibold uppercase tracking-wide">Left stripe = instrument colour</span>
+        <span className="text-[11px] text-[var(--txt4)] font-semibold uppercase tracking-wide">Teacher:</span>
+        {staff.map(s => (
+          <span key={s.id} className="flex items-center gap-1 text-[11px] font-semibold" style={{ color: teacherColor(s.id) }}>
+            <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: teacherColor(s.id) }} />
+            {s.firstName} {s.lastName}
+          </span>
+        ))}
       </div>
 
       {/* ── Week view ── */}

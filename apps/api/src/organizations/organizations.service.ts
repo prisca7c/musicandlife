@@ -10,7 +10,10 @@ export class OrganizationsService {
   async findById(id: string) {
     const org = await this.db.db.query.organizations.findFirst({ where: eq(organizations.id, id) });
     if (!org) throw new NotFoundException('Organization not found');
-    return org;
+    // Spread settings fields (address, bank details, etc.) onto the top level too,
+    // so flat consumers (e.g. invoice PDF generation) can read org.address directly
+    // while the settings page keeps using the nested org.settings shape.
+    return { ...org, ...(org.settings as Record<string, unknown> ?? {}) };
   }
 
   async findBySlug(slug: string) {

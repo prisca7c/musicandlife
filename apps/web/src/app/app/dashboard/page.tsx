@@ -23,6 +23,7 @@ function getRoleFromCookie(): string {
 interface InstrumentRow { instrument: string; private: number; group: number; total: number; }
 
 interface KpiData {
+  scoped?: boolean;
   students: { active: number; trial: number; total: number };
   families: number;
   staff: number;
@@ -46,8 +47,8 @@ interface Lesson {
 const INSTR_COLOURS: Record<string, string> = {
   piano:    '#3D7A55', violin:  '#2B6CB0', guitar:  '#B7791F',
   drums:    '#C05621', cello:   '#6B46C1', viola:   '#2C7A7B',
-  bass:     '#276749', vocals:  '#97266D', ukulele: '#2B6CB0',
-  flute:    '#2B6CB0', clarinet:'#2C7A7B', trumpet: '#B7791F',
+  'bass guitar': '#276749', vocal: '#97266D', ukulele: '#D69E2E',
+  'suzuki violin': '#2B6CB0', ensemble: '#718096',
 };
 function instrColour(name: string) {
   return INSTR_COLOURS[name.toLowerCase()] ?? '#4A5568';
@@ -123,21 +124,25 @@ function AdminDashboard() {
         )}
       </div>
 
-      {/* Row 1 — Studio snapshot */}
+      {/* Row 1 — snapshot (scoped to own students/lessons for teachers) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        <StatCard label="Active students" href="/app/students" icon={<UserCheck size={20} />}
+        <StatCard label={kpis?.scoped ? 'My students' : 'Active students'} href="/app/students" icon={<UserCheck size={20} />}
           value={kpis?.students.active ?? '—'}
           sub={kpis?.students.trial ? `+ ${kpis.students.trial} on trial` : undefined} />
-        <StatCard label="Families" href="/app/families" icon={<Users size={20} />}
-          value={kpis?.families ?? '—'} />
-        <StatCard label="Teaching staff" href="/app/staff" icon={<Briefcase size={20} />}
-          value={kpis?.staff ?? '—'} sub="active" />
+        {!kpis?.scoped && (
+          <>
+            <StatCard label="Families" href="/app/families" icon={<Users size={20} />}
+              value={kpis?.families ?? '—'} />
+            <StatCard label="Teaching staff" href="/app/staff" icon={<Briefcase size={20} />}
+              value={kpis?.staff ?? '—'} sub="active" />
+          </>
+        )}
         <StatCard label="Lessons today" href="/app/calendar" icon={<Clock size={20} />}
           value={todayLessons.length}
           sub={todayLessons.length > 0 ? `next: ${new Date(todayLessons[0]!.startsAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'none scheduled'} />
       </div>
 
-      {/* Row 2 — Activity */}
+      {/* Row 2 — Activity (financials hidden for teachers) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard label="This week" href="/app/calendar" icon={<Calendar size={20} />} muted
           value={kpis?.weeklyLessons.total ?? '—'}
@@ -145,12 +150,16 @@ function AdminDashboard() {
         <StatCard label={`Lessons — ${monthLabel}`} icon={<TrendingUp size={20} />} muted
           value={kpis?.lessons.totalThisMonth ?? '—'}
           sub={kpis ? `${kpis.lessons.completedThisMonth} completed` : undefined} />
-        <StatCard label={`Revenue — ${monthLabel}`} href="/app/billing" icon={<PoundSterling size={20} />}
-          value={kpis ? `£${(kpis.revenue.thisMonth / 100).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'} />
-        <StatCard label="Outstanding" href="/app/billing" icon={<PoundSterling size={20} />}
-          warn={(kpis?.invoices.outstandingTotal ?? 0) > 0}
-          value={kpis ? `£${(kpis.invoices.outstandingTotal / 100).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'}
-          sub={kpis?.invoices.outstandingCount ? `${kpis.invoices.outstandingCount} unpaid invoice${kpis.invoices.outstandingCount !== 1 ? 's' : ''}` : undefined} />
+        {!kpis?.scoped && (
+          <>
+            <StatCard label={`Revenue — ${monthLabel}`} href="/app/billing" icon={<PoundSterling size={20} />}
+              value={kpis ? `£${(kpis.revenue.thisMonth / 100).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'} />
+            <StatCard label="Outstanding" href="/app/billing" icon={<PoundSterling size={20} />}
+              warn={(kpis?.invoices.outstandingTotal ?? 0) > 0}
+              value={kpis ? `£${(kpis.invoices.outstandingTotal / 100).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'}
+              sub={kpis?.invoices.outstandingCount ? `${kpis.invoices.outstandingCount} unpaid invoice${kpis.invoices.outstandingCount !== 1 ? 's' : ''}` : undefined} />
+          </>
+        )}
       </div>
 
       {/* Row 3 — Instrument breakdown + Today's lessons */}
