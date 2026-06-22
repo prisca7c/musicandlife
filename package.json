@@ -1,0 +1,21 @@
+{
+  "name": "music-life-os",
+  "private": true,
+  "packageManager": "pnpm@11.5.1",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:generate": "pnpm --filter @music-life/db run generate",
+    "db:migrate": "pnpm --filter @music-life/db run migrate",
+    "db:seed": "pnpm --filter @music-life/db run seed"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "typescript": "^5.5.0",
+    "prettier": "^3.3.0",
+    "@types/node": "^20.0.0"
+  }
+}

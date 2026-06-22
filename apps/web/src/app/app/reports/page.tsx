@@ -1,0 +1,260 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { pdf } from '@react-pdf/renderer';
+import { apiFetch } from '@/lib/api';
+import { PageHeader } from '@/components/page-header';
+import { InvoicePDF, type OrgPDFData } from '@/components/invoice-pdf';
+import { PayrollPDF, type PayrollPDFData } from '@/components/payroll-pdf';
+import { AttendancePDF, type AttendancePDFData } from '@/components/attendance-pdf';
+import { Download, Loader2 } from 'lucide-react';
+import { SearchableSelect } from '@/components/searchable-select';
+
+interface AttendanceReport { from: string; to: string; byStatus: { status: string; count: number }[]; }
+interface RevenueReport { from: string; to: string; byType: { type: string; total: string | null }[]; }
+interface EnrollmentReport { byInstrument: { instrument: string; lessonType: string; count: number }[]; }
+interface StudentOption { id: string; firstName: string; lastName: string; }
+interface StaffOption { id: string; firstName: string; lastName: string; }
+
+function today() { return new Date().toISOString().split('T')[0]!; }
+function monthStart() { const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]!; }
+
+async function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  scheduled: 'Scheduled', completed: 'Completed',
+  cancelled_makeup: 'Makeup credit', cancelled_no_makeup: 'Late cancel',
+  cancelled_no_pay: 'No charge', cancelled_teacher: 'Teacher cancelled', makeup: 'Makeup lesson',
+};
+
+export default function ReportsPage() {
+  const [attendance, setAttendance] = useState<AttendanceReport | null>(null);
+  const [revenue, setRevenue] = useState<RevenueReport | null>(null);
+  const [enrollments, setEnrollments] = useState<EnrollmentReport | null>(null);
+  const [students, setStudents] = useState<StudentOption[]>([]);
+  const [staff, setStaff] = useState<StaffOption[]>([]);
+  const [org, setOrg] = useState<OrgPDFData | null>(null);
+
+  const [from, setFrom] = useState(monthStart);
+  const [to, setTo] = useState(today);
+  const [pdfStudent, setPdfStudent] = useState('');
+  const [pdfStaff, setPdfStaff] = useState('');
+  const [generating, setGenerating] = useState<string | null>(null);
+
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  useEffect(() => {
+    const t = tok();
+    Promise.all([
+      apiFetch<StudentOption[]>('/students', { token: t }).catch(() => []),
+      apiFetch<StaffOption[]>('/staff', { token: t }).catch(() => []),
+      apiFetch<OrgPDFData>('/organizations/me', { token: t }).catch(() => null),
+    ]).then(([s, st, o]) => { setStudents(s); setStaff(st); setOrg(o); });
+  }, []);
+
+  useEffect(() => {
+    const t = tok();
+    Promise.all([
+      apiFetch<AttendanceReport>(`/reports/attendance?from=${from}&to=${to}`, { token: t }).catch(() => null),
+      apiFetch<RevenueReport>(`/reports/revenue?from=${from}&to=${to}`, { token: t }).catch(() => null),
+      apiFetch<EnrollmentReport>('/reports/enrollments', { token: t }).catch(() => null),
+    ]).then(([a, r, e]) => { setAttendance(a); setRevenue(r); setEnrollments(e); });
+  }, [from, to]);
+
+  async function downloadStudentInvoice() {
+    if (!pdfStudent) return;
+    setGenerating('invoice');
+    try {
+      const data = await apiFetch<Parameters<typeof InvoicePDF>[0]['invoice'] & { student: { name: string } }>(
+        `/reports/student-invoice-pdf?studentId=${pdfStudent}&from=${from}&to=${to}`, { token: tok() }
+      );
+      // Build an InvoicePDF-compatible shape from the report data
+      const invoiceData = {
+        number: `${(data as unknown as { student: { name: string } }).student?.name ?? 'Student'} · ${from} – ${to}`,
+        status: 'draft',
+        total: (data as unknown as { total: number }).total ?? 0,
+        issuedOn: today(),
+        dueDate: today(),
+        notes: null,
+        family: (data as unknown as { student: { family: { name: string; email: string | null } | null } }).student?.family ?? null,
+        lineItems: (data as unknown as { lineItems: { id: string; description: string; amount: number; date: string }[] }).lineItems ?? [],
+      };
+      const blob = await pdf(<InvoicePDF invoice={invoiceData} org={org} logoSrc="" />).toBlob();
+      const studentName = students.find(s => s.id === pdfStudent);
+      await downloadBlob(blob, `invoice-${studentName?.firstName ?? 'student'}-${from}.pdf`);
+    } catch (e) { console.error(e); alert('Could not generate invoice PDF.'); }
+    finally { setGenerating(null); }
+  }
+
+  async function downloadPayroll() {
+    if (!pdfStaff) return;
+    setGenerating('payroll');
+    try {
+      const data = await apiFetch<PayrollPDFData>(
+        `/reports/teacher-payroll-pdf?staffId=${pdfStaff}&from=${from}&to=${to}`, { token: tok() }
+      );
+      const blob = await pdf(<PayrollPDF data={data} />).toBlob();
+      await downloadBlob(blob, `payroll-${data.staff.name.replace(/ /g, '-')}-${from}.pdf`);
+    } catch (e) { console.error(e); alert('Could not generate payroll PDF.'); }
+    finally { setGenerating(null); }
+  }
+
+  async function downloadAttendance() {
+    if (!pdfStudent) return;
+    setGenerating('attendance');
+    try {
+      const data = await apiFetch<AttendancePDFData>(
+        `/reports/student-attendance-pdf?studentId=${pdfStudent}&from=${from}&to=${to}`, { token: tok() }
+      );
+      const blob = await pdf(<AttendancePDF data={data} />).toBlob();
+      await downloadBlob(blob, `attendance-${data.student.name.replace(/ /g, '-')}-${from}.pdf`);
+    } catch (e) { console.error(e); alert('Could not generate attendance PDF.'); }
+    finally { setGenerating(null); }
+  }
+
+  return (
+    <div>
+      <PageHeader title="Reports" />
+
+      {/* Date range */}
+      <div className="flex gap-3 items-center mb-6 flex-wrap">
+        <label className="text-sm font-medium" style={{ color: 'var(--txt3)' }}>From</label>
+        <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+          className="border border-[var(--bd2)] rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--sage)]" />
+        <label className="text-sm font-medium" style={{ color: 'var(--txt3)' }}>to</label>
+        <input type="date" value={to} onChange={e => setTo(e.target.value)}
+          className="border border-[var(--bd2)] rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--sage)]" />
+      </div>
+
+      {/* ── PDF exports ── */}
+      <div className="bg-white rounded-2xl border mb-6 overflow-hidden" style={{ borderColor: 'var(--bd)' }}>
+        <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+          <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Export PDFs</h2>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--txt4)' }}>Date range above applies to all exports</p>
+        </div>
+        <div className="p-5 grid grid-cols-1 md:grid-cols-3 gap-5">
+
+          {/* Student invoice */}
+          <div className="space-y-3">
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--txt3)' }}>Student invoice</p>
+            <SearchableSelect
+              options={students.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+              value={pdfStudent} onChange={setPdfStudent} placeholder="Select student…"
+            />
+            <button onClick={downloadStudentInvoice} disabled={!pdfStudent || generating === 'invoice'}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-[var(--bd2)] text-sm font-semibold hover:bg-[var(--surf)] disabled:opacity-50 transition-colors">
+              {generating === 'invoice' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              Download invoice
+            </button>
+          </div>
+
+          {/* Teacher payroll */}
+          <div className="space-y-3">
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--txt3)' }}>Teacher payroll</p>
+            <SearchableSelect
+              options={staff.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+              value={pdfStaff} onChange={setPdfStaff} placeholder="Select teacher…"
+            />
+            <button onClick={downloadPayroll} disabled={!pdfStaff || generating === 'payroll'}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-[var(--bd2)] text-sm font-semibold hover:bg-[var(--surf)] disabled:opacity-50 transition-colors">
+              {generating === 'payroll' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              Download payroll
+            </button>
+          </div>
+
+          {/* Attendance history */}
+          <div className="space-y-3">
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--txt3)' }}>Attendance history</p>
+            <SearchableSelect
+              options={students.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+              value={pdfStudent} onChange={setPdfStudent} placeholder="Select student…"
+            />
+            <button onClick={downloadAttendance} disabled={!pdfStudent || generating === 'attendance'}
+              className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border border-[var(--bd2)] text-sm font-semibold hover:bg-[var(--surf)] disabled:opacity-50 transition-colors">
+              {generating === 'attendance' ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              Download attendance
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Lesson attendance */}
+        <div className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: 'var(--bd)' }}>
+          <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+            <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Lessons by status</h2>
+          </div>
+          <div className="p-5">
+            {!attendance ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>Loading…</p> : (
+              <div className="space-y-3">
+                {attendance.byStatus.length === 0 && <p className="text-sm" style={{ color: 'var(--txt4)' }}>No lessons in this period.</p>}
+                {attendance.byStatus.map(row => (
+                  <div key={row.status} className="flex items-center justify-between">
+                    <span className="text-xs capitalize px-2 py-0.5 rounded-full bg-[var(--surf)]" style={{ color: 'var(--txt3)' }}>
+                      {STATUS_LABELS[row.status] ?? row.status.replace(/_/g, ' ')}
+                    </span>
+                    <span className="font-bold" style={{ color: 'var(--txt)' }}>{row.count}</span>
+                  </div>
+                ))}
+                <div className="border-t pt-3 flex justify-between text-sm font-semibold" style={{ borderColor: 'var(--bd)', color: 'var(--txt2)' }}>
+                  <span>Total</span>
+                  <span>{attendance.byStatus.reduce((s, r) => s + r.count, 0)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Revenue */}
+        <div className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: 'var(--bd)' }}>
+          <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+            <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Revenue by type</h2>
+          </div>
+          <div className="p-5">
+            {!revenue ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>Loading…</p> : (
+              <div className="space-y-3">
+                {revenue.byType.length === 0 && <p className="text-sm" style={{ color: 'var(--txt4)' }}>No transactions in this period.</p>}
+                {revenue.byType.map(row => (
+                  <div key={row.type} className="flex items-center justify-between">
+                    <span className="text-sm capitalize" style={{ color: 'var(--txt3)' }}>{row.type}</span>
+                    <span className="font-bold"
+                      style={{ color: row.type === 'charge' ? 'var(--txt)' : row.type === 'payment' ? 'var(--sage)' : 'var(--txt3)' }}>
+                      £{(Number(row.total ?? 0) / 100).toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Enrollments */}
+        <div className="bg-white rounded-2xl border overflow-hidden lg:col-span-2" style={{ borderColor: 'var(--bd)' }}>
+          <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+            <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Active enrollments by instrument</h2>
+          </div>
+          <div className="p-5">
+            {!enrollments ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>Loading…</p> : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                {enrollments.byInstrument.length === 0 && <p className="text-sm col-span-4" style={{ color: 'var(--txt4)' }}>No active enrollments.</p>}
+                {enrollments.byInstrument.map(row => (
+                  <div key={`${row.instrument}-${row.lessonType}`} className="rounded-xl p-4 text-center"
+                    style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
+                    <p className="text-2xl font-extrabold" style={{ color: 'var(--txt)' }}>{row.count}</p>
+                    <p className="text-xs font-semibold capitalize mt-1" style={{ color: 'var(--txt2)' }}>{row.instrument}</p>
+                    <p className="text-xs capitalize" style={{ color: 'var(--txt4)' }}>{row.lessonType}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

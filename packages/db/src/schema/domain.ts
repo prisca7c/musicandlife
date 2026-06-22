@@ -1,0 +1,229 @@
+import {
+  pgTable,
+  uuid,
+  text,
+  jsonb,
+  timestamp,
+  integer,
+  boolean,
+  date,
+  uniqueIndex,
+  index,
+} from 'drizzle-orm/pg-core';
+import { organizations, users } from './auth';
+
+// ─── Rooms ────────────────────────────────────────────────────────────────────
+export const rooms = pgTable('rooms', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  name: text('name').notNull(),
+  capacity: integer('capacity'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ─── Terms ────────────────────────────────────────────────────────────────────
+export const terms = pgTable(
+  'terms',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    name: text('name').notNull(),
+    startsOn: date('starts_on').notNull(),
+    endsOn: date('ends_on').notNull(),
+    weekCount: integer('week_count').notNull().default(12),
+    status: text('status', { enum: ['planned', 'active', 'closed'] })
+      .notNull()
+      .default('planned'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('terms_org_id_idx').on(t.organizationId)],
+);
+
+// ─── Families ─────────────────────────────────────────────────────────────────
+export const families = pgTable(
+  'families',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    name: text('name').notNull(),
+    contactName: text('contact_name'),
+    address: text('address'),
+    phone: text('phone'),
+    email: text('email'),
+    autoInvoice: boolean('auto_invoice').notNull().default(false),
+    invoiceMode: text('invoice_mode', {
+      enum: ['monthly_statement', 'per_lesson'],
+    })
+      .notNull()
+      .default('monthly_statement'),
+    balanceCached: integer('balance_cached').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('families_org_id_idx').on(t.organizationId)],
+);
+
+// ─── Guardians ────────────────────────────────────────────────────────────────
+export const guardians = pgTable(
+  'guardians',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    familyId: uuid('family_id').notNull().references(() => families.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    relationship: text('relationship').notNull().default('guardian'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('guardians_family_user_uidx').on(t.familyId, t.userId),
+    index('guardians_user_id_idx').on(t.userId),
+  ],
+);
+
+// ─── Students ─────────────────────────────────────────────────────────────────
+export const students = pgTable(
+  'students',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    familyId: uuid('family_id').notNull().references(() => families.id),
+    firstName: text('first_name').notNull(),
+    lastName: text('last_name').notNull(),
+    dob: date('dob'),
+    email: text('email'),
+    studentUserId: uuid('student_user_id').references(() => users.id),
+    status: text('status', { enum: ['trial', 'active', 'paused', 'withdrawn'] })
+      .notNull()
+      .default('active'),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('students_org_status_idx').on(t.organizationId, t.status),
+    index('students_family_id_idx').on(t.familyId),
+  ],
+);
+
+// ─── Staff members ────────────────────────────────────────────────────────────
+export const staffMembers = pgTable(
+  'staff_members',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    userId: uuid('user_id').references(() => users.id),
+    firstName: text('first_name').notNull(),
+    lastName: text('last_name').notNull(),
+    title: text('title'),
+    instruments: text('instruments').array().notNull().default([]),
+    defaultDuration: integer('default_duration').notNull().default(60),
+    payrollType: text('payroll_type', { enum: ['hourly'] }).notNull().default('hourly'),
+    hourlyRate: integer('hourly_rate').notNull().default(0),
+    status: text('status', { enum: ['active', 'inactive'] }).notNull().default('active'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('staff_members_org_id_idx').on(t.organizationId)],
+);
+
+// ─── Staff privileges ─────────────────────────────────────────────────────────
+export const staffPrivileges = pgTable('staff_privileges', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  staffId: uuid('staff_id')
+    .notNull()
+    .unique()
+    .references(() => staffMembers.id, { onDelete: 'cascade' }),
+  privileges: jsonb('privileges').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ─── Teacher assignments ──────────────────────────────────────────────────────
+export const teacherAssignments = pgTable(
+  'teacher_assignments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    staffId: uuid('staff_id')
+      .notNull()
+      .references(() => staffMembers.id, { onDelete: 'cascade' }),
+    studentId: uuid('student_id')
+      .notNull()
+      .references(() => students.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: ['primary', 'secondary'] }).notNull().default('primary'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('teacher_assignments_uidx').on(t.staffId, t.studentId),
+    index('teacher_assignments_student_idx').on(t.studentId),
+  ],
+);
+
+// ─── Enrollments ──────────────────────────────────────────────────────────────
+export const enrollments = pgTable(
+  'enrollments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    studentId: uuid('student_id').notNull().references(() => students.id),
+    termId: uuid('term_id').references(() => terms.id),
+    instrument: text('instrument').notNull(),
+    lessonType: text('lesson_type', { enum: ['private', 'group'] })
+      .notNull()
+      .default('private'),
+    teacherId: uuid('teacher_id').references(() => staffMembers.id),
+    rate: integer('rate').notNull().default(0),
+    scheduleRule: jsonb('schedule_rule'),
+    autoRenew: boolean('auto_renew').notNull().default(true),
+    status: text('status', { enum: ['trial', 'active', 'paused', 'withdrawn'] })
+      .notNull()
+      .default('active'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('enrollments_student_id_idx').on(t.studentId),
+    index('enrollments_teacher_id_idx').on(t.teacherId),
+    index('enrollments_term_id_idx').on(t.termId),
+  ],
+);
+
+// ─── Lesson notes ─────────────────────────────────────────────────────────────
+export const notes = pgTable(
+  'notes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    studentId: uuid('student_id').notNull().references(() => students.id),
+    lessonId: uuid('lesson_id'),
+    authorId: uuid('author_id').references(() => users.id),
+    body: text('body').notNull(),
+    attachments: jsonb('attachments').default([]),
+    visibility: text('visibility', { enum: ['internal', 'family'] }).notNull().default('family'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('notes_student_id_idx').on(t.organizationId, t.studentId),
+    index('notes_lesson_id_idx').on(t.lessonId),
+  ],
+);
+
+// ─── Staff availability windows ───────────────────────────────────────────────
+export const staffAvailability = pgTable(
+  'staff_availability',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    staffId: uuid('staff_id').notNull().references(() => staffMembers.id, { onDelete: 'cascade' }),
+    weekday: text('weekday', { enum: ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'] }).notNull(),
+    startTime: text('start_time').notNull(),
+    endTime: text('end_time').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('staff_availability_staff_idx').on(t.staffId)],
+);

@@ -1,0 +1,197 @@
+@import url('https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --sage:     #3D7A55;
+  --sage-lt:  #EBF5EE;
+  --sage-md:  #A8D4B8;
+  --sage-dk:  #2A5A3D;
+  --coral:    #C0392B;
+  --coral-lt: #FEE2E2;
+  --amber:    #B45309;
+  --amber-lt: #FEF3C7;
+  --amber-md: #F5C76A;
+  --sky:      #2B6CB0;
+  --sky-lt:   #EBF4FF;
+  --sky-md:   #90BEF0;
+  --plum:     #5B3F9E;
+  --plum-lt:  #EDE9FE;
+  --plum-md:  #C4B5FD;
+  --txt:      #111827;
+  --txt2:     #374151;
+  --txt3:     #6B7280;
+  --txt4:     #9CA3AF;
+  --bd:       #E5E7EB;
+  --bd2:      #D1D5DB;
+  --bg:       #F0F4F8;
+  --card:     #FFFFFF;
+  --surf:     #F3F4F6;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  font-family: 'Lexend', sans-serif;
+  font-size: 15px;
+  color: var(--txt);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bd2); border-radius: 3px; }
+
+/* ── Design System: Form Inputs ─────────────────────────────────────────────── */
+.ui-input {
+  width: 100%;
+  border: 1.5px solid var(--bd2);
+  border-radius: 10px;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
+  color: var(--txt);
+  background: #fff;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  font-family: 'Lexend', sans-serif;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.ui-input:focus {
+  border-color: var(--sage);
+  box-shadow: 0 0 0 3px var(--sage-lt);
+}
+.ui-input::placeholder { color: var(--txt4); }
+.ui-input:disabled { background: var(--surf); color: var(--txt4); cursor: not-allowed; }
+
+/* ── Design System: Labels ──────────────────────────────────────────────────── */
+.ui-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--txt2);
+  margin-bottom: 0.375rem;
+  letter-spacing: 0.005em;
+}
+
+/* ── Design System: Buttons ─────────────────────────────────────────────────── */
+.ui-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: var(--sage);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+  font-family: 'Lexend', sans-serif;
+}
+.ui-btn-primary:hover { background: var(--sage-dk); }
+.ui-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ui-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: #fff;
+  color: var(--txt2);
+  border: 1.5px solid var(--bd2);
+  border-radius: 10px;
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+  font-family: 'Lexend', sans-serif;
+}
+.ui-btn-ghost:hover { background: var(--surf); }
+
+/* ── Design System: Tables ──────────────────────────────────────────────────── */
+.data-table-wrap {
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid var(--bd);
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,.04);
+}
+.data-table { width: 100%; font-size: 0.875rem; border-collapse: collapse; }
+.data-table thead { background: var(--surf); border-bottom: 1px solid var(--bd); }
+.data-table th {
+  text-align: left;
+  padding: 0.75rem 1rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--txt3);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+.data-table td { padding: 0.8125rem 1rem; border-bottom: 1px solid var(--bd); vertical-align: middle; }
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tbody tr { transition: background 0.1s ease; }
+.data-table tbody tr:hover { background: var(--surf); }
+
+/* ── Design System: Search bar ──────────────────────────────────────────────── */
+.ui-search {
+  border: 1.5px solid var(--bd2);
+  border-radius: 10px;
+  padding: 0.5625rem 0.875rem;
+  font-size: 0.875rem;
+  color: var(--txt);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  background: #fff;
+  font-family: 'Lexend', sans-serif;
+  width: 17rem;
+}
+.ui-search:focus {
+  border-color: var(--sage);
+  box-shadow: 0 0 0 3px var(--sage-lt);
+}
+.ui-search::placeholder { color: var(--txt4); }
+
+/* ── Auth pages ─────────────────────────────────────────────────────────────── */
+.auth-bg {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  background: linear-gradient(150deg, var(--sage-lt) 0%, #EDF2F7 35%, var(--bg) 100%);
+}
+.auth-card {
+  width: 100%;
+  max-width: 400px;
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 4px 32px rgba(0,0,0,.09), 0 1px 4px rgba(0,0,0,.04);
+  padding: 2.5rem 2rem 2rem;
+}
+
+/* ── Back button ─────────────────────────────────────────────────────────────── */
+.ui-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border: 1.5px solid var(--bd2);
+  border-radius: 10px;
+  padding: 0.4375rem 0.875rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--txt2);
+  background: #fff;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  text-decoration: none;
+  font-family: 'Lexend', sans-serif;
+}
+.ui-back-btn:hover { background: var(--surf); border-color: var(--bd2); }

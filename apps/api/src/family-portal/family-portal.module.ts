@@ -1,0 +1,11 @@
+import { Module } from '@nestjs/common';
+import { FamilyPortalController } from './family-portal.controller';
+import { AuthModule } from '../auth/auth.module';
+import { EmailModule } from '../email/email.module';
+import { AttendanceModule } from '../attendance/attendance.module';
+
+@Module({
+  imports: [AuthModule, EmailModule, AttendanceModule],
+  controllers: [FamilyPortalController],
+})
+export class FamilyPortalModule {}
