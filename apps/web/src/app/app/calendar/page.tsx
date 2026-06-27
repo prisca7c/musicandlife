@@ -15,12 +15,15 @@ interface Lesson {
   teacher: { id: string; firstName: string; lastName: string } | null;
   room: { id: string; name: string } | null;
   attendance: { status: string } | null;
-  enrollment: { instrument: string; lessonType: string } | null;
+  enrollment: { instrument: string; lessonType: string; groupName?: string | null } | null;
 }
 interface StaffMember { id: string; firstName: string; lastName: string; }
 interface Student { id: string; firstName: string; lastName: string; }
 interface Room { id: string; name: string; }
-interface Enrollment { id: string; instrument: string; lessonType: string; status: string; }
+interface Enrollment {
+  id: string; instrument: string; lessonType: string; groupName?: string | null; status: string;
+  teacherId?: string | null; rate?: number; defaultDuration?: number;
+}
 interface StudentDetail { id: string; enrollments: Enrollment[]; }
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
@@ -112,8 +115,26 @@ const TEACHER_PALETTE = [
   '#97266D', '#2C7A7B', '#9B2C2C', '#1A4971', '#6B46C1',
   '#975A16', '#22543D',
 ];
+// Index-based assignment from the currently loaded staff list guarantees no two
+// teachers share a color (a pure hash can collide); falls back to a hash for any
+// teacher not in the current list (e.g. inactive staff still referenced by a lesson).
+// Beyond the fixed palette's size, colors are generated via hue rotation so any
+// number of teachers stays distinct rather than wrapping back to reused hexes.
+function colorAtIndex(i: number) {
+  if (i < TEACHER_PALETTE.length) return TEACHER_PALETTE[i]!;
+  const hue = Math.round((i * 360) / Math.max(TEACHER_PALETTE.length, 1)) % 360;
+  return `hsl(${hue}, 55%, 38%)`;
+}
+let teacherColorMap: Record<string, string> = {};
+function setTeacherColorMap(staffList: { id: string }[]) {
+  const sorted = [...staffList].sort((a, b) => a.id.localeCompare(b.id));
+  const map: Record<string, string> = {};
+  sorted.forEach((s, i) => { map[s.id] = colorAtIndex(i); });
+  teacherColorMap = map;
+}
 function teacherColor(teacherId?: string | null) {
   if (!teacherId) return '#718096';
+  if (teacherColorMap[teacherId]) return teacherColorMap[teacherId];
   let hash = 0;
   for (let i = 0; i < teacherId.length; i++) hash = (hash * 31 + teacherId.charCodeAt(i)) >>> 0;
   return TEACHER_PALETTE[hash % TEACHER_PALETTE.length]!;
@@ -176,6 +197,13 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
         </p>
       )}
 
+      {/* Group name */}
+      {xtall && isGrp && lesson.enrollment?.groupName && (
+        <p className="text-[10px] italic leading-tight truncate" style={{ color: style.text, opacity: 0.65 }}>
+          {lesson.enrollment.groupName}
+        </p>
+      )}
+
       {/* Teacher name */}
       {xtall && lesson.teacher && (
         <p className="flex items-center gap-1 mt-px">
@@ -202,6 +230,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   const [roomId, setRoomId] = useState('');
   const [lessonType, setLessonType] = useState<'private' | 'group'>('private');
   const [instrument, setInstrument] = useState('');
+  const [groupName, setGroupName] = useState('');
   const [duration, setDuration] = useState('60');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -211,7 +240,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   useEffect(() => {
     if (!open) return;
     setStudentId(''); setTeacherId(''); setRoomId(''); setDuration('60');
-    setLessonType('private'); setInstrument('');
+    setLessonType('private'); setInstrument(''); setGroupName('');
     const t = tok();
     const role = getRoleFromToken(t);
     const teacherSelf = role === 'teacher';
@@ -241,16 +270,18 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
     const f = new FormData(e.currentTarget);
     const t = tok();
     try {
-      // Find or create a matching enrollment for this student so the lesson carries instrument + type.
+      // Find or create a matching enrollment for this student so the lesson carries instrument + type (+ group name).
       const detail = await apiFetch<StudentDetail>(`/students/${studentId}`, { token: t });
       let enrollmentId = detail.enrollments.find(
-        en => en.instrument === instrument && en.lessonType === lessonType && en.status !== 'withdrawn',
+        en => en.instrument === instrument && en.lessonType === lessonType && en.status !== 'withdrawn'
+          && (lessonType !== 'group' || (en.groupName ?? '') === groupName.trim()),
       )?.id;
 
       if (!enrollmentId) {
         const created = await apiFetch<{ id: string }>(`/students/${studentId}/enrollments`, {
           method: 'POST', token: t, body: JSON.stringify({
             instrument, lessonType, duration: parseInt(duration) || 60,
+            groupName: lessonType === 'group' && groupName.trim() ? groupName.trim() : undefined,
             teacherId: teacherId || undefined,
             rate: lessonRate(lessonType, parseInt(duration) || 60),
             autoRenew: false, status: 'active',
@@ -310,12 +341,22 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
         </div>
 
         <div>
-          <label className="ui-label">{lessonType === 'private' ? 'Instrument' : 'Group'} <span style={{ color: 'var(--coral)' }}>*</span></label>
+          <label className="ui-label">{lessonType === 'private' ? 'Instrument' : 'Group type'} <span style={{ color: 'var(--coral)' }}>*</span></label>
           <SearchableSelect
             options={instrumentOptions.map(i => ({ value: i, label: i.charAt(0).toUpperCase() + i.slice(1) }))}
             value={instrument} onChange={setInstrument} placeholder="Select…"
           />
         </div>
+
+        {lessonType === 'group' && (
+          <div>
+            <label className="ui-label">Group name</label>
+            <input
+              value={groupName} onChange={e => setGroupName(e.target.value)}
+              placeholder="e.g. Tuesday 4pm Ensemble" className="ui-input"
+            />
+          </div>
+        )}
 
         {!isTeacher && (
           <div>
@@ -364,6 +405,130 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   );
 }
 
+// ─── New default lesson modal ─────────────────────────────────────────────────
+// Quick-add shortcut: pick a student, resolve their active enrollment, and only
+// ask for date/time — teacher, duration, and rate are taken from the enrollment.
+function NewDefaultLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: {
+  open: boolean; onClose: () => void; onCreated: () => void;
+  defaultDate?: string; defaultTime?: string;
+}) {
+  const [studentsList, setStudentsList] = useState<Student[]>([]);
+  const [studentId, setStudentId] = useState('');
+  const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
+  const [enrollmentId, setEnrollmentId] = useState('');
+  const [loadingEnrollments, setLoadingEnrollments] = useState(false);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  useEffect(() => {
+    if (!open) return;
+    setStudentId(''); setEnrollments([]); setEnrollmentId(''); setError('');
+    apiFetch<Student[]>('/students', { token: tok() }).then(setStudentsList).catch(() => {});
+  }, [open]);
+
+  useEffect(() => {
+    if (!studentId) { setEnrollments([]); setEnrollmentId(''); return; }
+    setLoadingEnrollments(true); setError('');
+    apiFetch<StudentDetail>(`/students/${studentId}`, { token: tok() })
+      .then(detail => {
+        const active = detail.enrollments.filter(e => e.status === 'active');
+        setEnrollments(active);
+        setEnrollmentId(active.length === 1 ? active[0]!.id : '');
+        if (active.length === 0) setError('This student has no active enrollment — use "Add lesson" instead.');
+      })
+      .catch(() => setError("Could not load this student's enrollments"))
+      .finally(() => setLoadingEnrollments(false));
+  }, [studentId]);
+
+  const selectedEnrollment = enrollments.find(e => e.id === enrollmentId);
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!selectedEnrollment) { setError('Select a student with an active enrollment'); return; }
+    setSaving(true); setError('');
+    const f = new FormData(e.currentTarget);
+    try {
+      await apiFetch('/lessons', { method: 'POST', token: tok(), body: JSON.stringify({
+        studentId, enrollmentId: selectedEnrollment.id,
+        teacherId: selectedEnrollment.teacherId ?? undefined,
+        startsAt: `${f.get('date')}T${f.get('time')}:00`,
+        duration: selectedEnrollment.defaultDuration ?? 60,
+      })});
+      onCreated(); onClose();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="New default lesson">
+      {error && (
+        <div className="mb-4 text-sm rounded-xl px-4 py-3"
+          style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
+          {error}
+        </div>
+      )}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="ui-label">Student <span style={{ color: 'var(--coral)' }}>*</span></label>
+          <SearchableSelect
+            options={studentsList.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+            value={studentId} onChange={setStudentId} placeholder="Select student…"
+          />
+        </div>
+
+        {studentId && loadingEnrollments && (
+          <p className="text-sm" style={{ color: 'var(--txt4)' }}>Loading enrollments…</p>
+        )}
+
+        {studentId && enrollments.length > 1 && (
+          <div>
+            <label className="ui-label">Enrollment <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <div className="space-y-1.5">
+              {enrollments.map(en => (
+                <label key={en.id} className="flex items-center gap-2 text-sm rounded-xl px-3 py-2 border cursor-pointer"
+                  style={{ borderColor: enrollmentId === en.id ? 'var(--sage)' : 'var(--bd)' }}>
+                  <input type="radio" name="enrollment" checked={enrollmentId === en.id} onChange={() => setEnrollmentId(en.id)} />
+                  <span className="capitalize font-medium">{en.instrument}</span>
+                  <span style={{ color: 'var(--txt4)' }}>
+                    · {en.defaultDuration ?? 60} min{en.groupName ? ` · ${en.groupName}` : ''}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {selectedEnrollment && (
+          <div className="rounded-xl px-3.5 py-2.5 text-sm" style={{ background: 'var(--surf)', border: '1px solid var(--bd)', color: 'var(--txt3)' }}>
+            Will book a <strong className="capitalize" style={{ color: 'var(--txt)' }}>
+              {selectedEnrollment.defaultDuration ?? 60}-min {selectedEnrollment.instrument}
+            </strong> lesson at the enrollment&rsquo;s usual rate and teacher.
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="ui-label">Date <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <input name="date" type="date" required defaultValue={defaultDate} className="ui-input" />
+          </div>
+          <div>
+            <label className="ui-label">Time <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <input name="time" type="time" required defaultValue={defaultTime ?? '16:00'} className="ui-input" />
+          </div>
+        </div>
+
+        <div className="flex gap-3 pt-1">
+          <button type="submit" disabled={saving || !selectedEnrollment} className="ui-btn-primary">
+            {saving ? 'Saving…' : 'Add lesson'}
+          </button>
+          <button type="button" onClick={onClose} className="ui-btn-ghost">Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 // ─── Lesson detail modal ──────────────────────────────────────────────────────
 const PRIVATE_ATTENDANCE = [
   { status: 'present',           label: 'Present' },
@@ -382,7 +547,24 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
   lesson: Lesson | null; open: boolean; onClose: () => void; onUpdated: () => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [newDate, setNewDate] = useState('');
+  const [newTime, setNewTime] = useState('');
+  const [actionError, setActionError] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  useEffect(() => {
+    setShowReschedule(false); setActionError('');
+    if (lesson) {
+      // Local-time date/time components — formatDate()'s toISOString() is UTC and can
+      // land on the wrong calendar day relative to what's shown elsewhere in this modal.
+      const d = new Date(lesson.startsAt);
+      const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      setNewDate(localDate);
+      setNewTime(fmtTime(lesson.startsAt));
+    }
+  }, [lesson?.id]);
+
   if (!lesson) return null;
 
   async function markAttendance(status: string) {
@@ -391,6 +573,31 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
       await apiFetch(`/lessons/${lesson!.id}/attendance`, { method: 'POST', token: tok(), body: JSON.stringify({ status }) });
       onUpdated(); onClose();
     } catch (e) { console.error(e); } finally { setSaving(false); }
+  }
+
+  async function cancelLesson() {
+    setSaving(true); setActionError('');
+    try {
+      await apiFetch(`/lessons/${lesson!.id}/cancel`, {
+        method: 'POST', token: tok(), body: JSON.stringify({ reason: 'cancelled_teacher' }),
+      });
+      onUpdated(); onClose();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not cancel lesson');
+    } finally { setSaving(false); }
+  }
+
+  async function rescheduleLesson() {
+    if (!newDate || !newTime) return;
+    setSaving(true); setActionError('');
+    try {
+      await apiFetch(`/lessons/${lesson!.id}/reschedule`, {
+        method: 'POST', token: tok(), body: JSON.stringify({ startsAt: `${newDate}T${newTime}:00` }),
+      });
+      onUpdated(); onClose();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not reschedule lesson');
+    } finally { setSaving(false); }
   }
 
   const start = new Date(lesson.startsAt);
@@ -430,6 +637,12 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
               </span>
             </div>
           )}
+          {isGrp && lesson.enrollment?.groupName && (
+            <div className="flex justify-between">
+              <span style={{ color: 'var(--txt3)' }}>Group</span>
+              <span className="font-medium">{lesson.enrollment.groupName}</span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span style={{ color: 'var(--txt3)' }}>Teacher</span>
             <span className="font-medium">{lesson.teacher ? `${lesson.teacher.firstName} ${lesson.teacher.lastName}` : '—'}</span>
@@ -467,6 +680,45 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
           </div>
         )}
 
+        {actionError && (
+          <div className="text-sm rounded-xl px-4 py-3"
+            style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
+            {actionError}
+          </div>
+        )}
+
+        {lesson.status === 'scheduled' && (
+          <div>
+            {showReschedule ? (
+              <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
+                <p className="text-sm font-semibold" style={{ color: 'var(--txt2)' }}>Reschedule to</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} className="ui-input" />
+                  <input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} className="ui-input" />
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={rescheduleLesson} disabled={saving} className="ui-btn-primary text-sm">
+                    {saving ? 'Saving…' : 'Confirm reschedule'}
+                  </button>
+                  <button onClick={() => setShowReschedule(false)} className="ui-btn-ghost text-sm">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button onClick={() => setShowReschedule(true)} disabled={saving}
+                  className="ui-btn-ghost text-sm flex-1 disabled:opacity-50">
+                  Reschedule
+                </button>
+                <button onClick={cancelLesson} disabled={saving}
+                  className="text-sm flex-1 rounded-[9px] px-3 py-2 font-semibold transition-colors disabled:opacity-50"
+                  style={{ border: '1.5px solid var(--coral)', color: 'var(--coral)', background: '#fff' }}>
+                  Cancel lesson
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {lesson.notes && (
           <p className="text-sm italic rounded-xl p-3.5"
             style={{ color: 'var(--txt3)', background: 'var(--surf)', border: '1px solid var(--bd)' }}>
@@ -487,6 +739,7 @@ export default function CalendarPage() {
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [slotDate, setSlotDate] = useState<string | undefined>();
   const [slotTime, setSlotTime] = useState<string | undefined>();
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
@@ -503,9 +756,14 @@ export default function CalendarPage() {
     const t = tok();
     const role = getRoleFromToken(t);
     if (role === 'teacher') {
-      apiFetch<StaffMember | null>('/staff/me', { token: t }).then(me => setStaff(me ? [me] : [])).catch(() => {});
+      apiFetch<StaffMember | null>('/staff/me', { token: t }).then(me => {
+        const list = me ? [me] : [];
+        setStaff(list); setTeacherColorMap(list);
+      }).catch(() => {});
     } else {
-      apiFetch<StaffMember[]>('/staff', { token: t }).then(setStaff).catch(() => {});
+      apiFetch<StaffMember[]>('/staff', { token: t }).then(list => {
+        setStaff(list); setTeacherColorMap(list);
+      }).catch(() => {});
     }
   }, []);
 
@@ -574,6 +832,12 @@ export default function CalendarPage() {
         defaultDate={slotDate ?? (view === 'day' ? anchorStr : formatDate(weekStart))}
         defaultTime={slotTime}
       />
+      <NewDefaultLessonModal
+        open={showQuickAdd}
+        onClose={() => setShowQuickAdd(false)}
+        onCreated={load}
+        defaultDate={view === 'day' ? anchorStr : formatDate(weekStart)}
+      />
       <LessonDetailModal lesson={selectedLesson} open={!!selectedLesson} onClose={() => setSelectedLesson(null)} onUpdated={load} />
 
       {/* Toolbar */}
@@ -616,7 +880,10 @@ export default function CalendarPage() {
             {view === 'day' && ' · all teachers'}
           </span>
         </div>
-        <button onClick={() => setShowAdd(true)} className="ui-btn-primary">+ Add lesson</button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowQuickAdd(true)} className="ui-btn-ghost">+ New default lesson</button>
+          <button onClick={() => setShowAdd(true)} className="ui-btn-primary">+ Add lesson</button>
+        </div>
       </div>
 
       {/* Legend */}

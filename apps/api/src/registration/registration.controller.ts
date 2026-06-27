@@ -66,4 +66,19 @@ export class RegistrationController {
   ) {
     return this.registration.deny(user.orgId, id, user.userId, body.reason);
   }
+
+  // CSV student import
+  @Post('registrations/import/preview')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  previewImport(@Body() body: { csv: string }) {
+    return this.registration.previewImport(body.csv);
+  }
+
+  @Post('registrations/import/commit')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  commitImport(@CurrentUser() user: RequestUser, @Body() body: { rows: Record<string, string>[] }) {
+    return this.registration.commitImport(user.orgId, body.rows);
+  }
 }

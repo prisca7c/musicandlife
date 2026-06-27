@@ -26,6 +26,8 @@ const VARIANTS: Record<string, string> = {
   paid:                    'bg-[var(--sage-lt)] text-[var(--sage-dk)] border border-[var(--sage-md)]',
   void:                    'bg-[var(--surf)] text-[var(--txt4)] border border-[var(--bd2)]',
   draft:                   'bg-[var(--surf)] text-[var(--txt3)] border border-[var(--bd2)]',
+  family:                  'bg-[var(--sage-lt)] text-[var(--sage-dk)] border border-[var(--sage-md)]',
+  internal:                'bg-[var(--amber-lt)] text-[var(--amber)] border border-[var(--amber-md)]',
   default:                 'bg-[var(--surf)] text-[var(--txt3)] border border-[var(--bd2)]',
 };
 

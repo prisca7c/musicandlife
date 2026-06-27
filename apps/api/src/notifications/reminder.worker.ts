@@ -4,23 +4,7 @@ import { gte, lte, eq, and } from 'drizzle-orm';
 import { lessons, students, families } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { NotificationsService } from './notifications.service';
-
-const REDIS_URL = process.env.REDIS_URL;
-
-function getRedisConnection() {
-  if (!REDIS_URL) return null;
-  try {
-    const url = new URL(REDIS_URL);
-    return {
-      host: url.hostname,
-      port: parseInt(url.port) || 6380,
-      password: url.password || undefined,
-      tls: url.protocol === 'rediss:' ? {} : undefined,
-    };
-  } catch {
-    return null;
-  }
-}
+import { getRedisConnection } from '../common/redis-connection';
 
 @Injectable()
 export class ReminderWorker implements OnModuleInit {
@@ -93,10 +77,10 @@ export class ReminderWorker implements OnModuleInit {
         });
       }
 
-      if (hoursUntil >= 1.75 && hoursUntil <= 2.25 && family?.phone) {
+      if (hoursUntil >= 1.75 && hoursUntil <= 2.25 && family?.email) {
         await this.notifications.trigger('lesson.reminder_2h', {
           orgId: lesson.organizationId,
-          phone: family.phone,
+          email: family.email,
           body: `Lesson in 2 hours at ${lesson.startsAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.`,
         });
       }

@@ -272,8 +272,6 @@ function RecordPaymentModal({ open, onClose, onCreated }: { open: boolean; onClo
               { value: 'bank_transfer', label: 'Bank transfer' },
               { value: 'cash',          label: 'Cash' },
               { value: 'card',          label: 'Card' },
-              { value: 'gocardless',    label: 'GoCardless' },
-              { value: 'revolut',       label: 'Revolut' },
               { value: 'other',         label: 'Other' },
             ]}
             value={method}

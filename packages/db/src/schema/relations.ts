@@ -7,8 +7,8 @@ import {
 } from './domain';
 import { lessons, attendance, rescheduleRequests, availability, blockedTime } from './scheduling';
 import { invoices, invoiceLineItems, ledgerEntries, payments, payrollRuns, payrollItems, expenses, rateChangeRequests, lessonCredits } from './billing';
-import { threads, threadParticipants, messages, notificationRules, notificationLog, registrations, leads } from './comms';
-import { files, resources, recordings, transcripts, lessonSummaries, aiJobs, repertoirePieces, practiceLogs } from './media';
+import { threads, threadParticipants, messages, notificationRules, notificationLog, registrations, leads, newsPosts } from './comms';
+import { files, resources, repertoirePieces } from './media';
 
 export const organizationsRelations = relations(organizations, ({ many }) => ({
   memberships: many(memberships),
@@ -147,6 +147,7 @@ export const payrollItemsRelations = relations(payrollItems, ({ one }) => ({
 
 export const expensesRelations = relations(expenses, ({ one }) => ({
   staff: one(staffMembers, { fields: [expenses.staffId], references: [staffMembers.id] }),
+  receiptFile: one(files, { fields: [expenses.receiptFileId], references: [files.id] }),
 }));
 
 export const rateChangeRequestsRelations = relations(rateChangeRequests, ({ one }) => ({
@@ -177,6 +178,10 @@ export const registrationsRelations = relations(registrations, ({ one }) => ({
   decidedByUser: one(users, { fields: [registrations.decidedBy], references: [users.id] }),
 }));
 
+export const newsPostsRelations = relations(newsPosts, ({ one }) => ({
+  author: one(users, { fields: [newsPosts.authorId], references: [users.id] }),
+}));
+
 export const notesRelations = relations(notes, ({ one }) => ({
   student: one(students, { fields: [notes.studentId], references: [students.id] }),
   author: one(users, { fields: [notes.authorId], references: [users.id] }),
@@ -189,33 +194,11 @@ export const staffAvailabilityRelations = relations(staffAvailability, ({ one })
 export const resourcesRelations = relations(resources, ({ one }) => ({
   file: one(files, { fields: [resources.fileId], references: [files.id] }),
   owner: one(users, { fields: [resources.ownerId], references: [users.id] }),
+  teacher: one(staffMembers, { fields: [resources.teacherId], references: [staffMembers.id] }),
+  student: one(students, { fields: [resources.studentId], references: [students.id] }),
 }));
 
-export const recordingsRelations = relations(recordings, ({ one, many }) => ({
-  lesson: one(lessons, { fields: [recordings.lessonId], references: [lessons.id] }),
-  student: one(students, { fields: [recordings.studentId], references: [students.id] }),
-  file: one(files, { fields: [recordings.fileId], references: [files.id] }),
-  transcripts: many(transcripts),
-  summaries: many(lessonSummaries),
-}));
-
-export const transcriptsRelations = relations(transcripts, ({ one }) => ({
-  recording: one(recordings, { fields: [transcripts.recordingId], references: [recordings.id] }),
-}));
-
-export const lessonSummariesRelations = relations(lessonSummaries, ({ one }) => ({
-  lesson: one(lessons, { fields: [lessonSummaries.lessonId], references: [lessons.id] }),
-  recording: one(recordings, { fields: [lessonSummaries.recordingId], references: [recordings.id] }),
-  generatedByUser: one(users, { fields: [lessonSummaries.generatedBy], references: [users.id] }),
-}));
-
-export const repertoirePiecesRelations = relations(repertoirePieces, ({ one, many }) => ({
+export const repertoirePiecesRelations = relations(repertoirePieces, ({ one }) => ({
   student: one(students, { fields: [repertoirePieces.studentId], references: [students.id] }),
   teacher: one(staffMembers, { fields: [repertoirePieces.teacherId], references: [staffMembers.id] }),
-  practiceLogs: many(practiceLogs),
-}));
-
-export const practiceLogsRelations = relations(practiceLogs, ({ one }) => ({
-  student: one(students, { fields: [practiceLogs.studentId], references: [students.id] }),
-  piece: one(repertoirePieces, { fields: [practiceLogs.pieceId], references: [repertoirePieces.id] }),
 }));

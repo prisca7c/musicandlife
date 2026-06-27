@@ -24,7 +24,7 @@ export class SchedulingController {
     @Query('teacherId') teacherId?: string,
     @Query('studentId') studentId?: string,
   ) {
-    return this.scheduling.getLessons(user.orgId, { weekStart, teacherId, studentId });
+    return this.scheduling.getLessons(user.orgId, { weekStart, teacherId, studentId }, { role: user.role, userId: user.userId });
   }
 
   @Post('lessons')
@@ -36,7 +36,7 @@ export class SchedulingController {
   @Get('lessons/:id')
   @Roles('teacher')
   getLesson(@CurrentUser() user: RequestUser, @Param('id') id: string) {
-    return this.scheduling.getLesson(user.orgId, id);
+    return this.scheduling.getLesson(user.orgId, id, { role: user.role, userId: user.userId });
   }
 
   @Patch('lessons/:id')
@@ -46,19 +46,19 @@ export class SchedulingController {
   }
 
   @Post('lessons/:id/cancel')
-  @Roles('receptionist')
+  @Roles('teacher')
   cancelLesson(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: CancelLessonDto) {
-    return this.scheduling.cancelLesson(user.orgId, id, dto, user.userId);
+    return this.scheduling.cancelLesson(user.orgId, id, dto, user.userId, { role: user.role, userId: user.userId });
   }
 
   @Post('lessons/:id/reschedule')
-  @Roles('receptionist')
+  @Roles('teacher')
   reschedule(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
     @Body() body: { startsAt: string; roomId?: string },
   ) {
-    return this.scheduling.directReschedule(user.orgId, id, body.startsAt, body.roomId);
+    return this.scheduling.directReschedule(user.orgId, id, body.startsAt, body.roomId, { role: user.role, userId: user.userId });
   }
 
   // ─── Reschedule requests ──────────────────────────────────────────────────

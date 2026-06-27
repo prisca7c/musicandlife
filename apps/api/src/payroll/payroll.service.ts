@@ -121,7 +121,10 @@ export class PayrollService {
       where: staffId
         ? and(eq(expenses.organizationId, orgId), eq(expenses.staffId, staffId))
         : eq(expenses.organizationId, orgId),
-      with: { staff: { columns: { id: true, firstName: true, lastName: true } } },
+      with: {
+        staff: { columns: { id: true, firstName: true, lastName: true } },
+        receiptFile: { columns: { id: true, originalName: true, mime: true } },
+      },
       orderBy: (e, { desc }) => [desc(e.date)],
     });
   }

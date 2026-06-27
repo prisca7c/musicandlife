@@ -41,7 +41,7 @@ function pick<T>(arr: readonly T[]): T { return arr[Math.floor(rand() * arr.leng
 function randInt(min: number, max: number) { return min + Math.floor(rand() * (max - min + 1)); }
 function shuffle<T>(arr: T[]): T[] { return arr.map(a => [rand(), a] as const).sort((a, b) => a[0] - b[0]).map(a => a[1]); }
 
-const PRIVATE_INSTR = ['guitar','piano','violin','drums','bass','cello','viola','vocal'] as const;
+const PRIVATE_INSTR = ['guitar','piano','violin','drums','bass guitar','cello','viola','vocal'] as const;
 const GROUP_INSTR = ['guitar','ukulele','suzuki violin','ensemble'] as const;
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -128,7 +128,7 @@ async function main() {
     familyLastNames.push(lastName);
     return {
       organizationId: orgId,
-      name: `${contactFirst} ${lastName} Family`,
+      name: `${contactFirst} ${lastName}`,
       contactName: `${contactFirst} ${lastName}`,
       email: `${contactFirst.toLowerCase()}.${lastName.toLowerCase()}${i}@example.com`,
       phone: `07${randInt(700000000, 999999999)}`,
@@ -188,9 +188,16 @@ async function main() {
   // ── 5. Enrollments ────────────────────────────────────────────────────────────
   console.log('Creating enrollments…');
   const enrollable = insertedStudents.filter(s => s.status === 'active' || s.status === 'trial');
-  const enrollmentRows: { studentId: string; termId: string | null; instrument: string; lessonType: 'private' | 'group'; teacherId: string; rate: number; status: 'trial' | 'active'; autoRenew: boolean; scheduleRule: { weekday: string; startTime: string } }[] = [];
+  const enrollmentRows: { studentId: string; termId: string | null; instrument: string; lessonType: 'private' | 'group'; groupName?: string; teacherId: string; rate: number; status: 'trial' | 'active'; autoRenew: boolean; scheduleRule: { weekday: string; startTime: string } }[] = [];
   const WEEKDAY_NAMES = ['monday','tuesday','wednesday','thursday','friday','saturday'];
   const RATE_PRIVATE: Record<number, number> = { 30: 3500, 45: 5250, 60: 7000 };
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  const fmtSlot = (weekday: string, startTime: string) => {
+    const [h, m] = startTime.split(':').map(Number) as [number, number];
+    const period = h >= 12 ? 'pm' : 'am';
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    return `${cap(weekday)} ${h12}${m ? `:${String(m).padStart(2, '0')}` : ''}${period}`;
+  };
 
   for (const stu of enrollable) {
     const numEnrollments = rand() < 0.18 ? 2 : 1;
@@ -200,22 +207,24 @@ async function main() {
       const teacher = pick(allTeachers);
       const duration = isGroup ? 60 : pick([30, 45, 60]);
       const rate = isGroup ? 2500 : RATE_PRIVATE[duration]!;
+      const scheduleRule = { weekday: pick(WEEKDAY_NAMES), startTime: `${randInt(14, 18)}:${pick(['00', '30'])}` };
       enrollmentRows.push({
         studentId: stu.id,
         termId: activeTerm?.id ?? null,
         instrument,
         lessonType: isGroup ? 'group' : 'private',
+        groupName: isGroup ? `${fmtSlot(scheduleRule.weekday, scheduleRule.startTime)} ${cap(instrument)}` : undefined,
         teacherId: teacher.id,
         rate,
         status: stu.status === 'trial' ? 'trial' : 'active',
         autoRenew: true,
-        scheduleRule: { weekday: pick(WEEKDAY_NAMES), startTime: `${randInt(14, 18)}:${pick(['00', '30'])}` },
+        scheduleRule,
       });
     }
   }
   const enrollmentInsertRows = enrollmentRows.map(e => ({
     organizationId: orgId, studentId: e.studentId, termId: e.termId ?? undefined, instrument: e.instrument,
-    lessonType: e.lessonType, teacherId: e.teacherId, rate: e.rate, status: e.status, autoRenew: e.autoRenew,
+    lessonType: e.lessonType, groupName: e.groupName, teacherId: e.teacherId, rate: e.rate, status: e.status, autoRenew: e.autoRenew,
     scheduleRule: e.scheduleRule,
   }));
   const insertedEnrollments: { id: string; studentId: string; teacherId: string | null; instrument: string; lessonType: string; rate: number; scheduleRule: unknown; status: string }[] = [];
@@ -227,7 +236,7 @@ async function main() {
   // ── 6. Lessons + attendance (3 weeks back, this week, 1 week ahead) ──────────
   console.log('Creating lessons + attendance…');
   const now = new Date();
-  const lessonRows: { enrollmentId: string; studentId: string; teacherId: string | null; roomId: string; startsAt: Date; duration: number; status: string; termId: string | null }[] = [];
+  const lessonRows: { id?: string; enrollmentId: string; studentId: string; teacherId: string | null; roomId: string; startsAt: Date; duration: number; status: string; termId: string | null }[] = [];
 
   for (const en of insertedEnrollments) {
     const rule = en.scheduleRule as { weekday: string; startTime: string };
@@ -261,6 +270,8 @@ async function main() {
   for (const c of chunk(lessonInsertRows, 200)) {
     insertedLessons.push(...await db.insert(lessons).values(c).returning({ id: lessons.id, status: lessons.status }));
   }
+  // INSERT ... RETURNING preserves row order, so this zips 1:1 back onto the in-memory rows
+  lessonRows.forEach((l, i) => { l.id = insertedLessons[i]!.id; });
   console.log(`  ${insertedLessons.length} lessons`);
 
   const attendanceRows: { lessonId: string; status: string }[] = [];
@@ -291,7 +302,6 @@ async function main() {
     const arr = studentsByFamily.get(s.familyId) ?? [];
     arr.push(s); studentsByFamily.set(s.familyId, arr);
   }
-  const teacherById = new Map(allTeachers.map(t => [t.id, `${t.firstName} ${t.lastName}`]));
   const lessonsByEnrollment = new Map<string, typeof lessonRows>();
   for (const l of lessonRows) {
     const arr = lessonsByEnrollment.get(l.enrollmentId) ?? [];
@@ -305,14 +315,15 @@ async function main() {
 
   for (const fam of insertedFamilies) {
     const famStudents = studentsByFamily.get(fam.id) ?? [];
-    const lineItemDefs: { description: string; amount: number; date: Date }[] = [];
+    const lineItemDefs: { lessonId: string; description: string; amount: number; date: Date }[] = [];
     for (const stu of famStudents) {
       for (const en of enrollByStudent.get(stu.id) ?? []) {
         const enLessons = lessonsByEnrollment.get(en.id) ?? [];
         for (const lesson of enLessons) {
-          const teacherName = lesson.teacherId ? teacherById.get(lesson.teacherId) ?? 'Unassigned' : 'Unassigned';
+          if (lesson.status !== 'completed' || !lesson.id) continue;
           lineItemDefs.push({
-            description: `${dateStr(lesson.startsAt)} — ${stu.firstName} ${stu.lastName}, ${en.instrument} with ${teacherName}`,
+            lessonId: lesson.id,
+            description: `${lesson.duration} min lesson`,
             amount: en.rate,
             date: lesson.startsAt,
           });
@@ -332,11 +343,11 @@ async function main() {
     }).returning();
 
     await db.insert(invoiceLineItems).values(
-      lineItemDefs.map(l => ({ organizationId: orgId, invoiceId: inv!.id, description: l.description, amount: l.amount })),
+      lineItemDefs.map(l => ({ organizationId: orgId, invoiceId: inv!.id, lessonId: l.lessonId, description: l.description, amount: l.amount })),
     );
 
     if (status === 'paid') {
-      const method = pick(['bank_transfer', 'bank_transfer', 'card', 'gocardless'] as const);
+      const method = pick(['bank_transfer', 'bank_transfer', 'card', 'cash'] as const);
       await db.insert(payments).values({
         organizationId: orgId, familyId: fam.id, invoiceId: inv!.id, method, amount: total,
         idempotencyKey: `seed-${inv!.id}`,

@@ -58,7 +58,7 @@ async function seed() {
   // ── Staff teachers ────────────────────────────────────────────────────────────
   const teacherDefs = [
     { firstName: 'Sarah', lastName: 'Mitchell', instruments: ['piano', 'violin'], hourlyRate: 4500 },
-    { firstName: 'James', lastName: 'Carter',   instruments: ['guitar', 'bass', 'drums'],  hourlyRate: 4000 },
+    { firstName: 'James', lastName: 'Carter',   instruments: ['guitar', 'bass guitar', 'drums'],  hourlyRate: 4000 },
     { firstName: 'Mei',   lastName: 'Chen',     instruments: ['violin', 'viola', 'cello'], hourlyRate: 4500 },
   ];
   const staffIds: string[] = [];
@@ -75,22 +75,22 @@ async function seed() {
 
   // ── Families & students ───────────────────────────────────────────────────────
   const familyDefs = [
-    { name: 'Claire Johnson Family', contactName: 'Claire Johnson', email: 'claire@example.com', phone: '07700 900001', students: [
+    { name: 'Claire Johnson', contactName: 'Claire Johnson', email: 'claire@example.com', phone: '07700 900001', students: [
       { firstName: 'Oliver', lastName: 'Johnson', dob: '2012-03-15', instrument: 'piano',  teacherId: sarahId },
       { firstName: 'Emma',   lastName: 'Johnson', dob: '2014-07-22', instrument: 'violin', teacherId: meiId },
     ]},
-    { name: 'David Smith Family', contactName: 'David Smith', email: 'david@example.com', phone: '07700 900002', students: [
+    { name: 'David Smith', contactName: 'David Smith', email: 'david@example.com', phone: '07700 900002', students: [
       { firstName: 'Liam',  lastName: 'Smith', dob: '2011-09-05', instrument: 'guitar', teacherId: jamesId },
       { firstName: 'Grace', lastName: 'Smith', dob: '2015-01-18', instrument: 'piano',  teacherId: sarahId },
     ]},
-    { name: 'Priya Patel Family', contactName: 'Priya Patel', email: 'priya@example.com', phone: '07700 900003', students: [
+    { name: 'Priya Patel', contactName: 'Priya Patel', email: 'priya@example.com', phone: '07700 900003', students: [
       { firstName: 'Arjun', lastName: 'Patel', dob: '2013-06-30', instrument: 'drums',  teacherId: jamesId },
       { firstName: 'Anika', lastName: 'Patel', dob: '2016-11-10', instrument: 'violin', teacherId: meiId },
     ]},
-    { name: 'Tom Williams Family', contactName: 'Tom Williams', email: 'tom@example.com', phone: '07700 900004', students: [
+    { name: 'Tom Williams', contactName: 'Tom Williams', email: 'tom@example.com', phone: '07700 900004', students: [
       { firstName: 'Sophia', lastName: 'Williams', dob: '2010-04-12', instrument: 'cello', teacherId: meiId },
     ]},
-    { name: 'Rachel Brown Family', contactName: 'Rachel Brown', email: 'rachel@example.com', phone: '07700 900005', students: [
+    { name: 'Rachel Brown', contactName: 'Rachel Brown', email: 'rachel@example.com', phone: '07700 900005', students: [
       { firstName: 'Noah', lastName: 'Brown', dob: '2014-08-25', instrument: 'guitar', teacherId: jamesId },
     ]},
   ];

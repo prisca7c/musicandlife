@@ -8,8 +8,8 @@ export class RecordPaymentDto {
   @IsUUID()
   invoiceId?: string;
 
-  @IsIn(['bank_transfer', 'cash', 'card', 'gocardless', 'revolut', 'other'])
-  method!: 'bank_transfer' | 'cash' | 'card' | 'gocardless' | 'revolut' | 'other';
+  @IsIn(['bank_transfer', 'cash', 'card', 'other'])
+  method!: 'bank_transfer' | 'cash' | 'card' | 'other';
 
   @IsInt()
   @Min(1)

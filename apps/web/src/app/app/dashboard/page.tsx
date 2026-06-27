@@ -4,12 +4,15 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { Badge } from '@/components/badge';
+import { linkify } from '@/lib/linkify';
 import { useRouter } from 'next/navigation';
 import {
   Calendar, PoundSterling,
   ChevronRight, Users, UserCheck,
-  Briefcase, TrendingUp, Music, Clock,
+  Briefcase, TrendingUp, Music, Clock, Megaphone,
 } from 'lucide-react';
+
+interface NewsPost { id: string; title: string; body: string; publishedAt: string; }
 
 function getRoleFromCookie(): string {
   try {
@@ -84,6 +87,7 @@ function StatCard({ label, value, sub, href, icon, warn = false, muted = false }
 function AdminDashboard() {
   const [kpis, setKpis] = useState<KpiData | null>(null);
   const [todayLessons, setTodayLessons] = useState<Lesson[]>([]);
+  const [news, setNews] = useState<NewsPost[]>([]);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   useEffect(() => {
@@ -91,6 +95,7 @@ function AdminDashboard() {
     const mon = new Date();
     mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
     mon.setHours(0, 0, 0, 0);
+    apiFetch<NewsPost[]>('/news', { token: t }).then(rows => setNews(rows.slice(0, 3))).catch(() => {});
     Promise.all([
       apiFetch<KpiData>('/reports/dashboard', { token: t }).catch(() => null),
       apiFetch<Lesson[]>(`/lessons?weekStart=${mon.toISOString().split('T')[0]}`, { token: t }).catch(() => []),
@@ -264,6 +269,24 @@ function AdminDashboard() {
           )}
         </div>
       </div>
+
+      {/* Row 4 — Studio News */}
+      {news.length > 0 && (
+        <div className="bg-white rounded-2xl border border-[var(--bd)] overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-[var(--bd)] flex items-center gap-2">
+            <Megaphone size={16} style={{ color: 'var(--sage)' }} />
+            <h2 className="font-bold text-[var(--txt)] text-sm">Studio News</h2>
+          </div>
+          <div className="px-5 py-4 space-y-3">
+            {news.map(n => (
+              <div key={n.id}>
+                <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{n.title}</p>
+                <p className="text-sm leading-relaxed line-clamp-2" style={{ color: 'var(--txt3)' }}>{linkify(n.body)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,10 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
 import { createHash } from 'crypto';
-import { notificationRules, notificationLog, organizations } from '@music-life/db';
+import { notificationRules, notificationLog, organizations, emailTemplates } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
-import { SmsPort } from '../sms/ports/sms.port';
 
 export type TriggerEvent =
   | 'registration.received'
@@ -15,6 +14,7 @@ export type TriggerEvent =
   | 'lesson.cancelled'
   | 'lesson.rescheduled'
   | 'invoice.sent'
+  | 'invoice.preview_summary'
   | 'payroll.approved';
 
 export interface TriggerContext {
@@ -57,6 +57,10 @@ const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: string; html
     subject: ctx.subject ?? 'New invoice from Music & Life',
     html: `<p>An invoice has been issued to your account.</p><p>${ctx.body}</p>`,
   }),
+  'invoice.preview_summary': (ctx) => ({
+    subject: ctx.subject ?? 'Upcoming auto-invoices',
+    html: `<p>The following auto-invoices are scheduled to go out soon.</p><p>${ctx.body}</p>`,
+  }),
 };
 
 // Default rules seeded for every new org
@@ -69,9 +73,10 @@ export const DEFAULT_RULES: Array<{
   { triggerEvent: 'registration.approved', templateId: 'registration.approved.family', channels: ['email'] },
   { triggerEvent: 'registration.denied', templateId: 'registration.denied.family', channels: ['email'] },
   { triggerEvent: 'lesson.reminder_24h', templateId: 'lesson.reminder_24h', channels: ['email'] },
-  { triggerEvent: 'lesson.reminder_2h', templateId: 'lesson.reminder_2h', channels: ['sms'] },
+  { triggerEvent: 'lesson.reminder_2h', templateId: 'lesson.reminder_2h', channels: ['email'] },
   { triggerEvent: 'lesson.cancelled', templateId: 'lesson.cancelled', channels: ['email'] },
   { triggerEvent: 'invoice.sent', templateId: 'invoice.sent', channels: ['email'] },
+  { triggerEvent: 'invoice.preview_summary', templateId: 'invoice.preview_summary', channels: ['email'] },
 ];
 
 @Injectable()
@@ -81,7 +86,6 @@ export class NotificationsService {
   constructor(
     private readonly db: DbService,
     private readonly email: EmailPort,
-    private readonly sms: SmsPort,
   ) {}
 
   /** Seed default notification rules for an org (idempotent) */
@@ -113,18 +117,21 @@ export class NotificationsService {
     });
 
     for (const rule of rules) {
-      const template = TEMPLATES[rule.templateId];
-      if (!template) continue;
+      const builtin = TEMPLATES[rule.templateId];
+      const override = await this.db.db.query.emailTemplates.findFirst({
+        where: and(eq(emailTemplates.organizationId, ctx.orgId), eq(emailTemplates.templateId, rule.templateId)),
+      });
+      if (!builtin && !override) continue;
 
-      const rendered = template(ctx);
+      const rendered = override
+        ? { subject: this.interpolate(override.subject, ctx), html: this.interpolate(override.html, ctx) }
+        : builtin!(ctx);
       const payloadHash = createHash('sha256').update(JSON.stringify(ctx)).digest('hex');
 
       for (const channel of rule.channels ?? ['email']) {
         try {
           if (channel === 'email' && ctx.email) {
             await this.email.send({ to: ctx.email, subject: rendered.subject, html: rendered.html });
-          } else if (channel === 'sms' && ctx.phone) {
-            await this.sms.send({ to: ctx.phone, body: rendered.subject });
           }
           await this.db.db.insert(notificationLog).values({
             organizationId: ctx.orgId, ruleId: rule.id, userId: ctx.userId,
@@ -155,5 +162,55 @@ export class NotificationsService {
       .where(and(eq(notificationRules.id, id), eq(notificationRules.organizationId, orgId)))
       .returning();
     return updated!;
+  }
+
+  // Built-in templates only support `{{body}}` — enough for the simple wrapper html they use.
+  private interpolate(text: string, ctx: TriggerContext): string {
+    return text.replace(/\{\{body\}\}/g, ctx.body);
+  }
+
+  /** List every known templateId (built-in + org-specific) with its effective subject/html */
+  async getEmailTemplates(orgId: string) {
+    const overrides = await this.db.db.query.emailTemplates.findMany({
+      where: eq(emailTemplates.organizationId, orgId),
+    });
+    const overrideMap = new Map(overrides.map(o => [o.templateId, o]));
+
+    return Object.keys(TEMPLATES).map(templateId => {
+      const sample = TEMPLATES[templateId]!({ orgId, body: '{{body}}' });
+      const override = overrideMap.get(templateId);
+      return {
+        templateId,
+        subject: override?.subject ?? sample.subject,
+        html: override?.html ?? sample.html,
+        isOverridden: !!override,
+      };
+    });
+  }
+
+  async upsertEmailTemplate(orgId: string, templateId: string, subject: string, html: string) {
+    const existing = await this.db.db.query.emailTemplates.findFirst({
+      where: and(eq(emailTemplates.organizationId, orgId), eq(emailTemplates.templateId, templateId)),
+    });
+    if (existing) {
+      const [updated] = await this.db.db
+        .update(emailTemplates)
+        .set({ subject, html, updatedAt: new Date() })
+        .where(eq(emailTemplates.id, existing.id))
+        .returning();
+      return updated!;
+    }
+    const [created] = await this.db.db
+      .insert(emailTemplates)
+      .values({ organizationId: orgId, templateId, subject, html })
+      .returning();
+    return created!;
+  }
+
+  async revertEmailTemplate(orgId: string, templateId: string) {
+    await this.db.db
+      .delete(emailTemplates)
+      .where(and(eq(emailTemplates.organizationId, orgId), eq(emailTemplates.templateId, templateId)));
+    return { reverted: true };
   }
 }

@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { SearchableSelect } from '@/components/searchable-select';
+import { Paperclip } from 'lucide-react';
 
 interface PayrollRun {
   id: string; status: string; periodStart: string; periodEnd: string;
@@ -16,6 +17,7 @@ interface PayrollRun {
 interface Expense {
   id: string; category: string; amount: number; date: string; description: string | null; status: string;
   staff: { id: string; firstName: string; lastName: string } | null;
+  receiptFile: { id: string; originalName: string | null; mime: string } | null;
 }
 interface StaffMember { id: string; firstName: string; lastName: string; }
 
@@ -93,6 +95,7 @@ function AddExpenseModal({ open, onClose, onCreated }: { open: boolean; onClose:
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [expStaffId, setExpStaffId] = useState('');
   const [category, setCategory] = useState('materials');
+  const [receipt, setReceipt] = useState<File | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
@@ -100,19 +103,29 @@ function AddExpenseModal({ open, onClose, onCreated }: { open: boolean; onClose:
   useEffect(() => {
     if (open) {
       apiFetch<StaffMember[]>('/staff', { token: tok() }).then(setStaff).catch(() => {});
-      setExpStaffId(''); setCategory('materials'); setError('');
+      setExpStaffId(''); setCategory('materials'); setReceipt(null); setError('');
     }
   }, [open]);
+
+  async function uploadReceipt(file: File): Promise<string> {
+    const { uploadUrl, fileId } = await apiFetch<{ uploadUrl: string; fileId: string }>('/files/sign-upload', {
+      method: 'POST', token: tok(), body: JSON.stringify({ mime: file.type, size: file.size, originalName: file.name }),
+    });
+    await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+    return fileId;
+  }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSaving(true); setError('');
     const f = new FormData(e.currentTarget);
     try {
+      const receiptFileId = receipt ? await uploadReceipt(receipt) : undefined;
       await apiFetch('/expenses', { method: 'POST', token: tok(), body: JSON.stringify({
         staffId: expStaffId || undefined, category,
         amount: Math.round(parseFloat(f.get('amount') as string) * 100),
         date: f.get('date'), description: f.get('description') || undefined,
         mileageKm: f.get('mileageKm') ? parseInt(f.get('mileageKm') as string) : undefined,
+        receiptFileId,
       })});
       onCreated(); onClose();
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
@@ -166,6 +179,10 @@ function AddExpenseModal({ open, onClose, onCreated }: { open: boolean; onClose:
           <label className="ui-label">Description</label>
           <input name="description" className="ui-input" />
         </div>
+        <div>
+          <label className="ui-label">Receipt</label>
+          <input type="file" accept="image/*,.pdf" onChange={e => setReceipt(e.target.files?.[0] ?? null)} className="ui-input" />
+        </div>
         <div className="flex gap-3 pt-1">
           <button type="submit" disabled={saving} className="ui-btn-primary">
             {saving ? 'Saving…' : 'Add expense'}
@@ -196,6 +213,13 @@ export default function PayrollPage() {
     setActioning(id);
     try { await apiFetch(`/staff/payroll/${id}/approve`, { method: 'POST', token: tok() }); load(); }
     catch (e) { console.error(e); } finally { setActioning(null); }
+  }
+
+  async function openReceipt(fileId: string) {
+    try {
+      const { downloadUrl } = await apiFetch<{ downloadUrl: string }>(`/files/${fileId}/sign-download`, { token: tok() });
+      window.open(downloadUrl, '_blank');
+    } catch (e) { console.error(e); }
   }
 
   async function approveExpense(id: string) {
@@ -287,12 +311,13 @@ export default function PayrollPage() {
                 <th>Description</th>
                 <th style={{ textAlign: 'right' }}>Amount</th>
                 <th>Status</th>
+                <th>Receipt</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {expenses.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+                <tr><td colSpan={8} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                   No expenses yet.
                 </td></tr>
               )}
@@ -304,6 +329,14 @@ export default function PayrollPage() {
                   <td className="text-xs" style={{ color: 'var(--txt4)' }}>{exp.description ?? '—'}</td>
                   <td className="font-semibold" style={{ textAlign: 'right' }}>£{(exp.amount/100).toFixed(2)}</td>
                   <td><Badge variant={STATUS_COLORS[exp.status]}>{exp.status}</Badge></td>
+                  <td>
+                    {exp.receiptFile ? (
+                      <button onClick={() => openReceipt(exp.receiptFile!.id)}
+                        className="flex items-center gap-1 text-xs font-semibold hover:underline" style={{ color: 'var(--sage)' }}>
+                        <Paperclip size={12} /> View
+                      </button>
+                    ) : <span style={{ color: 'var(--txt4)' }}>—</span>}
+                  </td>
                   <td style={{ textAlign: 'right' }}>
                     {exp.status === 'pending' && (
                       <button onClick={() => approveExpense(exp.id)} disabled={actioning===exp.id}

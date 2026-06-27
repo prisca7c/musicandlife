@@ -1,11 +1,11 @@
 import React from 'react';
 import {
-  Document, Page, Text, View, Image, StyleSheet,
+  Document, Page, Text, View, Image, StyleSheet, Link,
 } from '@react-pdf/renderer';
 
 const DARK  = '#3a3736';
-const CORAL = '#C0392B';
 const SAGE  = '#2A5A3D';
+const MANUAL_DOT = '#c9a227';
 
 const s = StyleSheet.create({
   page: {
@@ -88,10 +88,21 @@ const s = StyleSheet.create({
   tableRowAlt: { backgroundColor: '#f8f8f8' },
   cell: { fontSize: 9, lineHeight: 1.45 },
 
-  colDate:     { width: 72 },
-  colDesc:     { flex: 1, paddingRight: 8 },
-  colCharges:  { width: 66, textAlign: 'right' },
-  colPayments: { width: 60, textAlign: 'right' },
+  colDate:       { width: 58 },
+  colTeacher:    { width: 78, paddingRight: 6 },
+  colInstrument: { width: 64, paddingRight: 6 },
+  colIcon:       { width: 12, paddingTop: 2 },
+  colDesc:       { flex: 1, paddingRight: 8 },
+  colCharges:    { width: 60, textAlign: 'right' },
+  colPayments:   { width: 50, textAlign: 'right' },
+  sourceDot:     { width: 6, height: 6, borderRadius: 3 },
+
+  balanceForwardRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 6,
+  },
+  balanceForwardText: { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#555555' },
 
   // ── Fixed page footer bar ────────────────────────────────────────────────────
   footerBar: {
@@ -144,19 +155,22 @@ const s = StyleSheet.create({
   watermarkText: {
     fontFamily: 'Helvetica-Bold',
     fontSize: 110,
-    color: CORAL,
+    color: DARK,
     opacity: 0.18,
     letterSpacing: 12,
   },
 });
 
 export interface InvoicePDFData {
+  id?: string;
   number: string;
   status: string;
   total: number;
+  balanceForward?: number;
   issuedOn: string;
   dueDate: string;
   notes: string | null;
+  payUrl?: string;
   family: {
     name: string;
     email: string | null;
@@ -167,6 +181,9 @@ export interface InvoicePDFData {
     description: string;
     amount: number;
     date?: string;
+    teacher?: string;
+    instrument?: string;
+    lessonId?: string | null;
   }[];
 }
 
@@ -267,9 +284,21 @@ export function InvoicePDF({
           </View>
         </View>
 
+        {/* ── Balance forward ── */}
+        {!!invoice.balanceForward && (
+          <View style={s.balanceForwardRow}>
+            <Text style={s.balanceForwardText}>
+              Balance forward: {invoice.balanceForward < 0 ? '-' : ''}£{(Math.abs(invoice.balanceForward) / 100).toFixed(2)}
+            </Text>
+          </View>
+        )}
+
         {/* ── Table header ── */}
         <View style={s.tableHead}>
           <Text style={[s.th, s.colDate]}>Date</Text>
+          <Text style={[s.th, s.colTeacher]}>Teacher</Text>
+          <Text style={[s.th, s.colInstrument]}>Instrument</Text>
+          <Text style={[s.th, s.colIcon]} />
           <Text style={[s.th, s.colDesc]}>Description</Text>
           <Text style={[s.th, s.colCharges]}>Charges</Text>
           <Text style={[s.th, s.colPayments]}>Payments</Text>
@@ -279,6 +308,11 @@ export function InvoicePDF({
         {invoice.lineItems.map((item, i) => (
           <View key={item.id} style={[s.tableRow, i % 2 === 1 ? s.tableRowAlt : {}]}>
             <Text style={[s.cell, s.colDate]}>{item.date ?? ''}</Text>
+            <Text style={[s.cell, s.colTeacher]}>{item.teacher ?? ''}</Text>
+            <Text style={[s.cell, s.colInstrument]}>{item.instrument ?? ''}</Text>
+            <View style={s.colIcon}>
+              <View style={[s.sourceDot, { backgroundColor: item.lessonId ? SAGE : MANUAL_DOT }]} />
+            </View>
             <Text style={[s.cell, s.colDesc]}>{item.description}</Text>
             <Text style={[s.cell, s.colCharges]}>
               {item.amount !== 0
@@ -299,6 +333,11 @@ export function InvoicePDF({
               <Text style={s.payTotal}>
                 Total Due: £{(invoice.total / 100).toLocaleString('en-GB', { minimumFractionDigits: 2 })}
               </Text>
+              {invoice.payUrl && (
+                <Link src={invoice.payUrl} style={s.payBtn}>
+                  <Text style={s.payBtnText}>Click Here to Pay Online</Text>
+                </Link>
+              )}
             </View>
           </View>
         )}

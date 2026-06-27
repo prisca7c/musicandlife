@@ -39,7 +39,8 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           COOKIE_SECRET: ${{ secrets.COOKIE_SECRET }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          MAILRELAY_API_URL: ${{ secrets.MAILRELAY_API_URL }}
+          MAILRELAY_API_KEY: ${{ secrets.MAILRELAY_API_KEY }}
 
   migration-check:
     name: Migration drift check

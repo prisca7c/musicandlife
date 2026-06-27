@@ -1,12 +1,20 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import {
   invoices, invoiceLineItems, ledgerEntries, payments,
-  families, students, enrollments, lessonCredits,
+  families, students, enrollments, lessonCredits, lessons, organizations,
 } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateInvoiceDto } from './dto/create-invoice.dto';
 import type { RecordPaymentDto } from './dto/record-payment.dto';
+
+// A lesson billed at a different length than the student's normal duration is charged
+// proportionally — e.g. a 30-min lesson on a 60-min/£rate enrollment charges half the rate.
+export function proratedAmount(rate: number | undefined, defaultDuration: number | undefined, actualDuration: number): number {
+  if (!rate) return 0;
+  if (!defaultDuration || defaultDuration === actualDuration) return rate;
+  return Math.round((rate * actualDuration) / defaultDuration);
+}
 
 @Injectable()
 export class BillingService {
@@ -30,11 +38,77 @@ export class BillingService {
       where: and(eq(invoices.id, id), eq(invoices.organizationId, orgId)),
       with: {
         family: { columns: { id: true, name: true, email: true } },
-        lineItems: true,
+        lineItems: {
+          with: {
+            lesson: {
+              columns: { startsAt: true },
+              with: {
+                teacher: { columns: { firstName: true, lastName: true } },
+                enrollment: { columns: { instrument: true } },
+              },
+            },
+          },
+        },
       },
     });
     if (!inv) throw new NotFoundException('Invoice not found');
-    return inv;
+
+    const lineItems = inv.lineItems
+      .map(li => ({
+        id: li.id,
+        description: li.description,
+        amount: li.amount,
+        lessonId: li.lessonId,
+        date: li.lesson?.startsAt ? li.lesson.startsAt.toISOString().split('T')[0]! : null,
+        teacher: li.lesson?.teacher ? `${li.lesson.teacher.firstName} ${li.lesson.teacher.lastName}` : null,
+        instrument: li.lesson?.enrollment?.instrument ?? null,
+      }))
+      .sort((a, b) => {
+        if (a.date && b.date) return a.date.localeCompare(b.date);
+        if (a.date) return -1;
+        if (b.date) return 1;
+        return 0;
+      });
+
+    // Balance carried over from before this invoice was issued (prior charges/payments)
+    const dayBefore = new Date(`${inv.issuedOn}T00:00:00`);
+    dayBefore.setDate(dayBefore.getDate() - 1);
+    const { balance: balanceForward } = await this.getBalanceAsOf(
+      orgId, inv.familyId, dayBefore.toISOString().split('T')[0]!,
+    );
+
+    return { ...inv, lineItems, balanceForward };
+  }
+
+  // Minimal, unauthenticated invoice summary for the "Click Here to Pay Online" link in the
+  // PDF/email — the family may not have portal credentials at hand, so this intentionally
+  // skips JwtAuthGuard. Invoice ids are unguessable UUIDs and only payment-reference fields
+  // (no family PII beyond what's already on the printed invoice) are returned.
+  async getPublicInvoiceSummary(id: string) {
+    const inv = await this.db.db.query.invoices.findFirst({
+      where: eq(invoices.id, id),
+      columns: { id: true, number: true, total: true, status: true, dueDate: true, organizationId: true },
+    });
+    if (!inv) throw new NotFoundException('Invoice not found');
+
+    const org = await this.db.db.query.organizations.findFirst({
+      where: eq(organizations.id, inv.organizationId),
+    });
+    const settings = (org?.settings as Record<string, unknown>) ?? {};
+
+    return {
+      number: inv.number,
+      total: inv.total,
+      status: inv.status,
+      dueDate: inv.dueDate,
+      org: {
+        name: org?.name ?? 'Music & Life',
+        bankSortCode: settings.bankSortCode as string | undefined,
+        bankAccountNumber: settings.bankAccountNumber as string | undefined,
+        bankAccountName: settings.bankAccountName as string | undefined,
+        invoiceNotes: settings.invoiceNotes as string | undefined,
+      },
+    };
   }
 
   async createInvoice(orgId: string, dto: CreateInvoiceDto) {
@@ -56,7 +130,69 @@ export class BillingService {
       status: 'draft',
     }).returning();
 
+    if (dto.mode === 'per_lesson') {
+      await this.generateLessonLineItems(orgId, inv!.id, dto.familyId, dto.periodStart, dto.periodEnd);
+    }
+
     return inv!;
+  }
+
+  // Itemizes one line item per individual lesson occurrence (date, teacher, instrument
+  // are read off the linked lesson at display time) for every student in the family,
+  // sorted earliest-first, skipping lessons already billed on another invoice.
+  private async generateLessonLineItems(
+    orgId: string, invoiceId: string, familyId: string, periodStart?: string, periodEnd?: string,
+  ) {
+    const famStudents = await this.db.db.query.students.findMany({
+      where: and(eq(students.organizationId, orgId), eq(students.familyId, familyId)),
+      columns: { id: true },
+    });
+    const studentIds = famStudents.map(s => s.id);
+    if (studentIds.length === 0) return;
+
+    const candidateLessons = await this.db.db.query.lessons.findMany({
+      where: and(
+        eq(lessons.organizationId, orgId),
+        inArray(lessons.studentId, studentIds),
+        eq(lessons.status, 'completed'),
+      ),
+      with: {
+        teacher: { columns: { firstName: true, lastName: true } },
+        enrollment: { columns: { instrument: true, rate: true, defaultDuration: true } },
+      },
+    });
+
+    const alreadyBilled = await this.db.db.query.invoiceLineItems.findMany({
+      where: and(
+        eq(invoiceLineItems.organizationId, orgId),
+        inArray(invoiceLineItems.lessonId, candidateLessons.map(l => l.id)),
+      ),
+      columns: { lessonId: true },
+    });
+    const billedLessonIds = new Set(alreadyBilled.map(i => i.lessonId));
+
+    const start = periodStart ? new Date(periodStart) : null;
+    const end = periodEnd ? new Date(`${periodEnd}T23:59:59`) : null;
+
+    const eligible = candidateLessons
+      .filter(l => !billedLessonIds.has(l.id))
+      .filter(l => !start || l.startsAt >= start)
+      .filter(l => !end || l.startsAt <= end)
+      .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+
+    if (eligible.length === 0) return;
+
+    const rows = eligible.map(l => ({
+      organizationId: orgId,
+      invoiceId,
+      lessonId: l.id,
+      description: `${l.duration} min lesson`,
+      amount: proratedAmount(l.enrollment?.rate, l.enrollment?.defaultDuration, l.duration),
+    }));
+    await this.db.db.insert(invoiceLineItems).values(rows);
+
+    const total = rows.reduce((s, r) => s + r.amount, 0);
+    await this.db.db.update(invoices).set({ total, updatedAt: new Date() }).where(eq(invoices.id, invoiceId));
   }
 
   async sendInvoice(orgId: string, id: string) {
@@ -107,6 +243,27 @@ export class BillingService {
     });
 
     return { familyId, balance: family.balanceCached, entries };
+  }
+
+  // Preview the family's balance as of a given date (defaults to today) — lets a parent or
+  // admin look ahead/back without waiting for an invoice. Sums ledger entries up to that
+  // date rather than relying on the always-current `balanceCached`.
+  async getBalanceAsOf(orgId: string, familyId: string, asOf: string) {
+    const family = await this.db.db.query.families.findFirst({
+      where: and(eq(families.id, familyId), eq(families.organizationId, orgId)),
+    });
+    if (!family) throw new NotFoundException('Family not found');
+
+    const cutoff = new Date(`${asOf}T23:59:59.999`);
+    const entries = await this.db.db.query.ledgerEntries.findMany({
+      where: and(eq(ledgerEntries.organizationId, orgId), eq(ledgerEntries.familyId, familyId)),
+      orderBy: (e, { asc }) => [asc(e.occurredAt)],
+    });
+
+    const upToDate = entries.filter(e => e.occurredAt <= cutoff);
+    const balance = upToDate.reduce((sum, e) => sum + e.amount, 0);
+
+    return { familyId, asOf, balance, entries: upToDate };
   }
 
   // ─── Payments ──────────────────────────────────────────────────────────────
@@ -217,21 +374,6 @@ export class BillingService {
     );
 
     return { allocated, remainder: amountPence - allocated };
-  }
-
-  // Called by GoCardless/Revolut webhooks — idempotent via providerRef
-  async recordProviderPayment(orgId: string, familyId: string, amountPence: number, method: 'gocardless' | 'revolut', providerRef: string) {
-    const existing = await this.db.db.query.payments.findFirst({
-      where: eq(payments.idempotencyKey, `${method}-${providerRef}`),
-    });
-    if (existing) return existing; // already processed
-
-    return this.recordPayment(orgId, {
-      familyId,
-      method,
-      amount: amountPence,
-      providerRef,
-    });
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────────────

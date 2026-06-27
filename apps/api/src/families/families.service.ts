@@ -1,9 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { eq, and, ilike, or } from 'drizzle-orm';
+import { eq, and, ilike, or, inArray } from 'drizzle-orm';
 import { families, guardians, students } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateFamilyDto } from './dto/create-family.dto';
 import type { UpdateFamilyDto } from './dto/update-family.dto';
+import type { InvoicingSettingsDto } from './dto/bulk-invoicing-settings.dto';
 
 @Injectable()
 export class FamiliesService {
@@ -61,5 +62,14 @@ export class FamiliesService {
     await this.findOne(orgId, id);
     // Phase 4 stub
     return { familyId: id, entries: [], balance: 0 };
+  }
+
+  async bulkApplyInvoicingSettings(orgId: string, familyIds: string[], settings: InvoicingSettingsDto) {
+    if (familyIds.length === 0) return { updated: 0 };
+    await this.db.db
+      .update(families)
+      .set({ ...settings, updatedAt: new Date() })
+      .where(and(eq(families.organizationId, orgId), inArray(families.id, familyIds)));
+    return { updated: familyIds.length };
   }
 }

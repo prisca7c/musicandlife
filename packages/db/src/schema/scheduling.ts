@@ -95,18 +95,3 @@ export const attendance = pgTable(
     actualEndedAt: timestamp('actual_ended_at', { withTimezone: true }),
   },
 );
-
-export const makeupCredits = pgTable(
-  'makeup_credits',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
-    studentId: uuid('student_id').notNull().references(() => students.id),
-    sourceLessonId: uuid('source_lesson_id').references(() => lessons.id),
-    status: text('status', { enum: ['available','booked','used'] }).notNull().default('available'),
-    // Expires 30 days from the original lesson date per T&Cs §3. Nullable = teacher-approved extension.
-    expiresAt: timestamp('expires_at', { withTimezone: true }),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [index('makeup_credits_student_idx').on(t.studentId, t.status)],
-);

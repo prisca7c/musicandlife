@@ -91,6 +91,36 @@ export const registrations = pgTable(
   (t) => [index('registrations_org_status_idx').on(t.organizationId, t.status)],
 );
 
+// ─── Email templates (admin-editable overrides of the hardcoded defaults) ─────
+export const emailTemplates = pgTable(
+  'email_templates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    templateId: text('template_id').notNull(),
+    subject: text('subject').notNull(),
+    html: text('html').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('email_templates_org_template_uidx').on(t.organizationId, t.templateId)],
+);
+
+// ─── Studio news / announcements ───────────────────────────────────────────────
+export const newsPosts = pgTable(
+  'news_posts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    authorId: uuid('author_id').references(() => users.id),
+    publishedAt: timestamp('published_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('news_posts_org_published_idx').on(t.organizationId, t.publishedAt)],
+);
+
 // ─── Leads ────────────────────────────────────────────────────────────────────
 export const leads = pgTable(
   'leads',

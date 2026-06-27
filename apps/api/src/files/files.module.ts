@@ -2,7 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { FilesController } from './files.controller';
 import { FilesService } from './files.service';
 import { FileStoragePort } from './ports/file-storage.port';
-import { StubFileStorageAdapter } from './adapters/stub-file-storage.adapter';
+import { R2FileStorageAdapter } from './adapters/r2-file-storage.adapter';
 import { AuthModule } from '../auth/auth.module';
 
 @Global()
@@ -11,7 +11,7 @@ import { AuthModule } from '../auth/auth.module';
   controllers: [FilesController],
   providers: [
     FilesService,
-    { provide: FileStoragePort, useClass: StubFileStorageAdapter },
+    { provide: FileStoragePort, useClass: R2FileStorageAdapter },
   ],
   exports: [FilesService, FileStoragePort],
 })

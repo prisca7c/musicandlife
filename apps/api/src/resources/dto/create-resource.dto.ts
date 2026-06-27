@@ -21,4 +21,17 @@ export class CreateResourceDto {
 
   @IsIn(['studio', 'teacher', 'family', 'student'])
   scope!: 'studio' | 'teacher' | 'family' | 'student';
+
+  // ─── Filter/search tags (independent of `scope`) ───────────────────────────
+  @IsOptional()
+  @IsString()
+  instrument?: string;
+
+  @IsOptional()
+  @IsUUID()
+  teacherId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  studentId?: string;
 }

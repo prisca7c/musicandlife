@@ -14,7 +14,7 @@ export class FilesService {
 
   async signUpload(opts: {
     orgId: string; ownerId: string; mime: string; size: number;
-    originalName?: string; tier?: 'active' | 'archive';
+    originalName?: string; tier?: 'active' | 'archive'; expiring?: boolean;
   }) {
     const result = await this.storage.signUpload(opts);
 

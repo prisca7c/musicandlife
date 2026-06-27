@@ -56,10 +56,6 @@ export class SubmitRegistrationDto {
   emailReminders?: boolean;
 
   @IsOptional()
-  @IsBoolean()
-  smsReminders?: boolean;
-
-  @IsOptional()
   @IsString()
   notes?: string;
 

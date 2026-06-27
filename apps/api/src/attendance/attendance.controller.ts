@@ -15,12 +15,12 @@ export class AttendanceController {
   @Post(':id/attendance')
   @Roles('teacher')
   mark(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: MarkAttendanceDto) {
-    return this.attendance.markAttendance(user.orgId, id, dto, user.userId);
+    return this.attendance.markAttendance(user.orgId, id, dto, user.userId, { role: user.role, userId: user.userId });
   }
 
   @Get(':id/attendance')
   @Roles('teacher')
   get(@CurrentUser() user: RequestUser, @Param('id') id: string) {
-    return this.attendance.getAttendance(user.orgId, id);
+    return this.attendance.getAttendance(user.orgId, id, { role: user.role, userId: user.userId });
   }
 }

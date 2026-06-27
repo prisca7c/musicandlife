@@ -55,7 +55,8 @@ export class BillingController {
 
   @Get('families/:id/ledger')
   @Roles('receptionist')
-  getLedger(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+  getLedger(@CurrentUser() user: RequestUser, @Param('id') id: string, @Query('asOf') asOf?: string) {
+    if (asOf) return this.billing.getBalanceAsOf(user.orgId, id, asOf);
     return this.billing.getLedger(user.orgId, id);
   }
 

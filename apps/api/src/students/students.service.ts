@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { eq, and, ilike, or, inArray } from 'drizzle-orm';
-import { students, teacherAssignments, enrollments, families } from '@music-life/db';
+import { students, teacherAssignments, enrollments, families, staffMembers } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateStudentDto } from './dto/create-student.dto';
 import type { UpdateStudentDto } from './dto/update-student.dto';
@@ -10,14 +10,37 @@ import type { BaseRole } from '@music-life/types';
 export class StudentsService {
   constructor(private readonly db: DbService) {}
 
-  async findAll(orgId: string, userId: string, role: BaseRole, search?: string) {
-    // Teachers only see their assigned students
-    if (role === 'teacher') {
-      const assignments = await this.db.db.query.teacherAssignments.findMany({
-        where: and(eq(teacherAssignments.organizationId, orgId)),
+  private async resolveStaffId(orgId: string, userId: string): Promise<string | null> {
+    const staff = await this.db.db.query.staffMembers.findFirst({
+      where: and(eq(staffMembers.userId, userId), eq(staffMembers.organizationId, orgId)),
+      columns: { id: true },
+    });
+    return staff?.id ?? null;
+  }
+
+  // "Assigned" is the union of the explicit teacherAssignments table (admin-managed,
+  // primary/secondary) and enrollments.teacherId — in practice every student-teacher
+  // link today comes from an enrollment, since nothing in the app currently writes to
+  // teacherAssignments outside the dedicated staff assign/unassign endpoints.
+  private async getAssignedStudentIds(orgId: string, staffId: string): Promise<string[]> {
+    const [assignments, enrolled] = await Promise.all([
+      this.db.db.query.teacherAssignments.findMany({
+        where: and(eq(teacherAssignments.organizationId, orgId), eq(teacherAssignments.staffId, staffId)),
         columns: { studentId: true },
-      });
-      const ids = assignments.map((a) => a.studentId);
+      }),
+      this.db.db.query.enrollments.findMany({
+        where: and(eq(enrollments.organizationId, orgId), eq(enrollments.teacherId, staffId)),
+        columns: { studentId: true },
+      }),
+    ]);
+    return [...new Set([...assignments.map((a) => a.studentId), ...enrolled.map((e) => e.studentId)])];
+  }
+
+  async findAll(orgId: string, userId: string, role: BaseRole, search?: string) {
+    // Teachers only see their own assigned students
+    if (role === 'teacher') {
+      const staffId = await this.resolveStaffId(orgId, userId);
+      const ids = staffId ? await this.getAssignedStudentIds(orgId, staffId) : [];
       if (ids.length === 0) return [];
 
       return this.db.db.query.students.findMany({
@@ -51,7 +74,7 @@ export class StudentsService {
     });
   }
 
-  async findOne(orgId: string, id: string) {
+  async findOne(orgId: string, id: string, teacherScope?: { userId: string }) {
     const student = await this.db.db.query.students.findFirst({
       where: and(eq(students.id, id), eq(students.organizationId, orgId)),
       with: {
@@ -62,6 +85,13 @@ export class StudentsService {
       },
     });
     if (!student) throw new NotFoundException('Student not found');
+
+    if (teacherScope) {
+      const staffId = await this.resolveStaffId(orgId, teacherScope.userId);
+      const assignedIds = staffId ? await this.getAssignedStudentIds(orgId, staffId) : [];
+      if (!assignedIds.includes(id)) throw new NotFoundException('Student not found');
+    }
+
     return student;
   }
 
@@ -99,8 +129,8 @@ export class StudentsService {
     return updated!;
   }
 
-  async getEnrollments(orgId: string, studentId: string) {
-    await this.findOne(orgId, studentId);
+  async getEnrollments(orgId: string, studentId: string, teacherScope?: { userId: string }) {
+    await this.findOne(orgId, studentId, teacherScope);
     return this.db.db.query.enrollments.findMany({
       where: and(
         eq(enrollments.studentId, studentId),

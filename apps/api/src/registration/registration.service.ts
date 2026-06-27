@@ -5,6 +5,7 @@ import { randomBytes, createHash } from 'crypto';
 import { DbService } from '../db/db.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailPort } from '../email/ports/email.port';
+import { parseCsv } from '../common/csv';
 import type { SubmitRegistrationDto } from './dto/submit-registration.dto';
 
 @Injectable()
@@ -60,16 +61,12 @@ export class RegistrationService {
     });
   }
 
-  /** Admin: approve — atomically creates family + student + enrollments */
-  async approve(orgId: string, regId: string, decidedBy: string) {
-    const reg = await this.db.db.query.registrations.findFirst({
-      where: and(eq(registrations.id, regId), eq(registrations.organizationId, orgId)),
-    });
-    if (!reg) throw new NotFoundException('Registration not found');
-    if (reg.status !== 'pending') throw new BadRequestException('Already decided');
-
-    const payload = reg.payload as SubmitRegistrationDto;
-
+  /** Shared by registration approval and CSV import: atomically creates family + student + enrollments (+ portal account). */
+  async createFamilyStudentEnrollments(orgId: string, payload: {
+    studentFirstName: string; studentLastName: string; studentDob?: string; studentEmail?: string;
+    familyName: string; contactName: string; contactEmail?: string; contactPhone?: string; address?: string;
+    instruments: { instrument: string; lessonType: 'private' | 'group' }[];
+  }) {
     // Create family
     const [family] = await this.db.db.insert(families).values({
       organizationId: orgId,
@@ -135,11 +132,91 @@ export class RegistrationService {
       }
     }
 
+    return { familyId: family!.id, studentId: student!.id };
+  }
+
+  /** Admin: approve — atomically creates family + student + enrollments */
+  async approve(orgId: string, regId: string, decidedBy: string) {
+    const reg = await this.db.db.query.registrations.findFirst({
+      where: and(eq(registrations.id, regId), eq(registrations.organizationId, orgId)),
+    });
+    if (!reg) throw new NotFoundException('Registration not found');
+    if (reg.status !== 'pending') throw new BadRequestException('Already decided');
+
+    const payload = reg.payload as SubmitRegistrationDto;
+    const { familyId, studentId } = await this.createFamilyStudentEnrollments(orgId, payload);
+
     await this.db.db.update(registrations)
       .set({ status: 'approved', decidedBy, decidedAt: new Date() })
       .where(eq(registrations.id, regId));
 
-    return { id: regId, status: 'approved', familyId: family!.id, studentId: student!.id };
+    return { id: regId, status: 'approved', familyId, studentId };
+  }
+
+  // ─── CSV student import ─────────────────────────────────────────────────────
+  private validateImportRow(data: Record<string, string>): string[] {
+    const errors: string[] = [];
+    if (!data.studentFirstName) errors.push('studentFirstName is required');
+    if (!data.studentLastName) errors.push('studentLastName is required');
+    if (!data.guardianFirstName) errors.push('guardianFirstName is required');
+    if (!data.guardianLastName) errors.push('guardianLastName is required');
+    const emailRe = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+    if (data.studentEmail && !emailRe.test(data.studentEmail)) errors.push('studentEmail is not a valid email');
+    if (data.guardianEmail && !emailRe.test(data.guardianEmail)) errors.push('guardianEmail is not a valid email');
+    if (data.lessonType && !['private', 'group'].includes(data.lessonType)) errors.push("lessonType must be 'private' or 'group'");
+    if (data.studentDob && isNaN(Date.parse(data.studentDob))) errors.push('studentDob is not a valid date');
+    return errors;
+  }
+
+  /** Admin: parse an uploaded CSV and validate rows without committing anything. */
+  previewImport(csv: string) {
+    const records = parseCsv(csv);
+    if (records.length === 0) return { rows: [], validCount: 0, errorCount: 0 };
+
+    const header = records[0]!.map(h => h.trim());
+    const rows = records.slice(1).map((cols, i) => {
+      const data: Record<string, string> = {};
+      header.forEach((h, idx) => { data[h] = (cols[idx] ?? '').trim(); });
+      return { rowNumber: i + 2, data, errors: this.validateImportRow(data) };
+    });
+
+    return {
+      rows,
+      validCount: rows.filter(r => r.errors.length === 0).length,
+      errorCount: rows.filter(r => r.errors.length > 0).length,
+    };
+  }
+
+  /** Admin: commit previously-previewed rows — reuses the same creation logic as registration approval. */
+  async commitImport(orgId: string, rows: Record<string, string>[]) {
+    let created = 0;
+    const failures: { row: number; error: string }[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i]!;
+      const errors = this.validateImportRow(r);
+      if (errors.length > 0) { failures.push({ row: i + 1, error: errors.join('; ') }); continue; }
+
+      try {
+        await this.createFamilyStudentEnrollments(orgId, {
+          studentFirstName: r.studentFirstName!,
+          studentLastName: r.studentLastName!,
+          studentDob: r.studentDob || undefined,
+          studentEmail: r.studentEmail || undefined,
+          familyName: r.familyName || `${r.guardianLastName} Family`,
+          contactName: `${r.guardianFirstName} ${r.guardianLastName}`,
+          contactEmail: r.guardianEmail || undefined,
+          contactPhone: r.guardianPhone || undefined,
+          address: r.address || undefined,
+          instruments: r.instrument ? [{ instrument: r.instrument, lessonType: (r.lessonType as 'private' | 'group') || 'private' }] : [],
+        });
+        created++;
+      } catch (e) {
+        failures.push({ row: i + 1, error: e instanceof Error ? e.message : 'Unknown error' });
+      }
+    }
+
+    return { created, failures };
   }
 
   /** Admin: deny */

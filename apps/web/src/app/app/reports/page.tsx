@@ -2,17 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import { pdf } from '@react-pdf/renderer';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, apiFetchBlob } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { InvoicePDF, type OrgPDFData } from '@/components/invoice-pdf';
 import { PayrollPDF, type PayrollPDFData } from '@/components/payroll-pdf';
 import { AttendancePDF, type AttendancePDFData } from '@/components/attendance-pdf';
-import { Download, Loader2 } from 'lucide-react';
+import { Download, FileDown, Loader2 } from 'lucide-react';
 import { SearchableSelect } from '@/components/searchable-select';
 
 interface AttendanceReport { from: string; to: string; byStatus: { status: string; count: number }[]; }
-interface RevenueReport { from: string; to: string; byType: { type: string; total: string | null }[]; }
+interface RevenueReport { from: string; to: string; accountingMode: 'cash' | 'accrual'; total: number; byType: { type: string; total: string | null }[]; }
 interface EnrollmentReport { byInstrument: { instrument: string; lessonType: string; count: number }[]; }
+interface RetentionReport { byMonth: { month: string; active: number; withdrawn: number }[]; }
 interface StudentOption { id: string; firstName: string; lastName: string; }
 interface StaffOption { id: string; firstName: string; lastName: string; }
 
@@ -28,7 +29,7 @@ async function downloadBlob(blob: Blob, filename: string) {
 
 const STATUS_LABELS: Record<string, string> = {
   scheduled: 'Scheduled', completed: 'Completed',
-  cancelled_makeup: 'Makeup credit', cancelled_no_makeup: 'Late cancel',
+  cancelled_makeup: 'Lesson earned', cancelled_no_makeup: 'Late cancel',
   cancelled_no_pay: 'No charge', cancelled_teacher: 'Teacher cancelled', makeup: 'Makeup lesson',
 };
 
@@ -36,6 +37,7 @@ export default function ReportsPage() {
   const [attendance, setAttendance] = useState<AttendanceReport | null>(null);
   const [revenue, setRevenue] = useState<RevenueReport | null>(null);
   const [enrollments, setEnrollments] = useState<EnrollmentReport | null>(null);
+  const [retention, setRetention] = useState<RetentionReport | null>(null);
   const [students, setStudents] = useState<StudentOption[]>([]);
   const [staff, setStaff] = useState<StaffOption[]>([]);
   const [org, setOrg] = useState<OrgPDFData | null>(null);
@@ -63,8 +65,18 @@ export default function ReportsPage() {
       apiFetch<AttendanceReport>(`/reports/attendance?from=${from}&to=${to}`, { token: t }).catch(() => null),
       apiFetch<RevenueReport>(`/reports/revenue?from=${from}&to=${to}`, { token: t }).catch(() => null),
       apiFetch<EnrollmentReport>('/reports/enrollments', { token: t }).catch(() => null),
-    ]).then(([a, r, e]) => { setAttendance(a); setRevenue(r); setEnrollments(e); });
+      apiFetch<RetentionReport>('/reports/retention', { token: t }).catch(() => null),
+    ]).then(([a, r, e, ret]) => { setAttendance(a); setRevenue(r); setEnrollments(e); setRetention(ret); });
   }, [from, to]);
+
+  async function downloadCsv(path: string, filename: string) {
+    setGenerating(filename);
+    try {
+      const blob = await apiFetchBlob(path, { token: tok() });
+      await downloadBlob(blob, filename);
+    } catch (e) { console.error(e); alert('Could not download CSV.'); }
+    finally { setGenerating(null); }
+  }
 
   async function downloadStudentInvoice() {
     if (!pdfStudent) return;
@@ -186,8 +198,13 @@ export default function ReportsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Lesson attendance */}
         <div className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: 'var(--bd)' }}>
-          <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+          <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
             <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Lessons by status</h2>
+            <button onClick={() => downloadCsv(`/reports/attendance?from=${from}&to=${to}&format=csv`, 'attendance.csv')}
+              disabled={generating === 'attendance.csv'}
+              className="flex items-center gap-1.5 text-xs font-semibold hover:underline disabled:opacity-50" style={{ color: 'var(--sage)' }}>
+              <FileDown size={12} /> CSV
+            </button>
           </div>
           <div className="p-5">
             {!attendance ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>Loading…</p> : (
@@ -212,8 +229,16 @@ export default function ReportsPage() {
 
         {/* Revenue */}
         <div className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: 'var(--bd)' }}>
-          <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
-            <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Revenue by type</h2>
+          <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+            <div>
+              <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Revenue by type</h2>
+              {revenue && <p className="text-xs mt-0.5 capitalize" style={{ color: 'var(--txt4)' }}>{revenue.accountingMode} basis · £{(revenue.total / 100).toFixed(2)}</p>}
+            </div>
+            <button onClick={() => downloadCsv(`/reports/revenue?from=${from}&to=${to}&format=csv`, 'revenue.csv')}
+              disabled={generating === 'revenue.csv'}
+              className="flex items-center gap-1.5 text-xs font-semibold hover:underline disabled:opacity-50 shrink-0" style={{ color: 'var(--sage)' }}>
+              <FileDown size={12} /> CSV
+            </button>
           </div>
           <div className="p-5">
             {!revenue ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>Loading…</p> : (
@@ -234,14 +259,19 @@ export default function ReportsPage() {
         </div>
 
         {/* Enrollments */}
-        <div className="bg-white rounded-2xl border overflow-hidden lg:col-span-2" style={{ borderColor: 'var(--bd)' }}>
-          <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+        <div className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: 'var(--bd)' }}>
+          <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
             <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Active enrollments by instrument</h2>
+            <button onClick={() => downloadCsv('/reports/enrollments?format=csv', 'enrollments.csv')}
+              disabled={generating === 'enrollments.csv'}
+              className="flex items-center gap-1.5 text-xs font-semibold hover:underline disabled:opacity-50" style={{ color: 'var(--sage)' }}>
+              <FileDown size={12} /> CSV
+            </button>
           </div>
           <div className="p-5">
             {!enrollments ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>Loading…</p> : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {enrollments.byInstrument.length === 0 && <p className="text-sm col-span-4" style={{ color: 'var(--txt4)' }}>No active enrollments.</p>}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {enrollments.byInstrument.length === 0 && <p className="text-sm col-span-3" style={{ color: 'var(--txt4)' }}>No active enrollments.</p>}
                 {enrollments.byInstrument.map(row => (
                   <div key={`${row.instrument}-${row.lessonType}`} className="rounded-xl p-4 text-center"
                     style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
@@ -250,6 +280,44 @@ export default function ReportsPage() {
                     <p className="text-xs capitalize" style={{ color: 'var(--txt4)' }}>{row.lessonType}</p>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Retention */}
+        <div className="bg-white rounded-2xl border overflow-hidden lg:col-span-2" style={{ borderColor: 'var(--bd)' }}>
+          <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+            <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Retention — active vs withdrawn by enrollment month</h2>
+            <button onClick={() => downloadCsv('/reports/retention?format=csv', 'retention.csv')}
+              disabled={generating === 'retention.csv'}
+              className="flex items-center gap-1.5 text-xs font-semibold hover:underline disabled:opacity-50" style={{ color: 'var(--sage)' }}>
+              <FileDown size={12} /> CSV
+            </button>
+          </div>
+          <div className="p-5">
+            {!retention ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>Loading…</p> : (
+              <div className="overflow-x-auto">
+                {retention.byMonth.length === 0 ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>No enrollment history yet.</p> : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left" style={{ color: 'var(--txt3)' }}>
+                        <th className="font-semibold pb-2">Month</th>
+                        <th className="font-semibold pb-2 text-right">Active</th>
+                        <th className="font-semibold pb-2 text-right">Withdrawn</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y" style={{ borderColor: 'var(--bd)' }}>
+                      {retention.byMonth.map(row => (
+                        <tr key={row.month}>
+                          <td className="py-2 font-medium" style={{ color: 'var(--txt)' }}>{row.month}</td>
+                          <td className="py-2 text-right font-bold" style={{ color: 'var(--sage-dk)' }}>{row.active}</td>
+                          <td className="py-2 text-right font-bold" style={{ color: 'var(--coral)' }}>{row.withdrawn}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             )}
           </div>

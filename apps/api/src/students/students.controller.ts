@@ -33,7 +33,7 @@ export class StudentsController {
   @Get(':id')
   @Roles('teacher')
   findOne(@CurrentUser() user: RequestUser, @Param('id') id: string) {
-    return this.students.findOne(user.orgId, id);
+    return this.students.findOne(user.orgId, id, user.role === 'teacher' ? { userId: user.userId } : undefined);
   }
 
   @Patch(':id')
@@ -51,7 +51,7 @@ export class StudentsController {
   @Get(':id/enrollments')
   @Roles('teacher')
   getEnrollments(@CurrentUser() user: RequestUser, @Param('id') id: string) {
-    return this.students.getEnrollments(user.orgId, id);
+    return this.students.getEnrollments(user.orgId, id, user.role === 'teacher' ? { userId: user.userId } : undefined);
   }
 
   @Post(':id/enrollments')

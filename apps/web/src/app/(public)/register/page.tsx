@@ -8,7 +8,7 @@ import {
   ClipboardCheck, Mail, Phone, MapPin, Search,
   CircleCheck, AlertCircle, Info, Send,
   Plus, MailCheck, Clock, CalendarPlus, Bell,
-  Smartphone, UserPlus, Music,
+  UserPlus, Music,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { PRIVATE_INSTRUMENTS, GROUP_INSTRUMENTS } from '@music-life/types';
@@ -23,7 +23,7 @@ interface FormData {
   guardianFirstName: string; guardianLastName: string;
   contactEmail: string; contactPhone: string; address: string;
   instruments: InstrumentSelection[];
-  emailReminders: boolean; smsReminders: boolean;
+  emailReminders: boolean;
   notes: string;
 }
 
@@ -33,7 +33,7 @@ const EMPTY: FormData = {
   guardianFirstName: '', guardianLastName: '',
   contactEmail: '', contactPhone: '', address: '',
   instruments: [],
-  emailReminders: true, smsReminders: false,
+  emailReminders: true,
   notes: '',
 };
 
@@ -206,7 +206,7 @@ export default function RegisterPage() {
         studentEmail: data.studentEmail || undefined,
         familyName: data.familyType === 'existing' && selectedFamily
           ? selectedFamily.name
-          : `${data.guardianFirstName} ${data.guardianLastName} Family`,
+          : `${data.guardianFirstName} ${data.guardianLastName}`,
         contactName: data.familyType === 'existing' && selectedFamily
           ? selectedFamily.name
           : `${data.guardianFirstName} ${data.guardianLastName}`,
@@ -217,7 +217,6 @@ export default function RegisterPage() {
         address: data.address || undefined,
         instruments: data.instruments,
         emailReminders: data.emailReminders,
-        smsReminders: data.smsReminders,
         notes: data.notes || undefined,
         idempotencyKey: `reg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       };
@@ -542,8 +541,7 @@ export default function RegisterPage() {
               </p>
               <div className="space-y-2">
                 {[
-                  { id: 'email', key: 'emailReminders' as const, icon: <Mail size={16} />, title: 'Email lesson reminders', desc: 'Sent 24 hours before each lesson.', defaultOn: true },
-                  { id: 'sms', key: 'smsReminders' as const, icon: <Smartphone size={16} />, title: 'SMS lesson reminders', desc: 'Text reminder 2 hours before. Standard rates may apply.', defaultOn: false },
+                  { id: 'email', key: 'emailReminders' as const, icon: <Mail size={16} />, title: 'Email lesson reminders', desc: 'Sent 24 hours and 2 hours before each lesson.', defaultOn: true },
                 ].map(pref => (
                   <label key={pref.id} onClick={() => set({ [pref.key]: !data[pref.key] } as Partial<FormData>)}
                     className={`flex items-start gap-3 p-3 border-[1.5px] rounded-[10px] cursor-pointer transition-all
@@ -647,7 +645,7 @@ export default function RegisterPage() {
                     : <em className="text-[var(--txt4)]">None</em>
                 } />
                 {data.notes && <ReviewRow label="Notes" value={data.notes} />}
-                <ReviewRow label="Reminders" value={[data.emailReminders && 'Email', data.smsReminders && 'SMS'].filter(Boolean).join(', ') || 'None'} />
+                <ReviewRow label="Reminders" value={data.emailReminders ? 'Email' : 'None'} />
               </div>
 
               <div className="h-px bg-[var(--bd)]" />
@@ -658,7 +656,7 @@ export default function RegisterPage() {
                 <span className="text-sm text-[var(--txt2)] leading-relaxed">
                   I have read and agree to the{' '}
                   <Link href="/terms" target="_blank" className="text-[var(--sky)] font-semibold hover:underline">Terms &amp; Conditions</Link>,
-                  including the fees, cancellation policy, and 30-day make-up credit policy.
+                  including the fees, cancellation policy, and make-up lesson policy.
                 </span>
               </label>
             </div>
