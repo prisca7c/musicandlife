@@ -16,7 +16,7 @@ import {
   staffMembers, staffPrivileges, enrollments, lessons, teacherAssignments,
   availability, blockedTime, payrollRuns, expenses,
 } from './index';
-import { DEFAULT_TEACHER_PRIVILEGES } from '../../types/src/index';
+import { DEFAULT_TEACHER_PRIVILEGES } from '@music-life/types';
 
 const db = createDb(process.env.DATABASE_URL!);
 const TEACHER_PASSWORD = 'Teacher123!';

@@ -20,7 +20,7 @@ import {
   ledgerEntries, lessonCredits, leads, resources, threads, threadParticipants,
   messages, notes,
 } from './index';
-import { DEFAULT_TEACHER_PRIVILEGES } from '../../types/src/index';
+import { DEFAULT_TEACHER_PRIVILEGES } from '@music-life/types';
 
 const db = createDb(process.env.DATABASE_URL!);
 
