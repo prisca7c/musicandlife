@@ -2,6 +2,7 @@ import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@ne
 import { FamiliesService } from './families.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { UpdateFamilyDto } from './dto/update-family.dto';
+import { BulkInvoicingSettingsDto } from './dto/bulk-invoicing-settings.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -23,6 +24,13 @@ export class FamiliesController {
   @Roles('receptionist')
   create(@CurrentUser() user: RequestUser, @Body() dto: CreateFamilyDto) {
     return this.families.create(user.orgId, dto);
+  }
+
+  // Declared before ':id' so it isn't shadowed by the param route below.
+  @Patch('bulk-invoicing-settings')
+  @Roles('admin')
+  bulkInvoicingSettings(@CurrentUser() user: RequestUser, @Body() dto: BulkInvoicingSettingsDto) {
+    return this.families.bulkApplyInvoicingSettings(user.orgId, dto.familyIds, dto.settings);
   }
 
   @Get(':id')

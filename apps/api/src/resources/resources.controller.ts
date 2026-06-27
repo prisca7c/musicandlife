@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ResourcesService } from './resources.service';
 import { CreateResourceDto } from './dto/create-resource.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -14,14 +14,20 @@ export class ResourcesController {
 
   @Get()
   @Roles('student')
-  findAll(@CurrentUser() user: RequestUser) {
-    return this.resources.findAll(user.orgId, user.role);
+  findAll(
+    @CurrentUser() user: RequestUser,
+    @Query('search') search?: string,
+    @Query('instrument') instrument?: string,
+    @Query('teacherId') teacherId?: string,
+    @Query('studentId') studentId?: string,
+  ) {
+    return this.resources.findAll(user.orgId, user.role, user.userId, { search, instrument, teacherId, studentId });
   }
 
   @Post()
   @Roles('teacher')
   create(@CurrentUser() user: RequestUser, @Body() dto: CreateResourceDto) {
-    return this.resources.create(user.orgId, user.userId, dto);
+    return this.resources.create(user.orgId, user.userId, user.role, dto);
   }
 
   @Delete(':id')

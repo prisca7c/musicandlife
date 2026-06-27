@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { BackButton } from '@/components/back-button';
+import { Calendar, Pencil } from 'lucide-react';
 import type { InvoicePDFData, OrgPDFData } from '@/components/invoice-pdf';
 
 // Load the PDF download button client-side only (react-pdf uses browser APIs)
@@ -19,9 +20,12 @@ const PdfDownloadButton = dynamic(
 
 interface InvoiceDetail {
   id: string; number: string; status: string; total: number; issuedOn: string; dueDate: string;
-  mode: string; notes: string | null;
+  mode: string; notes: string | null; balanceForward: number;
   family: { id: string; name: string; email: string | null } | null;
-  lineItems: { id: string; description: string; amount: number; lessonId: string | null; date?: string }[];
+  lineItems: {
+    id: string; description: string; amount: number; lessonId: string | null;
+    date: string | null; teacher: string | null; instrument: string | null;
+  }[];
 }
 
 interface OrgSettings {
@@ -120,7 +124,7 @@ export default function InvoiceDetailPage() {
   useEffect(() => {
     load();
     // Fetch org settings for PDF
-    apiFetch<OrgSettings>('/org/settings', { token: tok() })
+    apiFetch<OrgSettings>('/organizations/me', { token: tok() })
       .then(o => setOrg({
         name:               o.name,
         address:            o.settings.address,
@@ -145,12 +149,15 @@ export default function InvoiceDetailPage() {
 
   // Build the data shape expected by the PDF template
   const pdfInvoice: InvoicePDFData = {
-    number:    invoice.number,
-    status:    invoice.status,
-    total:     invoice.total,
-    issuedOn:  invoice.issuedOn,
-    dueDate:   invoice.dueDate,
-    notes:     invoice.notes,
+    id:              invoice.id,
+    number:          invoice.number,
+    status:          invoice.status,
+    total:           invoice.total,
+    balanceForward:  invoice.balanceForward,
+    issuedOn:        invoice.issuedOn,
+    dueDate:         invoice.dueDate,
+    notes:           invoice.notes,
+    payUrl:          typeof window !== 'undefined' ? `${window.location.origin}/pay/${invoice.id}` : undefined,
     family:    invoice.family
       ? { name: invoice.family.name, email: invoice.family.email, address: familyAddress }
       : null,
@@ -158,7 +165,10 @@ export default function InvoiceDetailPage() {
       id:          li.id,
       description: li.description,
       amount:      li.amount,
-      date:        li.date,
+      date:        li.date ?? undefined,
+      teacher:     li.teacher ?? undefined,
+      instrument:  li.instrument ?? undefined,
+      lessonId:    li.lessonId,
     })),
   };
 
@@ -250,18 +260,36 @@ export default function InvoiceDetailPage() {
         <table className="data-table">
           <thead>
             <tr>
+              <th>Date</th>
+              <th>Teacher</th>
+              <th>Instrument</th>
+              <th></th>
               <th>Description</th>
               <th style={{ textAlign: 'right' }}>Amount</th>
             </tr>
           </thead>
           <tbody>
+            {!!invoice.balanceForward && (
+              <tr>
+                <td colSpan={4} style={{ color: 'var(--txt3)' }}>Balance forward</td>
+                <td className="font-semibold" style={{ textAlign: 'right', color: 'var(--txt3)' }}>
+                  {invoice.balanceForward < 0 ? '-' : ''}£{(Math.abs(invoice.balanceForward) / 100).toFixed(2)}
+                </td>
+              </tr>
+            )}
             {invoice.lineItems.length === 0 && (
-              <tr><td colSpan={2} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No line items yet.
               </td></tr>
             )}
             {invoice.lineItems.map(item => (
               <tr key={item.id}>
+                <td style={{ color: 'var(--txt3)' }}>{item.date ?? '—'}</td>
+                <td style={{ color: 'var(--txt3)' }}>{item.teacher ?? '—'}</td>
+                <td className="capitalize" style={{ color: 'var(--txt3)' }}>{item.instrument ?? '—'}</td>
+                <td title={item.lessonId ? 'Generated from calendar lesson' : 'Added manually'} style={{ color: 'var(--txt4)' }}>
+                  {item.lessonId ? <Calendar size={12} /> : <Pencil size={12} />}
+                </td>
                 <td>{item.description}</td>
                 <td className="font-semibold" style={{ textAlign: 'right' }}>
                   {item.amount < 0 ? '-' : ''}£{(Math.abs(item.amount) / 100).toFixed(2)}
@@ -270,7 +298,7 @@ export default function InvoiceDetailPage() {
             ))}
             {invoice.lineItems.length > 0 && (
               <tr style={{ background: 'var(--surf)', fontWeight: 700 }}>
-                <td>Total</td>
+                <td colSpan={5}>Total</td>
                 <td style={{ textAlign: 'right' }}>£{(invoice.total / 100).toFixed(2)}</td>
               </tr>
             )}

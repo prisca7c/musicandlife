@@ -65,7 +65,7 @@ export default function TermsPage() {
           <p className="text-sm text-gray-700 mb-2">We understand that life can be busy. Our policy is designed to be fair to both our families and our instructors.</p>
           <ul className="text-sm text-gray-700 space-y-2 list-disc pl-5 mb-3">
             <li><strong>24-Hour Cancellation Notice:</strong> Please provide at least 24 hours&apos; notice via email or phone to cancel or reschedule a lesson. This applies to all reasons for cancellation, including illness.</li>
-            <li><strong>Cancellations with 24+ Hours&apos; Notice:</strong> You will receive a make-up credit, which can be used to reschedule the lesson.</li>
+            <li><strong>Cancellations with 24+ Hours&apos; Notice:</strong> You will receive a lesson you can book again, with no expiry.</li>
             <li>
               <strong>Cancellations with Less Than 24 Hours&apos; Notice:</strong> The teacher is not obligated to reschedule. However, we want to ensure you still get value from your lesson, so we offer several flexible options:
               <ul className="list-disc pl-5 mt-1 space-y-1">
@@ -73,14 +73,14 @@ export default function TermsPage() {
                 <li><strong>Switch to an online lesson</strong> — Where feasible, you can opt to have your lesson online instead.</li>
               </ul>
             </li>
-            <li><strong>Missed Lessons (No Notice):</strong> If a lesson is missed without any prior notice, it will be forfeited, and no refund or credit will be issued.</li>
+            <li><strong>Missed Lessons (No Notice):</strong> If a lesson is missed without any prior notice, it will be forfeited, and no refund or rebookable lesson will be issued.</li>
           </ul>
 
           {/* §3 */}
           <h2 className="text-lg font-semibold mt-8 mb-3">3. Make-Up Lessons &amp; Teacher Absences</h2>
           <ul className="text-sm text-gray-700 space-y-2 list-disc pl-5 mb-3">
-            <li><strong>Student Make-Up Lessons:</strong> Make-up lessons are offered when a cancellation is made with at least 24 hours&apos; notice. Make-up credits are valid for <strong>30 days</strong> from the date of the original lesson, unless your teacher agrees to an extension. While we do our best to find an alternative time for unavoidable circumstances, make-up lessons are not guaranteed and are subject to schedule availability.</li>
-            <li><strong>Teacher Cancellations:</strong> If a teacher must cancel a lesson, they are obligated to either reschedule at a mutually convenient time or issue a make-up credit. A replacement teacher may be arranged if necessary.</li>
+            <li><strong>Student Make-Up Lessons:</strong> Make-up lessons are offered when a cancellation is made with at least 24 hours&apos; notice, and do not expire. While we do our best to find an alternative time for unavoidable circumstances, make-up lessons are not guaranteed and are subject to schedule availability.</li>
+            <li><strong>Teacher Cancellations:</strong> If a teacher must cancel a lesson, they are obligated to either reschedule at a mutually convenient time or issue a make-up lesson you can book again. A replacement teacher may be arranged if necessary.</li>
           </ul>
 
           {/* §4 */}
@@ -89,7 +89,7 @@ export default function TermsPage() {
             <li><strong>Punctuality:</strong> Please arrive on time for your lesson. Late arrivals will still finish at the scheduled time to respect the student following you. If a teacher is late, you will receive your full lesson time.</li>
             <li><strong>Serious Illness:</strong> We understand that serious or long-term illness can interfere with attendance. In such cases, please speak directly with your teacher to discuss special arrangements.</li>
             <li><strong>Discontinuing Lessons:</strong> Should your circumstances change and you need to discontinue lessons, we kindly request <strong>4 weeks&apos; notice</strong> before the end of the term to allow us to adjust our schedules.</li>
-            <li><strong>Our Positive Environment:</strong> We are committed to a safe, positive, and respectful environment for all students, parents, and teachers. We do not tolerate disrespectful or aggressive behaviour and reserve the right to terminate lessons at any time. In the rare event of termination, any unused lesson credits will be refunded.</li>
+            <li><strong>Our Positive Environment:</strong> We are committed to a safe, positive, and respectful environment for all students, parents, and teachers. We do not tolerate disrespectful or aggressive behaviour and reserve the right to terminate lessons at any time. In the rare event of termination, any unused lessons will be refunded.</li>
             <li><strong>Communication:</strong> We encourage open communication! Please feel free to ask any questions you may have about lessons, policies, or your child&apos;s progress.</li>
           </ul>
 

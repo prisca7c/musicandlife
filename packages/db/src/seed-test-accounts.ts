@@ -3,6 +3,7 @@
  * Run with: pnpm --filter @music-life/db seed:test
  *
  * Accounts created:
+ *   admin@musiclife.test    /  Admin123!     (admin)
  *   teacher@musiclife.test  /  Teacher123!   (teacher — Sarah Mitchell)
  *   parent@musiclife.test   /  Parent123!    (guardian — Johnson Family)
  */
@@ -20,6 +21,8 @@ import {
 
 const db = createDb(process.env.DATABASE_URL!);
 
+const ADMIN_EMAIL   = 'admin@musiclife.test';
+const ADMIN_PASS    = 'Admin123!';
 const TEACHER_EMAIL = 'teacher@musiclife.test';
 const TEACHER_PASS  = 'Teacher123!';
 const PARENT_EMAIL  = 'parent@musiclife.test';
@@ -49,6 +52,20 @@ async function main() {
   });
   if (!org) { console.error('Org not found — run pnpm --filter @music-life/db seed first'); process.exit(1); }
   const orgId = org.id;
+
+  // ── Admin account ────────────────────────────────────────────────────────────
+  console.log('\nSetting up admin account…');
+  const adminUserId = await upsertUser(ADMIN_EMAIL, ADMIN_PASS);
+  const existingAM = await db.query.memberships.findFirst({
+    where: and(eq(memberships.userId, adminUserId), eq(memberships.organizationId, orgId)),
+  });
+  if (!existingAM) {
+    await db.insert(memberships).values({ userId: adminUserId, organizationId: orgId, baseRole: 'admin' });
+    console.log('  created admin membership');
+  } else if (existingAM.baseRole !== 'admin') {
+    await db.update(memberships).set({ baseRole: 'admin' }).where(eq(memberships.id, existingAM.id));
+    console.log('  updated membership to admin');
+  }
 
   // ── Teacher account ──────────────────────────────────────────────────────────
   console.log('\nSetting up teacher account…');
@@ -117,6 +134,7 @@ async function main() {
   }
 
   console.log('\n✓ Done!\n');
+  console.log('  Admin:    admin@musiclife.test    /  Admin123!');
   console.log('  Teacher:  teacher@musiclife.test  /  Teacher123!');
   console.log('  Guardian: parent@musiclife.test   /  Parent123!\n');
   process.exit(0);

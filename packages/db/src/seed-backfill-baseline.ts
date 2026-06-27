@@ -11,10 +11,8 @@ config({ path: join(__dirname, '../../../.env') });
 import { eq, isNull } from 'drizzle-orm';
 import {
   createDb, organizations, terms, rooms, enrollments, lessons, attendance,
-  lessonCredits, invoices, invoiceLineItems, payments, staffMembers,
+  lessonCredits, invoices, invoiceLineItems, payments,
 } from './index';
-
-function dateStr(d: Date) { return d.toISOString().split('T')[0]!; }
 
 const db = createDb(process.env.DATABASE_URL!);
 
@@ -48,7 +46,7 @@ async function main() {
   console.log(`Backfilling lessons for ${toBackfill.length} enrollments…`);
   const now = new Date();
   let lessonCount = 0, attendanceCount = 0;
-  const lessonsByEnrollment = new Map<string, { startsAt: Date; teacherId: string | null }[]>();
+  const lessonsByEnrollment = new Map<string, { id: string; startsAt: Date; status: string }[]>();
 
   for (const en of toBackfill) {
     const rule = en.scheduleRule as { weekday: string; startTime: string } | null;
@@ -68,7 +66,7 @@ async function main() {
       }).returning();
       lessonCount++;
       const arr = lessonsByEnrollment.get(en.id) ?? [];
-      arr.push({ startsAt, teacherId: en.teacherId ?? null });
+      arr.push({ id: lesson!.id, startsAt, status });
       lessonsByEnrollment.set(en.id, arr);
 
       if (status === 'completed') {
@@ -84,21 +82,20 @@ async function main() {
     ]);
   }
 
-  // One paid invoice per affected family, itemized per lesson, sorted earliest first
-  const allStaff = await db.query.staffMembers.findMany({ where: eq(staffMembers.organizationId, orgId) });
-  const teacherById = new Map(allStaff.map(t => [t.id, `${t.firstName} ${t.lastName}`]));
+  // One paid invoice per affected family, itemized per completed lesson, sorted earliest first
   const studentsForEnrollments = await Promise.all(
     toBackfill.map(en => db.query.students.findFirst({ where: (s, { eq }) => eq(s.id, en.studentId) })),
   );
-  const byFamily = new Map<string, { description: string; amount: number; date: Date }[]>();
+  const byFamily = new Map<string, { lessonId: string; description: string; amount: number; date: Date }[]>();
   toBackfill.forEach((en, i) => {
     const stu = studentsForEnrollments[i];
     if (!stu) return;
     const arr = byFamily.get(stu.familyId) ?? [];
     for (const lesson of lessonsByEnrollment.get(en.id) ?? []) {
-      const teacherName = lesson.teacherId ? teacherById.get(lesson.teacherId) ?? 'Unassigned' : 'Unassigned';
+      if (lesson.status !== 'completed') continue;
       arr.push({
-        description: `${dateStr(lesson.startsAt)} — ${stu.firstName} ${stu.lastName}, ${en.instrument} with ${teacherName}`,
+        lessonId: lesson.id,
+        description: '60 min lesson',
         amount: en.rate,
         date: lesson.startsAt,
       });
@@ -110,6 +107,7 @@ async function main() {
   const due = new Date(now.getTime() + 7 * 86400000).toISOString().split('T')[0]!;
   let n = 9000;
   for (const [familyId, items] of byFamily) {
+    if (items.length === 0) continue;
     items.sort((a, b) => a.date.getTime() - b.date.getTime());
     const total = items.reduce((s, i) => s + i.amount, 0);
     const [inv] = await db.insert(invoices).values({
@@ -117,7 +115,7 @@ async function main() {
       number: `INV-${n++}`, issuedOn: today, dueDate: due, status: 'paid', total,
     }).returning();
     await db.insert(invoiceLineItems).values(
-      items.map(i => ({ organizationId: orgId, invoiceId: inv!.id, description: i.description, amount: i.amount })),
+      items.map(i => ({ organizationId: orgId, invoiceId: inv!.id, lessonId: i.lessonId, description: i.description, amount: i.amount })),
     );
     await db.insert(payments).values({
       organizationId: orgId, familyId, invoiceId: inv!.id, method: 'bank_transfer', amount: total,

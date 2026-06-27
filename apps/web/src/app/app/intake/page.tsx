@@ -6,7 +6,7 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { ALL_INSTRUMENTS } from '@music-life/types';
-import { Plus, CircleCheck, CircleX } from 'lucide-react';
+import { Plus, CircleCheck, CircleX, Upload } from 'lucide-react';
 
 interface Registration {
   id: string; status: string; submittedAt: string; denyReason: string | null;
@@ -213,8 +213,132 @@ function AddLeadModal({ open, onClose, onCreated }: { open: boolean; onClose: ()
 const REG_STATUS: Record<string, string> = { pending: 'trial', approved: 'active', denied: 'withdrawn' };
 const LEAD_STATUS: Record<string, string> = { new: 'trial', contacted: 'default', converted: 'active', lost: 'withdrawn' };
 
+interface ImportRow { rowNumber: number; data: Record<string, string>; errors: string[]; }
+interface ImportPreview { rows: ImportRow[]; validCount: number; errorCount: number; }
+interface ImportResult { created: number; failures: { row: number; error: string }[]; }
+
+function ImportCsvPanel() {
+  const [fileName, setFileName] = useState('');
+  const [csv, setCsv] = useState('');
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name); setPreview(null); setResult(null); setError('');
+    const reader = new FileReader();
+    reader.onload = () => setCsv(String(reader.result ?? ''));
+    reader.readAsText(file);
+  }
+
+  async function runPreview() {
+    setLoading(true); setError('');
+    try {
+      const data = await apiFetch<ImportPreview>('/registrations/import/preview', { method: 'POST', token: tok(), body: JSON.stringify({ csv }) });
+      setPreview(data);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not parse CSV'); }
+    finally { setLoading(false); }
+  }
+
+  async function confirmImport() {
+    if (!preview) return;
+    const validRows = preview.rows.filter(r => r.errors.length === 0).map(r => r.data);
+    setLoading(true); setError('');
+    try {
+      const res = await apiFetch<ImportResult>('/registrations/import/commit', { method: 'POST', token: tok(), body: JSON.stringify({ rows: validRows }) });
+      setResult(res); setPreview(null); setCsv(''); setFileName('');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Import failed'); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+        <h2 className="font-bold text-sm mb-1" style={{ color: 'var(--txt)' }}>Import students from CSV</h2>
+        <p className="text-xs mb-4" style={{ color: 'var(--txt3)' }}>
+          Required columns: <code>studentFirstName</code>, <code>studentLastName</code>, <code>guardianFirstName</code>, <code>guardianLastName</code>.
+          Optional: <code>studentDob</code>, <code>studentEmail</code>, <code>guardianEmail</code>, <code>guardianPhone</code>, <code>address</code>, <code>familyName</code>, <code>instrument</code>, <code>lessonType</code>.
+          Each row creates its own family — no merging of guardians across rows.
+        </p>
+        {error && (
+          <div className="mb-4 text-sm rounded-xl px-4 py-3"
+            style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
+            {error}
+          </div>
+        )}
+        <div className="flex items-center gap-3">
+          <label className="ui-btn-ghost cursor-pointer">
+            <Upload size={14} /> {fileName || 'Choose CSV file…'}
+            <input type="file" accept=".csv,text/csv" onChange={handleFile} className="hidden" />
+          </label>
+          <button onClick={runPreview} disabled={!csv || loading} className="ui-btn-primary">
+            {loading ? 'Working…' : 'Preview'}
+          </button>
+        </div>
+      </div>
+
+      {result && (
+        <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+          <p className="text-sm font-bold mb-2" style={{ color: 'var(--sage-dk)' }}>
+            Imported {result.created} student{result.created !== 1 ? 's' : ''}.
+          </p>
+          {result.failures.length > 0 && (
+            <div className="text-sm" style={{ color: 'var(--coral)' }}>
+              {result.failures.length} row{result.failures.length !== 1 ? 's' : ''} failed:
+              <ul className="list-disc ml-5 mt-1">
+                {result.failures.map(f => <li key={f.row}>Row {f.row}: {f.error}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {preview && (
+        <div className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: 'var(--bd)' }}>
+          <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+            <p className="text-sm font-semibold" style={{ color: 'var(--txt)' }}>
+              {preview.validCount} valid · {preview.errorCount} with errors
+            </p>
+            <button onClick={confirmImport} disabled={preview.validCount === 0 || loading} className="ui-btn-primary text-xs px-3 py-1.5">
+              {loading ? 'Importing…' : `Confirm import (${preview.validCount})`}
+            </button>
+          </div>
+          <div className="overflow-x-auto max-h-96">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0" style={{ background: 'var(--surf)' }}>
+                <tr className="text-left">
+                  <th className="px-4 py-2 font-semibold" style={{ color: 'var(--txt3)' }}>Row</th>
+                  <th className="px-4 py-2 font-semibold" style={{ color: 'var(--txt3)' }}>Student</th>
+                  <th className="px-4 py-2 font-semibold" style={{ color: 'var(--txt3)' }}>Guardian</th>
+                  <th className="px-4 py-2 font-semibold" style={{ color: 'var(--txt3)' }}>Instrument</th>
+                  <th className="px-4 py-2 font-semibold" style={{ color: 'var(--txt3)' }}>Errors</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y" style={{ borderColor: 'var(--bd)' }}>
+                {preview.rows.map(r => (
+                  <tr key={r.rowNumber} style={r.errors.length > 0 ? { background: 'var(--coral-lt)' } : undefined}>
+                    <td className="px-4 py-2" style={{ color: 'var(--txt4)' }}>{r.rowNumber}</td>
+                    <td className="px-4 py-2 font-medium">{r.data.studentFirstName} {r.data.studentLastName}</td>
+                    <td className="px-4 py-2" style={{ color: 'var(--txt3)' }}>{r.data.guardianFirstName} {r.data.guardianLastName}</td>
+                    <td className="px-4 py-2 capitalize" style={{ color: 'var(--txt3)' }}>{r.data.instrument || '—'}</td>
+                    <td className="px-4 py-2 text-xs" style={{ color: 'var(--coral)' }}>{r.errors.join('; ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function IntakePage() {
-  const [tab, setTab] = useState<'registrations' | 'leads'>('registrations');
+  const [tab, setTab] = useState<'registrations' | 'leads' | 'import'>('registrations');
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [regFilter, setRegFilter] = useState('pending');
   const [selectedReg, setSelectedReg] = useState<Registration | null>(null);
@@ -262,14 +386,14 @@ export default function IntakePage() {
 
       {/* Tab bar */}
       <div className="flex gap-1 mb-5 border-b" style={{ borderColor: 'var(--bd)' }}>
-        {(['registrations', 'leads'] as const).map(t => (
+        {(['registrations', 'leads', 'import'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className="px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors"
             style={{
               borderColor: tab === t ? 'var(--sage)' : 'transparent',
               color: tab === t ? 'var(--sage)' : 'var(--txt3)',
             }}>
-            {t === 'registrations' ? 'Registrations' : 'Leads & Waitlist'}
+            {t === 'registrations' ? 'Registrations' : t === 'leads' ? 'Leads & Waitlist' : 'Import (CSV)'}
           </button>
         ))}
       </div>
@@ -385,6 +509,8 @@ export default function IntakePage() {
           </table>
         </div>
       )}
+
+      {tab === 'import' && <ImportCsvPanel />}
     </div>
   );
 }

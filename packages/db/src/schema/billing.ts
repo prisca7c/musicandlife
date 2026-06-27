@@ -4,6 +4,7 @@ import {
 import { organizations, users } from './auth';
 import { families, students, staffMembers, terms, enrollments } from './domain';
 import { lessons } from './scheduling';
+import { files } from './media';
 
 // ─── Invoices ─────────────────────────────────────────────────────────────────
 export const invoices = pgTable(
@@ -68,7 +69,7 @@ export const payments = pgTable(
     organizationId: uuid('organization_id').notNull().references(() => organizations.id),
     familyId: uuid('family_id').notNull().references(() => families.id),
     invoiceId: uuid('invoice_id').references(() => invoices.id),
-    method: text('method', { enum: ['bank_transfer', 'cash', 'card', 'gocardless', 'revolut', 'other'] }).notNull(),
+    method: text('method', { enum: ['bank_transfer', 'cash', 'card', 'other'] }).notNull(),
     amount: integer('amount').notNull(),
     providerRef: text('provider_ref'),
     idempotencyKey: text('idempotency_key').unique(),
@@ -122,6 +123,7 @@ export const expenses = pgTable(
     mileageKm: integer('mileage_km'),
     date: date('date').notNull(),
     description: text('description'),
+    receiptFileId: uuid('receipt_file_id').references(() => files.id),
     status: text('status', { enum: ['pending', 'approved', 'rejected'] }).notNull().default('pending'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

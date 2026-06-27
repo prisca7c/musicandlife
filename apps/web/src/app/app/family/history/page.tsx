@@ -17,7 +17,7 @@ interface Lesson {
 const STATUS_LABELS: Record<string, string> = {
   scheduled: 'Scheduled',
   completed: 'Attended',
-  cancelled_makeup: 'Makeup credit',
+  cancelled_makeup: 'Lesson earned',
   cancelled_no_makeup: 'Late cancel',
   cancelled_no_pay: 'No charge',
   cancelled_teacher: 'Teacher cancelled',

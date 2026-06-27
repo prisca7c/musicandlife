@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { Modal } from '@/components/modal';
-import { UsersRound, Search } from 'lucide-react';
+import { InvoicingSettingsFields, readInvoicingSettingsForm } from '@/components/invoicing-settings-fields';
+import { UsersRound, Search, Settings2 } from 'lucide-react';
 
 interface Family {
   id: string; name: string; contactName: string | null; email: string | null;
@@ -79,10 +80,52 @@ function AddFamilyModal({ open, onClose, onCreated }: { open: boolean; onClose: 
   );
 }
 
+function BulkInvoicingSettingsModal({ open, onClose, familyIds, onApplied }: {
+  open: boolean; onClose: () => void; familyIds: string[]; onApplied: () => void;
+}) {
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setSaving(true); setError('');
+    try {
+      await apiFetch('/families/bulk-invoicing-settings', {
+        method: 'PATCH', token: tok(),
+        body: JSON.stringify({ familyIds, settings: readInvoicingSettingsForm(new FormData(e.currentTarget)) }),
+      });
+      onApplied(); onClose();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Apply invoicing settings to ${familyIds.length} famil${familyIds.length !== 1 ? 'ies' : 'y'}`}>
+      {error && (
+        <div className="mb-4 text-sm rounded-xl px-4 py-3"
+          style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
+          {error}
+        </div>
+      )}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <InvoicingSettingsFields defaults={{}} />
+        <div className="flex gap-3 pt-1">
+          <button type="submit" disabled={saving} className="ui-btn-primary">
+            {saving ? 'Applying…' : 'Apply to selected'}
+          </button>
+          <button type="button" onClick={onClose} className="ui-btn-ghost">Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export default function FamiliesPage() {
   const [families, setFamilies] = useState<Family[]>([]);
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showBulkSettings, setShowBulkSettings] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   function load(q = search) {
@@ -92,16 +135,39 @@ export default function FamiliesPage() {
 
   useEffect(() => { load(); }, []);
 
+  function toggleSelected(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected(prev => prev.size === families.length ? new Set() : new Set(families.map(f => f.id)));
+  }
+
   return (
     <div>
       <AddFamilyModal open={showAdd} onClose={() => setShowAdd(false)} onCreated={() => load()} />
+      <BulkInvoicingSettingsModal
+        open={showBulkSettings} onClose={() => setShowBulkSettings(false)}
+        familyIds={[...selected]} onApplied={() => { setSelected(new Set()); load(); }}
+      />
       <PageHeader
         title="Families"
         subtitle={`${families.length} famil${families.length !== 1 ? 'ies' : 'y'}`}
         action={
-          <button onClick={() => setShowAdd(true)} className="ui-btn-primary">
-            <UsersRound size={15} /> Add family
-          </button>
+          <div className="flex items-center gap-2">
+            {selected.size > 0 && (
+              <button onClick={() => setShowBulkSettings(true)} className="ui-btn-ghost">
+                <Settings2 size={15} /> Apply invoicing settings ({selected.size})
+              </button>
+            )}
+            <button onClick={() => setShowAdd(true)} className="ui-btn-primary">
+              <UsersRound size={15} /> Add family
+            </button>
+          </div>
         }
       />
 
@@ -122,6 +188,9 @@ export default function FamiliesPage() {
         <table className="data-table">
           <thead>
             <tr>
+              <th>
+                <input type="checkbox" checked={selected.size > 0 && selected.size === families.length} onChange={toggleSelectAll} />
+              </th>
               <th>Family</th>
               <th>Contact</th>
               <th>Students</th>
@@ -131,12 +200,15 @@ export default function FamiliesPage() {
           </thead>
           <tbody>
             {families.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No families yet.
               </td></tr>
             )}
             {families.map(f => (
               <tr key={f.id}>
+                <td>
+                  <input type="checkbox" checked={selected.has(f.id)} onChange={() => toggleSelected(f.id)} />
+                </td>
                 <td>
                   <Link href={`/app/families/${f.id}`}
                     className="font-semibold hover:underline"

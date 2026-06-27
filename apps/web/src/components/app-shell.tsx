@@ -10,7 +10,7 @@ import {
   FileText, BarChart3, Settings,
   Briefcase, CreditCard, UserCheck, BookOpen,
   Clock, History, ChevronLeft, ChevronRight, ChevronDown,
-  LogOut, PanelLeftClose, PanelLeftOpen,
+  LogOut, PanelLeftClose, PanelLeftOpen, Megaphone,
 } from 'lucide-react';
 import type { BaseRole } from '@music-life/types';
 import { apiFetch } from '@/lib/api';
@@ -24,6 +24,7 @@ const NAV: NavItem[] = [
   { label: 'History',      href: '/app/family/history',    roles: ['guardian','student'],                                     icon: <History size={16} /> },
   { label: 'Calendar',     href: '/app/calendar',          roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <Calendar size={16} /> },
   { label: 'Attendance',   href: '/app/attendance',        roles: ['system_admin','admin','manager','teacher'],               icon: <ClipboardCheck size={16} /> },
+  { label: 'Notes',        href: '/app/notes',             roles: ['system_admin','admin','manager','teacher'],               icon: <FileText size={16} /> },
   { label: 'Students',     href: '/app/students',          roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <UserCheck size={16} /> },
   { label: 'Families',     href: '/app/families',          roles: ['system_admin','admin','manager','receptionist'],          icon: <Home size={16} /> },
   { label: 'Staff',        href: '/app/staff',             roles: ['system_admin','admin'],                                   icon: <Briefcase size={16} /> },
@@ -31,8 +32,9 @@ const NAV: NavItem[] = [
   { label: 'Billing',      href: '/app/billing',           roles: ['system_admin','admin','manager','receptionist','guardian'], icon: <CreditCard size={16} /> },
   { label: 'Intake',       href: '/app/intake',            roles: ['system_admin','admin','manager','receptionist'],          icon: <ClipboardCheck size={16} /> },
   { label: 'Messages',     href: '/app/messaging',         roles: ['system_admin','admin','manager','teacher','guardian'],    icon: <MessageSquare size={16} /> },
-  { label: 'Resources',    href: '/app/resources',         roles: ['system_admin','admin','manager','teacher','guardian'],    icon: <FileText size={16} /> },
+  { label: 'Resources',    href: '/app/resources',         roles: ['system_admin','admin','manager','teacher','guardian','student'], icon: <FileText size={16} /> },
   { label: 'Content',      href: '/app/content',           roles: ['system_admin','admin','manager','teacher'],               icon: <BookOpen size={16} /> },
+  { label: 'Studio News',  href: '/app/news',              roles: ['system_admin','admin'],                                   icon: <Megaphone size={16} /> },
   { label: 'Reports',      href: '/app/reports',           roles: ['system_admin','admin','manager'],                        icon: <BarChart3 size={16} /> },
   { label: 'Settings',     href: '/app/settings',          roles: ['system_admin','admin'],                                   icon: <Settings size={16} /> },
 ];
@@ -40,10 +42,10 @@ const NAV: NavItem[] = [
 // Group nav sections
 const GROUPS = [
   { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History'] },
-  { label: 'Studio',   items: ['Calendar','Attendance','Intake','Messages'] },
+  { label: 'Studio',   items: ['Calendar','Attendance','Notes','Intake','Messages'] },
   { label: 'People',   items: ['Students','Families','Staff','Payroll'] },
   { label: 'Finance',  items: ['Billing'] },
-  { label: 'Content',  items: ['Resources','Content'] },
+  { label: 'Content',  items: ['Resources','Content','Studio News'] },
   { label: 'Admin',    items: ['Reports','Settings'] },
 ];
 

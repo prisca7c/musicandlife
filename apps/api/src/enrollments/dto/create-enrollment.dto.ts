@@ -12,6 +12,10 @@ export class CreateEnrollmentDto {
   lessonType!: 'private' | 'group';
 
   @IsOptional()
+  @IsString()
+  groupName?: string;
+
+  @IsOptional()
   @IsUUID()
   teacherId?: string;
 

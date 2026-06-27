@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { eq, and, gte, lte, ne, isNull } from 'drizzle-orm';
 import { lessons, rescheduleRequests, lessonCredits, availability, blockedTime, students, staffMembers, rooms } from '@music-life/db';
 import { DbService } from '../db/db.service';
@@ -6,13 +6,26 @@ import type { CreateLessonDto } from './dto/create-lesson.dto';
 import type { UpdateLessonDto } from './dto/update-lesson.dto';
 import type { CancelLessonDto } from './dto/cancel-lesson.dto';
 import type { CreateRescheduleRequestDto } from './dto/reschedule-request.dto';
+import type { BaseRole } from '@music-life/types';
+
+// Resolves to the caller's own staffId when their role is exactly 'teacher' (so service
+// methods can scope/ownership-check); higher roles (receptionist+) act unrestricted.
+export interface Actor { role: BaseRole; userId: string }
 
 @Injectable()
 export class SchedulingService {
   constructor(private readonly db: DbService) {}
 
+  private async resolveStaffId(orgId: string, userId: string): Promise<string | null> {
+    const staff = await this.db.db.query.staffMembers.findFirst({
+      where: and(eq(staffMembers.userId, userId), eq(staffMembers.organizationId, orgId)),
+      columns: { id: true },
+    });
+    return staff?.id ?? null;
+  }
+
   // ─── Lessons ──────────────────────────────────────────────────────────────
-  async getLessons(orgId: string, params: { weekStart?: string; teacherId?: string; studentId?: string }) {
+  async getLessons(orgId: string, params: { weekStart?: string; teacherId?: string; studentId?: string }, actor?: Actor) {
     const base = eq(lessons.organizationId, orgId);
     const rows = await this.db.db.query.lessons.findMany({
       where: params.weekStart
@@ -25,17 +38,27 @@ export class SchedulingService {
         teacher: { columns: { id: true, firstName: true, lastName: true } },
         room: { columns: { id: true, name: true } },
         attendance: { columns: { status: true } },
-        enrollment: { columns: { instrument: true, lessonType: true } },
+        enrollment: { columns: { instrument: true, lessonType: true, groupName: true } },
       },
       orderBy: (l, { asc }) => [asc(l.startsAt)],
     });
+
+    // Teachers only ever see their own lessons, regardless of the teacherId param —
+    // it must not be possible to view another teacher's schedule by passing their id.
+    // studentId still narrows further, e.g. "this student's lessons that I teach".
+    if (actor?.role === 'teacher') {
+      const staffId = await this.resolveStaffId(orgId, actor.userId);
+      let scoped = rows.filter(r => r.teacherId === staffId);
+      if (params.studentId) scoped = scoped.filter(r => r.studentId === params.studentId);
+      return scoped;
+    }
 
     if (params.teacherId) return rows.filter(r => r.teacherId === params.teacherId);
     if (params.studentId) return rows.filter(r => r.studentId === params.studentId);
     return rows;
   }
 
-  async getLesson(orgId: string, id: string) {
+  async getLesson(orgId: string, id: string, actor?: Actor) {
     const lesson = await this.db.db.query.lessons.findFirst({
       where: and(eq(lessons.id, id), eq(lessons.organizationId, orgId)),
       with: {
@@ -43,10 +66,14 @@ export class SchedulingService {
         teacher: { columns: { id: true, firstName: true, lastName: true } },
         room: true,
         attendance: true,
-        enrollment: { columns: { id: true, instrument: true, lessonType: true } },
+        enrollment: { columns: { id: true, instrument: true, lessonType: true, groupName: true } },
       },
     });
     if (!lesson) throw new NotFoundException('Lesson not found');
+    if (actor?.role === 'teacher') {
+      const staffId = await this.resolveStaffId(orgId, actor.userId);
+      if (lesson.teacherId !== staffId) throw new NotFoundException('Lesson not found');
+    }
     return lesson;
   }
 
@@ -80,8 +107,16 @@ export class SchedulingService {
     return updated!;
   }
 
-  async cancelLesson(orgId: string, id: string, dto: CancelLessonDto, actorUserId: string) {
+  // Teachers may only act on their own lessons; receptionist+ may act on any lesson in the org.
+  private async assertOwnsLesson(orgId: string, teacherId: string | null, actor?: Actor) {
+    if (actor?.role !== 'teacher') return;
+    const staffId = await this.resolveStaffId(orgId, actor.userId);
+    if (!staffId || teacherId !== staffId) throw new ForbiddenException('Not your lesson');
+  }
+
+  async cancelLesson(orgId: string, id: string, dto: CancelLessonDto, actorUserId: string, actor?: Actor) {
     const lesson = await this.getLesson(orgId, id);
+    await this.assertOwnsLesson(orgId, lesson.teacherId, actor);
     if (lesson.status !== 'scheduled') throw new BadRequestException('Lesson is not scheduled');
 
     const now = new Date();
@@ -93,8 +128,9 @@ export class SchedulingService {
     return { id, status: dto.reason };
   }
 
-  async directReschedule(orgId: string, id: string, newStartsAt: string, newRoomId?: string) {
+  async directReschedule(orgId: string, id: string, newStartsAt: string, newRoomId?: string, actor?: Actor) {
     const lesson = await this.getLesson(orgId, id);
+    await this.assertOwnsLesson(orgId, lesson.teacherId, actor);
     await this.checkConflicts(orgId, newStartsAt, lesson.duration, lesson.teacherId ?? undefined, newRoomId ?? lesson.roomId ?? undefined, id);
 
     const [updated] = await this.db.db

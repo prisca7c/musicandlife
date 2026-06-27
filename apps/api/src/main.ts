@@ -14,7 +14,6 @@ import { RequestIdInterceptor } from './common/interceptors/request-id.intercept
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'verbose'],
-    rawBody: true, // required for GoCardless/Revolut HMAC signature verification
   });
 
   app.use(cookieParser(process.env.COOKIE_SECRET));

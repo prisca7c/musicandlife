@@ -22,4 +22,8 @@ export class CreateExpenseDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsUUID()
+  receiptFileId?: string;
 }

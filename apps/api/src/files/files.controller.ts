@@ -12,7 +12,7 @@ export class FilesController {
   @Post('sign-upload')
   signUpload(
     @CurrentUser() user: RequestUser,
-    @Body() body: { mime: string; size: number; originalName?: string },
+    @Body() body: { mime: string; size: number; originalName?: string; expiring?: boolean },
   ) {
     return this.files.signUpload({
       orgId: user.orgId,
@@ -20,6 +20,7 @@ export class FilesController {
       mime: body.mime,
       size: body.size,
       originalName: body.originalName,
+      expiring: body.expiring,
     });
   }
 

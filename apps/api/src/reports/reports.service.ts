@@ -1,11 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { eq, and, gte, lte, count, sum, inArray } from 'drizzle-orm';
+import { eq, and, gte, lte, count, sum, inArray, sql } from 'drizzle-orm';
 import {
   students, staffMembers, families, lessons, attendance,
   invoices, ledgerEntries, enrollments, terms, lessonCredits,
   payrollRuns, payrollItems, organizations,
 } from '@music-life/db';
 import { DbService } from '../db/db.service';
+import { proratedAmount } from '../billing/billing.service';
 
 @Injectable()
 export class ReportsService {
@@ -183,6 +184,10 @@ export class ReportsService {
   }
 
   async getRevenueReport(orgId: string, from: string, to: string) {
+    const org = await this.db.db.query.organizations.findFirst({ where: eq(organizations.id, orgId) });
+    const accountingMode: 'cash' | 'accrual' =
+      (org?.settings as Record<string, unknown> | null)?.accountingMode === 'accrual' ? 'accrual' : 'cash';
+
     const entries = await this.db.db.select({
       type: ledgerEntries.type,
       total: sum(ledgerEntries.amount),
@@ -195,7 +200,32 @@ export class ReportsService {
       ))
       .groupBy(ledgerEntries.type);
 
-    return { from, to, byType: entries };
+    // Headline figure: cash mode = money actually received (payments); accrual = revenue earned (charges).
+    const headlineType = accountingMode === 'cash' ? 'payment' : 'charge';
+    const total = Number(entries.find(e => e.type === headlineType)?.total ?? 0);
+
+    return { from, to, accountingMode, total, byType: entries };
+  }
+
+  async getRetentionReport(orgId: string) {
+    const rows = await this.db.db.select({
+      month: sql<string>`to_char(date_trunc('month', ${enrollments.createdAt}), 'YYYY-MM')`,
+      status: students.status,
+      count: count(),
+    })
+      .from(enrollments)
+      .innerJoin(students, eq(students.id, enrollments.studentId))
+      .where(and(eq(enrollments.organizationId, orgId), inArray(students.status, ['active', 'withdrawn'])))
+      .groupBy(sql`date_trunc('month', ${enrollments.createdAt})`, students.status)
+      .orderBy(sql`date_trunc('month', ${enrollments.createdAt})`);
+
+    const byMonth = new Map<string, { month: string; active: number; withdrawn: number }>();
+    for (const r of rows) {
+      const entry = byMonth.get(r.month) ?? { month: r.month, active: 0, withdrawn: 0 };
+      if (r.status === 'active' || r.status === 'withdrawn') entry[r.status] = r.count;
+      byMonth.set(r.month, entry);
+    }
+    return { byMonth: [...byMonth.values()] };
   }
 
   // ─── PDF data ─────────────────────────────────────────────────────────────
@@ -218,7 +248,7 @@ export class ReportsService {
         lte(lessons.startsAt, new Date(to)),
       ),
       with: {
-        enrollment: { columns: { instrument: true, rate: true } },
+        enrollment: { columns: { instrument: true, rate: true, defaultDuration: true } },
         attendance: { columns: { status: true } },
       },
       orderBy: (l, { asc }) => [asc(l.startsAt)],
@@ -230,7 +260,7 @@ export class ReportsService {
         id: l.id,
         date: l.startsAt.toLocaleDateString('en-GB'),
         description: `${l.isTrialLesson ? 'Trial: ' : ''}${l.enrollment?.instrument ?? 'Lesson'} — ${l.duration} min${l.status === 'cancelled_no_makeup' ? ' (late cancellation)' : ''}`,
-        amount: l.enrollment?.rate ?? 0,
+        amount: proratedAmount(l.enrollment?.rate, l.enrollment?.defaultDuration, l.duration),
         status: l.status,
         attended: l.status === 'completed',
       }));

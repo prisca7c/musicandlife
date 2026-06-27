@@ -18,6 +18,8 @@ export abstract class FileStoragePort {
     size: number;
     originalName?: string;
     tier?: 'active' | 'archive';
+    /** Student-related files (recordings, attachments) get auto-deleted after 30 days. Studio resources/logos do not. */
+    expiring?: boolean;
   }): Promise<SignedUploadResult>;
 
   /** Generate a pre-signed URL for GET download */

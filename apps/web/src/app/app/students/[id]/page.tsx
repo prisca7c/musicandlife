@@ -24,6 +24,10 @@ interface StudentDetail {
 }
 interface StaffMember { id: string; firstName: string; lastName: string; }
 interface Term { id: string; name: string; status: string; }
+interface LessonNote {
+  id: string; body: string; visibility: 'internal' | 'family'; createdAt: string;
+  author: { id: string; email: string } | null;
+}
 
 function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boolean; onClose: () => void; studentId: string; onCreated: () => void }) {
   const [staff, setStaff] = useState<StaffMember[]>([]);
@@ -177,6 +181,86 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
   );
 }
 
+function LessonNotes({ studentId }: { studentId: string }) {
+  const [notes, setNotes] = useState<LessonNote[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [familyNote, setFamilyNote] = useState('');
+  const [privateNote, setPrivateNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  function load() {
+    apiFetch<LessonNote[]>(`/notes?studentId=${studentId}`, { token: tok() }).then(setNotes).catch(() => {});
+  }
+
+  useEffect(() => { load(); }, [studentId]);
+
+  async function handleSave() {
+    if (!familyNote.trim() && !privateNote.trim()) return;
+    setSaving(true);
+    try {
+      const t = tok();
+      if (familyNote.trim()) {
+        await apiFetch('/notes', { method: 'POST', token: t, body: JSON.stringify({ studentId, body: familyNote.trim(), visibility: 'family' }) });
+      }
+      if (privateNote.trim()) {
+        await apiFetch('/notes', { method: 'POST', token: t, body: JSON.stringify({ studentId, body: privateNote.trim(), visibility: 'internal' }) });
+      }
+      setFamilyNote(''); setPrivateNote(''); setShowAdd(false);
+      load();
+    } catch (err) { console.error(err); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-bold text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Lesson notes</h2>
+        <button onClick={() => setShowAdd(v => !v)} className="ui-btn-ghost text-xs px-3 py-1.5">
+          {showAdd ? 'Cancel' : '+ Add note'}
+        </button>
+      </div>
+
+      {showAdd && (
+        <div className="space-y-3 mb-4 pb-4 border-b" style={{ borderColor: 'var(--bd)' }}>
+          <div>
+            <label className="ui-label">Family note <span style={{ color: 'var(--txt4)' }}>(visible to family)</span></label>
+            <textarea value={familyNote} onChange={e => setFamilyNote(e.target.value)} rows={2}
+              className="ui-input w-full" placeholder="Progress, practice tips, what to work on next…" />
+          </div>
+          <div>
+            <label className="ui-label">Private note <span style={{ color: 'var(--txt4)' }}>(staff only)</span></label>
+            <textarea value={privateNote} onChange={e => setPrivateNote(e.target.value)} rows={2}
+              className="ui-input w-full" placeholder="Internal observations, not shown to family…" />
+          </div>
+          <button onClick={handleSave} disabled={saving} className="ui-btn-primary text-xs px-3 py-1.5">
+            {saving ? 'Saving…' : 'Save note(s)'}
+          </button>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {notes.length === 0 && !showAdd && (
+          <p className="text-sm text-center py-2" style={{ color: 'var(--txt4)' }}>No lesson notes yet.</p>
+        )}
+        {notes.map(n => (
+          <div key={n.id} className="flex items-start gap-2">
+            <span className={`shrink-0 mt-0.5 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${n.visibility === 'family' ? 'bg-[var(--sage-lt)] text-[var(--sage-dk)]' : 'bg-[var(--surf)] text-[var(--txt3)]'}`}>
+              {n.visibility === 'family' ? 'Family' : 'Internal'}
+            </span>
+            <div>
+              <p className="text-sm whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--txt2)' }}>{n.body}</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--txt4)' }}>
+                {new Date(n.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function StudentDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -246,10 +330,11 @@ export default function StudentDetailPage() {
           )}
           {student.notes && (
             <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
-              <h2 className="font-bold mb-3 text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Notes</h2>
+              <h2 className="font-bold mb-3 text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Profile notes</h2>
               <p className="text-sm whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--txt2)' }}>{student.notes}</p>
             </div>
           )}
+          <LessonNotes studentId={id} />
         </div>
 
         <div className="lg:col-span-2">

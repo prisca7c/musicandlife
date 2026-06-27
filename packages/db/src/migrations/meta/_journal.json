@@ -64,6 +64,20 @@
       "when": 1749600000000,
       "tag": "0008_lesson_credits_attendance",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1782192338573,
+      "tag": "0009_add_enrollment_group_name",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782192338574,
+      "tag": "0010_mms_parity_phase1",
+      "breakpoints": true
     }
   ]
 }

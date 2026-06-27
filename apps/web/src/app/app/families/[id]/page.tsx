@@ -8,13 +8,122 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { BackButton } from '@/components/back-button';
+import { InvoicingSettingsFields, readInvoicingSettingsForm } from '@/components/invoicing-settings-fields';
 
 interface FamilyDetail {
   id: string; name: string; contactName: string | null; address: string | null;
   phone: string | null; email: string | null; autoInvoice: boolean;
   invoiceMode: string; balanceCached: number;
+  billingStartDate: string | null; billingMode: 'prepaid' | 'postpaid';
+  invoiceDateOffsetDays: number; dueDateOffsetDays: number;
+  invoiceFormat: 'condensed' | 'normal' | 'expanded'; includePreviousBalance: boolean;
+  autoEmailInvoice: boolean; invoiceFooterNote: string | null;
+  resourceAccessPaidUntil: string | null;
   students: { id: string; firstName: string; lastName: string; status: string }[];
   guardians: { id: string; relationship: string; user: { id: string; email: string } }[];
+}
+
+// Resource-access subscription — separate from lesson billing. Inline date editor.
+function ResourceAccessCard({ family, onSaved }: { family: FamilyDetail; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [date, setDate] = useState(family.resourceAccessPaidUntil ?? '');
+  const [saving, setSaving] = useState(false);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  const today = new Date().toISOString().split('T')[0]!;
+  const active = !!family.resourceAccessPaidUntil && family.resourceAccessPaidUntil >= today;
+
+  async function save() {
+    setSaving(true);
+    try {
+      await apiFetch(`/families/${family.id}`, {
+        method: 'PATCH', token: tok(),
+        body: JSON.stringify({ resourceAccessPaidUntil: date || null }),
+      });
+      onSaved(); setEditing(false);
+    } catch (err) { console.error(err); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-bold text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Resource access</h2>
+        {!editing && (
+          <button onClick={() => setEditing(true)} className="text-xs font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}>
+            Edit
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <div className="space-y-3">
+          <div>
+            <label className="ui-label">Paid until</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="ui-input" />
+          </div>
+          <div className="flex gap-2">
+            <button onClick={save} disabled={saving} className="ui-btn-primary text-xs px-3 py-1.5">
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button onClick={() => { setEditing(false); setDate(family.resourceAccessPaidUntil ?? ''); }} className="ui-btn-ghost text-xs px-3 py-1.5">
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <dl className="space-y-3 text-sm">
+          <div className="flex justify-between gap-3">
+            <dt style={{ color: 'var(--txt3)' }}>Status</dt>
+            <dd className="font-medium" style={{ color: active ? 'var(--sage-dk)' : 'var(--coral)' }}>
+              {active ? 'Active' : 'Inactive'}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt style={{ color: 'var(--txt3)' }}>Paid until</dt>
+            <dd className="font-medium">{family.resourceAccessPaidUntil ?? 'Not set'}</dd>
+          </div>
+        </dl>
+      )}
+    </div>
+  );
+}
+
+function AutoInvoicingSettingsModal({ open, onClose, family, onSaved }: {
+  open: boolean; onClose: () => void; family: FamilyDetail; onSaved: () => void;
+}) {
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setSaving(true); setError('');
+    try {
+      await apiFetch(`/families/${family.id}`, {
+        method: 'PATCH', token: tok(), body: JSON.stringify(readInvoicingSettingsForm(new FormData(e.currentTarget))),
+      });
+      onSaved(); onClose();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={`Auto-invoicing settings — ${family.name}`}>
+      {error && (
+        <div className="mb-4 text-sm rounded-xl px-4 py-3"
+          style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
+          {error}
+        </div>
+      )}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <InvoicingSettingsFields defaults={family} />
+        <div className="flex gap-3 pt-1">
+          <button type="submit" disabled={saving} className="ui-btn-primary">
+            {saving ? 'Saving…' : 'Save settings'}
+          </button>
+          <button type="button" onClick={onClose} className="ui-btn-ghost">Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  );
 }
 
 // Add student — family pre-filled, no need to select it
@@ -168,6 +277,7 @@ export default function FamilyDetailPage() {
   const [invoices, setInvoices] = useState<FamilyInvoice[]>([]);
   const [showAddStudent, setShowAddStudent] = useState(false);
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
+  const [showInvoicingSettings, setShowInvoicingSettings] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   function load() {
@@ -184,6 +294,8 @@ export default function FamilyDetailPage() {
         familyId={family.id} familyName={family.name} onCreated={load} />}
       {family && <CreateInvoiceModal open={showCreateInvoice} onClose={() => setShowCreateInvoice(false)}
         familyId={family.id} familyName={family.name} invoiceMode={family.invoiceMode} onCreated={load} />}
+      {family && <AutoInvoicingSettingsModal open={showInvoicingSettings} onClose={() => setShowInvoicingSettings(false)}
+        family={family} onSaved={load} />}
 
       <div className="mb-5">
         <BackButton label="Families" fallbackHref="/app/families" />
@@ -229,7 +341,12 @@ export default function FamilyDetailPage() {
             </dl>
           </div>
           <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
-            <h2 className="font-bold mb-4 text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Billing</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-bold text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Billing</h2>
+              <button onClick={() => setShowInvoicingSettings(true)} className="text-xs font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}>
+                Edit
+              </button>
+            </div>
             <dl className="space-y-3 text-sm">
               <div className="flex justify-between gap-3">
                 <dt style={{ color: 'var(--txt3)' }}>Invoice mode</dt>
@@ -239,8 +356,17 @@ export default function FamilyDetailPage() {
                 <dt style={{ color: 'var(--txt3)' }}>Auto-invoice</dt>
                 <dd className="font-medium">{family.autoInvoice ? 'Yes' : 'No'}</dd>
               </div>
+              <div className="flex justify-between gap-3">
+                <dt style={{ color: 'var(--txt3)' }}>Billing mode</dt>
+                <dd className="font-medium capitalize">{family.billingMode}</dd>
+              </div>
+              <div className="flex justify-between gap-3">
+                <dt style={{ color: 'var(--txt3)' }}>Auto-email invoice</dt>
+                <dd className="font-medium">{family.autoEmailInvoice ? 'Yes' : 'No'}</dd>
+              </div>
             </dl>
           </div>
+          <ResourceAccessCard family={family} onSaved={load} />
           {family.guardians.length > 0 && (
             <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
               <h2 className="font-bold mb-4 text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Guardians</h2>

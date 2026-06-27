@@ -5,10 +5,14 @@ import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
-import { Building2, Receipt, Calendar, Plus, Check, Bell } from 'lucide-react';
+import { Building2, Receipt, Calendar, Plus, Check, Bell, Mail } from 'lucide-react';
 
 interface NotificationRule {
   id: string; triggerEvent: string; channels: string[]; templateId: string; enabled: boolean;
+}
+
+interface EmailTemplate {
+  templateId: string; subject: string; html: string; isOverridden: boolean;
 }
 
 const EVENT_LABELS: Record<string, string> = {
@@ -29,6 +33,7 @@ interface OrgSettings {
     address?: string; contactEmail?: string; contactPhone?: string;
     bankSortCode?: string; bankAccountNumber?: string; bankAccountName?: string;
     invoiceDueDays?: number; invoiceNotes?: string;
+    accountingMode?: 'cash' | 'accrual';
   };
 }
 interface Term { id: string; name: string; startsOn: string; endsOn: string; weekCount: number; status: string; }
@@ -101,6 +106,9 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState<string | null>(null);
   const [rules, setRules] = useState<NotificationRule[]>([]);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
+  const [editingTemplate, setEditingTemplate] = useState<string | null>(null);
+  const [templateSaving, setTemplateSaving] = useState<string | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   useEffect(() => {
@@ -108,7 +116,29 @@ export default function SettingsPage() {
     apiFetch<OrgSettings>('/organizations/me', { token: t }).then(setOrg).catch(() => {});
     apiFetch<Term[]>('/terms', { token: t }).then(setTerms).catch(() => {});
     apiFetch<NotificationRule[]>('/notification-rules', { token: t }).then(setRules).catch(() => {});
+    apiFetch<EmailTemplate[]>('/email-templates', { token: t }).then(setEmailTemplates).catch(() => {});
   }, []);
+
+  async function saveTemplate(templateId: string, subject: string, html: string) {
+    setTemplateSaving(templateId);
+    try {
+      await apiFetch(`/email-templates/${templateId}`, { method: 'PUT', token: tok(), body: JSON.stringify({ subject, html }) });
+      const updated = await apiFetch<EmailTemplate[]>('/email-templates', { token: tok() });
+      setEmailTemplates(updated);
+      setEditingTemplate(null);
+    } catch (e) { console.error(e); }
+    finally { setTemplateSaving(null); }
+  }
+
+  async function revertTemplate(templateId: string) {
+    setTemplateSaving(templateId);
+    try {
+      await apiFetch(`/email-templates/${templateId}`, { method: 'DELETE', token: tok() });
+      const updated = await apiFetch<EmailTemplate[]>('/email-templates', { token: tok() });
+      setEmailTemplates(updated);
+    } catch (e) { console.error(e); }
+    finally { setTemplateSaving(null); }
+  }
 
   async function saveSection(section: string, data: Record<string, string | number>) {
     setSaving(section);
@@ -191,11 +221,20 @@ export default function SettingsPage() {
               bankSortCode: f.get('bankSortCode'),
               bankAccountNumber: f.get('bankAccountNumber'),
               invoiceNotes: f.get('invoiceNotes'),
+              accountingMode: f.get('accountingMode'),
             }),
           });
         }} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div><label className={labelCls}>Payment due (days)</label>
             <input name="invoiceDueDays" type="number" min="1" defaultValue={s.invoiceDueDays ?? 7} className={inputCls} /></div>
+          <div><label className={labelCls}>
+              Accounting mode{' '}
+              <span className="font-normal text-[11px]" style={{ color: 'var(--txt4)' }}>(revenue report basis)</span>
+            </label>
+            <select name="accountingMode" defaultValue={s.accountingMode ?? 'cash'} className={inputCls}>
+              <option value="cash">Cash — count payments received</option>
+              <option value="accrual">Accrual — count charges billed</option>
+            </select></div>
           <div><label className={labelCls}>Account name</label>
             <input name="bankAccountName" defaultValue={s.bankAccountName ?? ''} placeholder="Music & Life" className={inputCls} /></div>
           <div><label className={labelCls}>Sort code</label>
@@ -244,6 +283,58 @@ export default function SettingsPage() {
           </table>
         </div>
         <p className="mt-3 text-xs" style={{ color: 'var(--txt4)' }}>Lesson reminders run hourly via a background job. SMS requires a provider configured in settings.</p>
+      </Section>
+
+      {/* Email templates */}
+      <Section title="Email templates" icon={<Mail size={18} />}>
+        <div className="space-y-3">
+          {emailTemplates.length === 0 && <p className="text-sm py-2 text-center" style={{ color: 'var(--txt4)' }}>Loading…</p>}
+          {emailTemplates.map(t => (
+            <div key={t.templateId} className="border border-[var(--bd)] rounded-xl p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-sm" style={{ color: 'var(--txt)' }}>{t.templateId}</p>
+                  {t.isOverridden && <span className="text-[11px] font-semibold" style={{ color: 'var(--sage)' }}>Customized</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                  {t.isOverridden && (
+                    <button onClick={() => revertTemplate(t.templateId)} disabled={templateSaving === t.templateId}
+                      className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-[var(--bd2)] text-[var(--txt3)] hover:bg-[var(--surf)] disabled:opacity-50">
+                      Revert to default
+                    </button>
+                  )}
+                  <button onClick={() => setEditingTemplate(editingTemplate === t.templateId ? null : t.templateId)}
+                    className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-[var(--sage-md)] text-[var(--sage)] hover:bg-[var(--sage-lt)]">
+                    {editingTemplate === t.templateId ? 'Close' : 'Edit'}
+                  </button>
+                </div>
+              </div>
+              {editingTemplate === t.templateId && (
+                <form
+                  className="mt-3 space-y-3"
+                  onSubmit={e => {
+                    e.preventDefault();
+                    const f = new FormData(e.currentTarget);
+                    saveTemplate(t.templateId, f.get('subject') as string, f.get('html') as string);
+                  }}
+                >
+                  <div>
+                    <label className={labelCls}>Subject</label>
+                    <input name="subject" defaultValue={t.subject} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>HTML body <span className="font-normal text-[11px]" style={{ color: 'var(--txt4)' }}>(use {'{{body}}'} for the event-specific message)</span></label>
+                    <textarea name="html" rows={4} defaultValue={t.html} className={`${inputCls} resize-y font-mono text-xs`} />
+                  </div>
+                  <button type="submit" disabled={templateSaving === t.templateId}
+                    className="bg-[var(--sage)] text-white rounded-xl px-4 py-2 text-sm font-bold hover:bg-[var(--sage-dk)] disabled:opacity-50">
+                    {templateSaving === t.templateId ? 'Saving…' : 'Save template'}
+                  </button>
+                </form>
+              )}
+            </div>
+          ))}
+        </div>
       </Section>
 
       {/* Terms */}

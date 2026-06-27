@@ -6,10 +6,13 @@ import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
+import { linkify } from '@/lib/linkify';
 import {
   Calendar, Clock, BookOpen, AlertCircle,
-  Plus, X, Check,
+  Plus, X, Check, Megaphone,
 } from 'lucide-react';
+
+interface NewsPost { id: string; title: string; body: string; publishedAt: string; }
 
 interface DashboardData {
   nextLesson: {
@@ -28,6 +31,7 @@ interface DashboardData {
 
 export default function FamilyDashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [news, setNews] = useState<NewsPost[]>([]);
   const [cancelModal, setCancelModal] = useState<{ lessonId: string; hoursUntil: number } | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
@@ -35,6 +39,8 @@ export default function FamilyDashboardPage() {
   useEffect(() => {
     apiFetch<DashboardData>('/family/dashboard', { token: tok() })
       .then(setData).catch(() => {});
+    apiFetch<NewsPost[]>('/news', { token: tok() })
+      .then(rows => setNews(rows.slice(0, 3))).catch(() => {});
   }, []);
 
   async function cancelLesson(choice: 'absent_makeup' | 'absent_no_pay') {
@@ -143,7 +149,7 @@ export default function FamilyDashboardPage() {
           )}
         </div>
 
-        {/* ── Students / lesson credits ── */}
+        {/* ── Students / lessons remaining ── */}
         <div className="lg:col-span-2 bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
           <p className="text-xs font-bold uppercase tracking-widest mb-4" style={{ color: 'var(--txt3)' }}>Students</p>
           <div className="space-y-3">
@@ -167,6 +173,23 @@ export default function FamilyDashboardPage() {
             )}
           </div>
         </div>
+
+        {/* ── Studio News ── */}
+        {news.length > 0 && (
+          <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+            <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--txt3)' }}>
+              <Megaphone size={12} className="inline mr-1" /> Studio News
+            </p>
+            <div className="space-y-3">
+              {news.map(n => (
+                <div key={n.id}>
+                  <p className="text-sm font-bold" style={{ color: 'var(--txt)' }}>{n.title}</p>
+                  <p className="text-sm leading-relaxed line-clamp-3" style={{ color: 'var(--txt3)' }}>{linkify(n.body)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── Last note ── */}
         {lastNote && (
@@ -198,7 +221,7 @@ export default function FamilyDashboardPage() {
                 <div>
                   <p className="font-bold text-sm text-[var(--sage-dk)]">Get a makeup lesson</p>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--txt3)' }}>
-                    Your lesson fee is still charged, but you receive a credit to rebook a free makeup lesson.
+                    Your lesson fee is still charged, but you receive a lesson you can book again, free of charge.
                   </p>
                 </div>
               </button>
@@ -218,7 +241,7 @@ export default function FamilyDashboardPage() {
           ) : (
             <>
               <p className="text-sm" style={{ color: 'var(--txt3)' }}>
-                This lesson is within 24 hours. Cancelling now will still charge the lesson fee — no makeup credit is given.
+                This lesson is within 24 hours. Cancelling now will still charge the lesson fee — no extra lesson is given.
               </p>
               <button
                 onClick={() => cancelLesson('absent_no_pay')}

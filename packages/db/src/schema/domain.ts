@@ -59,6 +59,17 @@ export const families = pgTable(
       .notNull()
       .default('monthly_statement'),
     balanceCached: integer('balance_cached').notNull().default(0),
+    // ─── Auto-invoicing settings ──────────────────────────────────────────────
+    billingStartDate: date('billing_start_date'),
+    billingMode: text('billing_mode', { enum: ['prepaid', 'postpaid'] }).notNull().default('postpaid'),
+    invoiceDateOffsetDays: integer('invoice_date_offset_days').notNull().default(0),
+    dueDateOffsetDays: integer('due_date_offset_days').notNull().default(7),
+    invoiceFormat: text('invoice_format', { enum: ['condensed', 'normal', 'expanded'] }).notNull().default('normal'),
+    includePreviousBalance: boolean('include_previous_balance').notNull().default(true),
+    autoEmailInvoice: boolean('auto_email_invoice').notNull().default(false),
+    invoiceFooterNote: text('invoice_footer_note'),
+    // ─── Resource-access subscription (separate from lesson billing) ─────────
+    resourceAccessPaidUntil: date('resource_access_paid_until'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -174,8 +185,12 @@ export const enrollments = pgTable(
     lessonType: text('lesson_type', { enum: ['private', 'group'] })
       .notNull()
       .default('private'),
+    // Identifies which specific group session this is (e.g. "Tuesday 4pm Ensemble") — only set when lessonType = 'group'
+    groupName: text('group_name'),
     teacherId: uuid('teacher_id').references(() => staffMembers.id),
     rate: integer('rate').notNull().default(0),
+    // Duration (minutes) that `rate` corresponds to — lessons of a different length are prorated against this.
+    defaultDuration: integer('default_duration').notNull().default(60),
     scheduleRule: jsonb('schedule_rule'),
     autoRenew: boolean('auto_renew').notNull().default(true),
     status: text('status', { enum: ['trial', 'active', 'paused', 'withdrawn'] })

@@ -1,8 +1,10 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
-import { attendance, lessons, enrollments, families, ledgerEntries, lessonCredits } from '@music-life/db';
+import { attendance, lessons, enrollments, families, ledgerEntries, lessonCredits, staffMembers } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { MarkAttendanceDto } from './dto/mark-attendance.dto';
+import { proratedAmount } from '../billing/billing.service';
+import type { Actor } from '../scheduling/scheduling.service';
 
 // Maps attendance status → lesson table status
 const LESSON_STATUS_MAP = {
@@ -26,12 +28,25 @@ export class AttendanceService {
 
   constructor(private readonly db: DbService) {}
 
-  async markAttendance(orgId: string, lessonId: string, dto: MarkAttendanceDto, markedBy: string) {
+  private async resolveStaffId(orgId: string, userId: string): Promise<string | null> {
+    const staff = await this.db.db.query.staffMembers.findFirst({
+      where: and(eq(staffMembers.userId, userId), eq(staffMembers.organizationId, orgId)),
+      columns: { id: true },
+    });
+    return staff?.id ?? null;
+  }
+
+  async markAttendance(orgId: string, lessonId: string, dto: MarkAttendanceDto, markedBy: string, actor?: Actor) {
     const lesson = await this.db.db.query.lessons.findFirst({
       where: and(eq(lessons.id, lessonId), eq(lessons.organizationId, orgId)),
       with: { enrollment: { columns: { id: true, rate: true, lessonType: true, studentId: true } } },
     });
     if (!lesson) throw new NotFoundException('Lesson not found');
+
+    if (actor?.role === 'teacher') {
+      const staffId = await this.resolveStaffId(orgId, actor.userId);
+      if (!staffId || lesson.teacherId !== staffId) throw new ForbiddenException('Not your lesson');
+    }
 
     const existing = await this.db.db.query.attendance.findFirst({
       where: eq(attendance.lessonId, lessonId),
@@ -128,7 +143,7 @@ export class AttendanceService {
       .where(eq(lessonCredits.id, credit.id));
   }
 
-  private async postAutoCharge(orgId: string, lesson: { id: string; enrollmentId: string | null; studentId: string }) {
+  private async postAutoCharge(orgId: string, lesson: { id: string; enrollmentId: string | null; studentId: string; duration: number }) {
     if (!lesson.enrollmentId) return;
 
     const enrollment = await this.db.db.query.enrollments.findFirst({
@@ -150,7 +165,7 @@ export class AttendanceService {
     const family = (enrollment.student as { family?: { id: string; balanceCached: number } })?.family;
     if (!family) return;
 
-    const amount = -(enrollment.rate);
+    const amount = -proratedAmount(enrollment.rate, enrollment.defaultDuration, lesson.duration);
     const newBalance = family.balanceCached + amount;
 
     await this.db.db.insert(ledgerEntries).values({
@@ -167,7 +182,15 @@ export class AttendanceService {
       .where(eq(families.id, family.id));
   }
 
-  async getAttendance(orgId: string, lessonId: string) {
+  async getAttendance(orgId: string, lessonId: string, actor?: Actor) {
+    if (actor?.role === 'teacher') {
+      const lesson = await this.db.db.query.lessons.findFirst({
+        where: and(eq(lessons.id, lessonId), eq(lessons.organizationId, orgId)),
+        columns: { teacherId: true },
+      });
+      const staffId = await this.resolveStaffId(orgId, actor.userId);
+      if (!lesson || !staffId || lesson.teacherId !== staffId) throw new NotFoundException('Lesson not found');
+    }
     return this.db.db.query.attendance.findFirst({
       where: and(eq(attendance.lessonId, lessonId), eq(attendance.organizationId, orgId)),
     }) ?? null;
