@@ -22,10 +22,14 @@ import { CurrentUser } from './decorators/current-user.decorator';
 import type { RequestUser } from '@music-life/types';
 
 const REFRESH_COOKIE = 'refresh_token';
+const isProd = process.env.NODE_ENV === 'production';
 const COOKIE_OPTS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
+  // Frontend (Vercel) and backend (Render) are different domains, so the
+  // cookie must be SameSite=None to be sent on cross-site requests. None
+  // requires Secure, which is only valid over HTTPS (i.e. in production).
+  secure: isProd,
+  sameSite: isProd ? ('none' as const) : ('lax' as const),
   path: '/api/v1/auth',
   maxAge: parseInt(process.env.JWT_REFRESH_TTL ?? '2592000', 10) * 1000,
 };
