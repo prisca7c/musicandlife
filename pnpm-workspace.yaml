@@ -1,6 +1,19 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+overrides:
+  multer: '>=2.2.0'
+  qs: '>=6.15.2'
+  tmp: '>=0.2.6'
+  js-yaml: '>=4.2.0'
+  postcss: '>=8.5.10'
+  webpack: '>=5.104.1'
+  esbuild: '>=0.28.1'
+  lodash: '>=4.18.0'
+  file-type: '>=21.3.2'
+  glob@10: '>=10.5.0'
+  ajv@8: '>=8.18.0'
+  picomatch@4: '>=4.0.4'
 allowBuilds:
   '@nestjs/core': true
   argon2: true
