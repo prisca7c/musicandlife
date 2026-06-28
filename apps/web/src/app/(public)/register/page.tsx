@@ -679,7 +679,7 @@ export default function RegisterPage() {
         Already have an account?{' '}
         <Link href="/login" className="text-[var(--sage)] font-semibold hover:underline">Sign in →</Link>
         &nbsp;·&nbsp; Questions?{' '}
-        <a href="mailto:info@musicandlife.co.uk" className="text-[var(--sage)] font-semibold hover:underline">info@musicandlife.co.uk</a>
+        <a href="mailto:office@musicandlife.co.uk" className="text-[var(--sage)] font-semibold hover:underline">office@musicandlife.co.uk</a>
       </p>
     </div>
   );
