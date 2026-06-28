@@ -31,8 +31,15 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalInterceptors(new RequestIdInterceptor());
 
+  // WEB_URL supports a comma-separated list, so multiple frontend domains
+  // (e.g. a vercel.app URL and a custom domain) can be allowed at once.
+  const webUrls = (process.env.WEB_URL ?? 'http://localhost:3000')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean);
+
   app.enableCors({
-    origin: process.env.WEB_URL ?? 'http://localhost:3000',
+    origin: webUrls,
     credentials: true,
   });
 
