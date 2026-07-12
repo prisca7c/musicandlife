@@ -172,11 +172,19 @@ export class AuthService {
     });
 
     const resetUrl = `${process.env.WEB_URL}/reset-password?token=${rawToken}`;
-    await this.email.send({
-      to: user.email,
-      subject: 'Reset your Music & Life password',
-      html: `<p>Click <a href="${resetUrl}">here</a> to reset your password. This link expires in 1 hour.</p>`,
-    });
+    // A mail-provider outage must not turn this into a 500 — that both breaks
+    // the reset page and leaks which emails exist (a real email would error
+    // while an unknown one returned the generic message). Swallow send failures
+    // and always return the same generic response.
+    try {
+      await this.email.send({
+        to: user.email,
+        subject: 'Reset your Music & Life password',
+        html: `<p>Click <a href="${resetUrl}">here</a> to reset your password. This link expires in 1 hour.</p>`,
+      });
+    } catch (err) {
+      this.logger.warn(`Password reset email failed for ${user.email}: ${err}`);
+    }
 
     return { message: 'If that email is registered, a reset link has been sent.' };
   }
