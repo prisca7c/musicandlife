@@ -18,6 +18,23 @@ async function bootstrap() {
 
   app.use(cookieParser(process.env.COOKIE_SECRET));
 
+  // Render (and most PaaS) terminate TLS at a proxy and forward via X-Forwarded-For.
+  // Trust the first hop so req.ip is the real client IP — the rate limiter keys on
+  // it, otherwise every user shares the proxy's IP and gets throttled collectively.
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
+  // Baseline security headers. This is a JSON API (no HTML), so a full CSP isn't
+  // needed, but these close clickjacking / MIME-sniff / referrer-leak vectors and
+  // stop advertising the framework. (Web-app HTML headers live in the Next config.)
+  app.getHttpAdapter().getInstance().disable('x-powered-by');
+  app.use((_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+    next();
+  });
+
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
 

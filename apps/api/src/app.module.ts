@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { HealthModule } from './health/health.module';
 import { DbModule } from './db/db.module';
 import { EmailModule } from './email/email.module';
@@ -44,6 +45,13 @@ import { FamilyPortalModule } from './family-portal/family-portal.module';
     ResourcesModule, ReportsModule,
     NotesModule, NewsModule, FamilyPortalModule,
     HealthModule,
+  ],
+  providers: [
+    // Register the ThrottlerGuard globally so the @Throttle policies already
+    // declared on the auth routes (login 5/min, register 3/min, reset 3/hr, …)
+    // and the default 120/min limit are actually enforced. Without this the
+    // ThrottlerModule is loaded but no request is ever rate-limited.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

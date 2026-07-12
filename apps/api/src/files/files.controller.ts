@@ -1,5 +1,6 @@
 import { Controller, Post, Get, Param, Body, UseGuards } from '@nestjs/common';
 import { FilesService } from './files.service';
+import { SignUploadDto } from './dto/sign-upload.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { RequestUser } from '@music-life/types';
@@ -10,10 +11,7 @@ export class FilesController {
   constructor(private readonly files: FilesService) {}
 
   @Post('sign-upload')
-  signUpload(
-    @CurrentUser() user: RequestUser,
-    @Body() body: { mime: string; size: number; originalName?: string; expiring?: boolean },
-  ) {
+  signUpload(@CurrentUser() user: RequestUser, @Body() body: SignUploadDto) {
     return this.files.signUpload({
       orgId: user.orgId,
       ownerId: user.userId,
@@ -25,7 +23,7 @@ export class FilesController {
   }
 
   @Get(':id/sign-download')
-  signDownload(@Param('id') id: string) {
-    return this.files.signDownload(id);
+  signDownload(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.files.signDownload(id, user.orgId);
   }
 }
