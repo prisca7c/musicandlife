@@ -5,11 +5,25 @@ dotenvConfig({ path: resolve(__dirname, '../../../.env') });
 
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, VersioningType } from '@nestjs/common';
+import { Logger, ValidationPipe, VersioningType } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { RequestIdInterceptor } from './common/interceptors/request-id.interceptor';
+
+// Last-resort process-level guards. Without these, an unhandled promise
+// rejection or a stray throw outside the request cycle can crash the process
+// silently (or leave it in a bad state). Logging them gives visibility in the
+// platform logs; on an uncaught exception we exit so the platform restarts a
+// clean process rather than serving from a corrupted one.
+const processLogger = new Logger('Process');
+process.on('unhandledRejection', (reason) => {
+  processLogger.error(`Unhandled promise rejection: ${reason instanceof Error ? reason.stack : String(reason)}`);
+});
+process.on('uncaughtException', (err) => {
+  processLogger.error(`Uncaught exception: ${err.stack ?? err.message}`);
+  process.exit(1);
+});
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -59,6 +73,10 @@ async function bootstrap() {
     origin: webUrls,
     credentials: true,
   });
+
+  // Drain in-flight requests and run shutdown hooks on SIGTERM/SIGINT (Render
+  // sends SIGTERM on deploy/spin-down) instead of dropping live connections.
+  app.enableShutdownHooks();
 
   const port = parseInt(process.env.API_PORT ?? '3001', 10);
   await app.listen(port);

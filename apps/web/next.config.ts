@@ -17,6 +17,27 @@ const config: NextConfig = {
   env: {
     JWT_SECRET: process.env.JWT_SECRET ?? '',
   },
+  // Baseline security headers on every response. These close clickjacking
+  // (X-Frame-Options + CSP frame-ancestors), MIME-sniffing, referrer leakage,
+  // and lock down powerful browser features the app doesn't use. A full
+  // resource-CSP (script/connect/img-src) is intentionally deferred — it must
+  // be validated against the live API origin (NEXT_PUBLIC_API_URL) and R2 URLs
+  // first, or it silently breaks API calls and image loads.
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()' },
+          { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+        ],
+      },
+    ];
+  },
 };
 
 export default config;
