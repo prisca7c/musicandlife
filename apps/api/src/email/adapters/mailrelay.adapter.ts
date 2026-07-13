@@ -23,6 +23,7 @@ export class MailrelayAdapter extends EmailPort {
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly defaultFrom: string;
+  private readonly groupId: number;
   private readonly logger = new Logger(MailrelayAdapter.name);
   private readonly breaker = new CircuitBreaker({ name: 'mailrelay-email', failureThreshold: 3, timeout: 120_000 });
 
@@ -33,11 +34,44 @@ export class MailrelayAdapter extends EmailPort {
     this.baseUrl = process.env.MAILRELAY_API_URL.replace(/\/$/, '');
     this.token = process.env.MAILRELAY_API_KEY;
     this.defaultFrom = process.env.EMAIL_FROM ?? 'Music & Life <no-reply@musiclife.studio>';
+    // Subscriber group new contacts are added to (Mailrelay "Default" = 1).
+    this.groupId = parseInt(process.env.MAILRELAY_GROUP_ID ?? '1', 10) || 1;
+  }
+
+  /**
+   * Mailrelay only delivers to known subscribers, so before sending we make sure
+   * every recipient is on the list. This runs on every send — so approving a
+   * student (welcome email) or inviting a teacher (invite email) auto-subscribes
+   * them, and so do resets/reminders. Best-effort and idempotent: an "already
+   * taken" 422 means they're already subscribed (fine); any other failure is
+   * logged but never blocks the actual send.
+   */
+  private async ensureSubscriber(raw: string): Promise<void> {
+    const { email, name } = parseAddress(raw);
+    try {
+      const res = await fetch(`${this.baseUrl}/subscribers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-auth-token': this.token },
+        body: JSON.stringify({ email, name, status: 'active', group_ids: [this.groupId] }),
+      });
+      if (res.ok) {
+        this.logger.log(`Subscriber ensured: ${email}`);
+        return;
+      }
+      const body = await res.text().catch(() => '');
+      if (res.status === 422 && /taken|already|exist/i.test(body)) return; // already a subscriber
+      this.logger.warn(`Could not ensure subscriber ${email}: ${res.status} ${body}`);
+    } catch (err) {
+      this.logger.warn(`ensureSubscriber failed for ${email}: ${err}`);
+    }
   }
 
   async send(opts: SendEmailOptions): Promise<void> {
+    const toList = Array.isArray(opts.to) ? opts.to : [opts.to];
+    // Add recipients to the subscriber list first (outside the send breaker, so
+    // list-building keeps working even if sending is temporarily tripped).
+    await Promise.all(toList.map((addr) => this.ensureSubscriber(addr)));
     await this.breaker.call(async () => {
-      const toList = Array.isArray(opts.to) ? opts.to : [opts.to];
       const res = await fetch(`${this.baseUrl}/send_emails`, {
         method: 'POST',
         headers: {
