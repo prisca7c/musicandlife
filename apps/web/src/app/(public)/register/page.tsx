@@ -280,12 +280,12 @@ export default function RegisterPage() {
             </div>
             <h2 className="text-[22px] font-bold text-[var(--sage-dk)] tracking-tight">Registration submitted!</h2>
             <p className="text-sm text-[var(--txt3)] max-w-[360px] leading-relaxed">
-              Thank you, {data.guardianFirstName || contactName}! We&apos;ve received {data.studentFirstName}&apos;s registration and will review it within 1 business day.
+              Thank you, {data.guardianFirstName || contactName}! We&apos;ve received {data.studentFirstName}&apos;s registration and will review it within 2–3 business days.
             </p>
             <div className="bg-[var(--sage-lt)] border border-[var(--sage-md)] rounded-xl p-4 w-full max-w-sm text-left mt-1">
               {([
                 { icon: <MailCheck size={16} />, text: "You'll receive a confirmation email at the address you provided." },
-                { icon: <Clock size={16} />, text: "Our team will review and approve your registration within 1 business day." },
+                { icon: <Clock size={16} />, text: "Our team will review and approve your registration within 2–3 business days." },
                 { icon: <CalendarPlus size={16} />, text: "Once approved, you'll get a welcome email with portal login details." },
               ] as { icon: React.ReactNode; text: string }[]).map((item, i) => (
                 <div key={i} className="flex gap-2.5 py-1.5 text-[13px] text-[var(--sage-dk)]">
@@ -314,7 +314,7 @@ export default function RegisterPage() {
           width={300} height={130}
           className="w-[240px] h-auto object-contain" priority />
         <p className="text-sm text-[var(--txt3)] max-w-[360px] leading-relaxed">
-          Register your student below. Takes about 2 minutes — we&apos;ll review your application and reach out within 1 business day.
+          Register your student below. Takes about 2 minutes — we&apos;ll review your application and reach out within 2–3 business days.
         </p>
       </div>
 
@@ -541,7 +541,7 @@ export default function RegisterPage() {
               </p>
               <div className="space-y-2">
                 {[
-                  { id: 'email', key: 'emailReminders' as const, icon: <Mail size={16} />, title: 'Email lesson reminders', desc: 'Sent 24 hours and 2 hours before each lesson.', defaultOn: true },
+                  { id: 'email', key: 'emailReminders' as const, icon: <Mail size={16} />, title: 'Email lesson reminders', desc: 'Sent 24 hours before each lesson.', defaultOn: true },
                 ].map(pref => (
                   <label key={pref.id} onClick={() => set({ [pref.key]: !data[pref.key] } as Partial<FormData>)}
                     className={`flex items-start gap-3 p-3 border-[1.5px] rounded-[10px] cursor-pointer transition-all

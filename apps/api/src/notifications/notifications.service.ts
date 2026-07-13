@@ -10,7 +10,6 @@ export type TriggerEvent =
   | 'registration.approved'
   | 'registration.denied'
   | 'lesson.reminder_24h'
-  | 'lesson.reminder_2h'
   | 'lesson.cancelled'
   | 'lesson.rescheduled'
   | 'invoice.sent'
@@ -45,10 +44,6 @@ const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: string; html
     subject: `Lesson reminder — tomorrow`,
     html: `<p>This is a reminder that you have a lesson tomorrow.</p><p>${ctx.body}</p>`,
   }),
-  'lesson.reminder_2h': (ctx) => ({
-    subject: `Lesson in 2 hours`,
-    html: `<p>Your lesson starts in approximately 2 hours.</p><p>${ctx.body}</p>`,
-  }),
   'lesson.cancelled': (ctx) => ({
     subject: 'Lesson cancelled',
     html: `<p>A lesson has been cancelled.</p><p>${ctx.body}</p>`,
@@ -73,7 +68,6 @@ export const DEFAULT_RULES: Array<{
   { triggerEvent: 'registration.approved', templateId: 'registration.approved.family', channels: ['email'] },
   { triggerEvent: 'registration.denied', templateId: 'registration.denied.family', channels: ['email'] },
   { triggerEvent: 'lesson.reminder_24h', templateId: 'lesson.reminder_24h', channels: ['email'] },
-  { triggerEvent: 'lesson.reminder_2h', templateId: 'lesson.reminder_2h', channels: ['email'] },
   { triggerEvent: 'lesson.cancelled', templateId: 'lesson.cancelled', channels: ['email'] },
   { triggerEvent: 'invoice.sent', templateId: 'invoice.sent', channels: ['email'] },
   { triggerEvent: 'invoice.preview_summary', templateId: 'invoice.preview_summary', channels: ['email'] },

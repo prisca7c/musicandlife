@@ -20,7 +20,6 @@ const EVENT_LABELS: Record<string, string> = {
   'registration.approved': 'Registration approved',
   'registration.denied': 'Registration denied',
   'lesson.reminder_24h': 'Lesson reminder (24h before)',
-  'lesson.reminder_2h': 'Lesson reminder (2h before)',
   'lesson.cancelled': 'Lesson cancelled',
   'lesson.rescheduled': 'Lesson rescheduled',
   'invoice.sent': 'Invoice sent to family',
