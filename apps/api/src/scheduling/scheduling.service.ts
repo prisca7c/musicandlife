@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
-import { eq, and, gte, lte, ne, isNull } from 'drizzle-orm';
+import { eq, and, gte, lte, ne, isNull, sql } from 'drizzle-orm';
 import { lessons, rescheduleRequests, lessonCredits, availability, blockedTime, students, staffMembers, rooms } from '@music-life/db';
+import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateLessonDto } from './dto/create-lesson.dto';
 import type { UpdateLessonDto } from './dto/update-lesson.dto';
@@ -12,9 +13,30 @@ import type { BaseRole } from '@music-life/types';
 // methods can scope/ownership-check); higher roles (receptionist+) act unrestricted.
 export interface Actor { role: BaseRole; userId: string }
 
+// The executor passed to conflict-checking helpers — either the pooled db or an
+// open transaction. Booking writes always run on a transaction so the conflict
+// check and the insert/update are atomic and hold the same advisory locks.
+type Executor = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
+
 @Injectable()
 export class SchedulingService {
   constructor(private readonly db: DbService) {}
+
+  // Booking conflicts are check-then-act, which races: two concurrent bookings can
+  // both pass the conflict check and then both insert, double-booking a teacher or
+  // room. To serialize per-resource we take Postgres transaction-scoped advisory
+  // locks keyed on the teacher and room before checking + writing. Locks are
+  // acquired in a deterministic (sorted) order so two transactions locking the same
+  // pair can never deadlock. This is robust against overlapping (not just identical)
+  // slots and needs no schema change / clean data — unlike a unique index.
+  private async lockResources(tx: Executor, orgId: string, teacherId?: string | null, roomId?: string | null) {
+    const keys: string[] = [];
+    if (teacherId) keys.push(`lesson:${orgId}:teacher:${teacherId}`);
+    if (roomId) keys.push(`lesson:${orgId}:room:${roomId}`);
+    for (const key of keys.sort()) {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+    }
+  }
 
   private async resolveStaffId(orgId: string, userId: string): Promise<string | null> {
     const staff = await this.db.db.query.staffMembers.findFirst({
@@ -78,33 +100,42 @@ export class SchedulingService {
   }
 
   async createLesson(orgId: string, dto: CreateLessonDto) {
-    await this.checkConflicts(orgId, dto.startsAt, dto.duration ?? 60, dto.teacherId, dto.roomId);
+    return this.db.db.transaction(async (tx) => {
+      await this.lockResources(tx, orgId, dto.teacherId, dto.roomId);
+      await this.checkConflicts(tx, orgId, dto.startsAt, dto.duration ?? 60, dto.teacherId, dto.roomId);
 
-    const [lesson] = await this.db.db
-      .insert(lessons)
-      .values({ ...dto, organizationId: orgId, startsAt: new Date(dto.startsAt) })
-      .returning();
-    return lesson!;
+      const [lesson] = await tx
+        .insert(lessons)
+        .values({ ...dto, organizationId: orgId, startsAt: new Date(dto.startsAt) })
+        .returning();
+      return lesson!;
+    });
   }
 
   async updateLesson(orgId: string, id: string, dto: UpdateLessonDto) {
     const existing = await this.getLesson(orgId, id);
-    if (dto.startsAt || dto.teacherId || dto.roomId) {
-      await this.checkConflicts(
-        orgId,
-        dto.startsAt ?? existing.startsAt.toISOString(),
-        dto.duration ?? existing.duration,
-        dto.teacherId ?? existing.teacherId ?? undefined,
-        dto.roomId ?? existing.roomId ?? undefined,
-        id,
-      );
-    }
-    const [updated] = await this.db.db
-      .update(lessons)
-      .set({ ...dto, startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined, updatedAt: new Date() })
-      .where(and(eq(lessons.id, id), eq(lessons.organizationId, orgId)))
-      .returning();
-    return updated!;
+    return this.db.db.transaction(async (tx) => {
+      if (dto.startsAt || dto.teacherId || dto.roomId) {
+        const teacherId = dto.teacherId ?? existing.teacherId ?? undefined;
+        const roomId = dto.roomId ?? existing.roomId ?? undefined;
+        await this.lockResources(tx, orgId, teacherId, roomId);
+        await this.checkConflicts(
+          tx,
+          orgId,
+          dto.startsAt ?? existing.startsAt.toISOString(),
+          dto.duration ?? existing.duration,
+          teacherId,
+          roomId,
+          id,
+        );
+      }
+      const [updated] = await tx
+        .update(lessons)
+        .set({ ...dto, startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined, updatedAt: new Date() })
+        .where(and(eq(lessons.id, id), eq(lessons.organizationId, orgId)))
+        .returning();
+      return updated!;
+    });
   }
 
   // Teachers may only act on their own lessons; receptionist+ may act on any lesson in the org.
@@ -131,14 +162,20 @@ export class SchedulingService {
   async directReschedule(orgId: string, id: string, newStartsAt: string, newRoomId?: string, actor?: Actor) {
     const lesson = await this.getLesson(orgId, id);
     await this.assertOwnsLesson(orgId, lesson.teacherId, actor);
-    await this.checkConflicts(orgId, newStartsAt, lesson.duration, lesson.teacherId ?? undefined, newRoomId ?? lesson.roomId ?? undefined, id);
 
-    const [updated] = await this.db.db
-      .update(lessons)
-      .set({ startsAt: new Date(newStartsAt), roomId: newRoomId ?? lesson.roomId, updatedAt: new Date() })
-      .where(eq(lessons.id, id))
-      .returning();
-    return updated!;
+    return this.db.db.transaction(async (tx) => {
+      const teacherId = lesson.teacherId ?? undefined;
+      const roomId = newRoomId ?? lesson.roomId ?? undefined;
+      await this.lockResources(tx, orgId, teacherId, roomId);
+      await this.checkConflicts(tx, orgId, newStartsAt, lesson.duration, teacherId, roomId, id);
+
+      const [updated] = await tx
+        .update(lessons)
+        .set({ startsAt: new Date(newStartsAt), roomId: newRoomId ?? lesson.roomId, updatedAt: new Date() })
+        .where(eq(lessons.id, id))
+        .returning();
+      return updated!;
+    });
   }
 
   // ─── Reschedule requests ──────────────────────────────────────────────────
@@ -178,9 +215,18 @@ export class SchedulingService {
     if (!req) throw new NotFoundException('Request not found');
     if (req.status !== 'pending') throw new BadRequestException('Request already decided');
 
-    await this.db.db.update(rescheduleRequests)
+    // Guarded claim: only transition if still pending. If a concurrent request
+    // already decided it, the WHERE matches zero rows and we stop — so the
+    // reschedule below never runs twice.
+    const claimed = await this.db.db.update(rescheduleRequests)
       .set({ status: decision, decidedBy, decidedAt: new Date(), reason })
-      .where(eq(rescheduleRequests.id, id));
+      .where(and(
+        eq(rescheduleRequests.id, id),
+        eq(rescheduleRequests.organizationId, orgId),
+        eq(rescheduleRequests.status, 'pending'),
+      ))
+      .returning({ id: rescheduleRequests.id });
+    if (claimed.length === 0) throw new BadRequestException('Request already decided');
 
     if (decision === 'approved') {
       await this.directReschedule(orgId, req.lessonId, req.proposedStartsAt.toISOString(), req.proposedRoomId ?? undefined);
@@ -203,11 +249,11 @@ export class SchedulingService {
   }
 
   // ─── Conflict check ────────────────────────────────────────────────────────
-  private async checkConflicts(orgId: string, startsAt: string, duration: number, teacherId?: string, roomId?: string, excludeLessonId?: string) {
+  private async checkConflicts(db: Executor, orgId: string, startsAt: string, duration: number, teacherId?: string, roomId?: string, excludeLessonId?: string) {
     const start = new Date(startsAt);
     const end = new Date(start.getTime() + duration * 60000);
 
-    const overlapping = await this.db.db.query.lessons.findMany({
+    const overlapping = await db.query.lessons.findMany({
       where: and(
         eq(lessons.organizationId, orgId),
         eq(lessons.status, 'scheduled'),
