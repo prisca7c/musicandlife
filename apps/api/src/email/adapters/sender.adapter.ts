@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { EmailPort, type SendEmailOptions } from '../ports/email.port';
+import { EmailPort, type SendEmailOptions, type AddContactOptions, type ContactAudience } from '../ports/email.port';
 import { CircuitBreaker } from '../../common/circuit-breaker/circuit-breaker';
 
 function parseAddress(raw: string): { email: string; name?: string } {
@@ -66,5 +66,55 @@ export class SenderAdapter extends EmailPort {
         this.logger.log(`Email sent to ${addr}: "${opts.subject}"`);
       }
     });
+  }
+
+  /** Map an audience to the configured Sender group id(s), if any. */
+  private groupsFor(audience?: ContactAudience): string[] {
+    const map: Record<ContactAudience, string | undefined> = {
+      families: process.env.SENDER_GROUP_FAMILIES,
+      teachers: process.env.SENDER_GROUP_TEACHERS,
+      students: process.env.SENDER_GROUP_STUDENTS,
+    };
+    const id = audience ? map[audience] : undefined;
+    return id ? [id] : [];
+  }
+
+  /**
+   * Add/ensure a contact in Sender's list. Runs outside the send breaker and is
+   * best-effort: an "already exists" response is treated as success, and any
+   * other failure is logged but never thrown (the caller's main action must
+   * still succeed). If SENDER_GROUP_* isn't configured the contact is added to
+   * the account with no group.
+   */
+  async addContact(opts: AddContactOptions): Promise<void> {
+    const groups = this.groupsFor(opts.audience);
+    const parts = (opts.name ?? '').trim().split(/\s+/).filter(Boolean);
+    const firstname = parts.shift();
+    const lastname = parts.length ? parts.join(' ') : undefined;
+    try {
+      const res = await fetch(`${this.baseUrl}/subscribers`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.token}`,
+        },
+        body: JSON.stringify({
+          email: opts.email,
+          ...(firstname ? { firstname } : {}),
+          ...(lastname ? { lastname } : {}),
+          ...(groups.length ? { groups } : {}),
+        }),
+      });
+      if (res.ok) {
+        this.logger.log(`Contact added to Sender: ${opts.email}${opts.audience ? ` (${opts.audience})` : ''}`);
+        return;
+      }
+      const body = await res.text().catch(() => '');
+      if (res.status === 409 || /already|exist|taken|duplicate/i.test(body)) return; // already a contact
+      this.logger.warn(`Could not add contact ${opts.email}: ${res.status} ${body}`);
+    } catch (err) {
+      this.logger.warn(`addContact failed for ${opts.email}: ${err}`);
+    }
   }
 }

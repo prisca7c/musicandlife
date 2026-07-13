@@ -103,6 +103,13 @@ export class StaffService {
       }
     }
 
+    // Auto-add the teacher to the Sender mailing list (best-effort, non-blocking).
+    if (dto.email) {
+      this.email
+        .addContact({ email: dto.email, name: `${dto.firstName} ${dto.lastName}`.trim(), audience: 'teachers' })
+        .catch((err) => this.logger.warn(`Add-contact failed for ${dto.email}: ${err}`));
+    }
+
     const { email: _email, ...staffData } = dto;
     const [member] = await this.db.db
       .insert(staffMembers)

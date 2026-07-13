@@ -157,6 +157,25 @@ export class RegistrationService {
       }
     }
 
+    // Auto-add to the Sender mailing list (best-effort, non-blocking): the
+    // family contact goes to the Families audience, and a 16+ student with their
+    // own email goes to the Students audience. This fires whenever an admin
+    // brings a student on board — approving a registration or a CSV import.
+    if (payload.contactEmail) {
+      this.email
+        .addContact({ email: payload.contactEmail, name: payload.contactName, audience: 'families' })
+        .catch((e) => this.logger.warn('Add family contact failed', e));
+    }
+    if (payload.studentEmail) {
+      this.email
+        .addContact({
+          email: payload.studentEmail,
+          name: `${payload.studentFirstName} ${payload.studentLastName}`.trim(),
+          audience: 'students',
+        })
+        .catch((e) => this.logger.warn('Add student contact failed', e));
+    }
+
     return { familyId: family!.id, studentId: student!.id, pendingInvite };
   }
 
