@@ -8,7 +8,7 @@ import {
   ClipboardCheck, Mail, Phone, MapPin, Search,
   CircleCheck, AlertCircle, Info, Send,
   Plus, MailCheck, Clock, CalendarPlus, Bell,
-  UserPlus, Music,
+  UserPlus, Music, Home,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { PRIVATE_INSTRUMENTS, GROUP_INSTRUMENTS } from '@music-life/types';
@@ -294,10 +294,16 @@ export default function RegisterPage() {
                 </div>
               ))}
             </div>
-            <button onClick={() => { setStep(1); setData(EMPTY); setTcAccepted(false); }}
-              className="mt-2 flex items-center gap-2 bg-[var(--sage)] text-white rounded-[10px] px-6 py-2.5 text-sm font-bold hover:bg-[var(--sage-dk)] transition-colors">
-              <Plus size={16} /> Register another student
-            </button>
+            <div className="mt-2 flex flex-wrap items-center justify-center gap-2.5">
+              <a href="https://www.musicandlife.co.uk"
+                className="flex items-center gap-2 bg-white text-[var(--sage-dk)] border border-[var(--sage-md)] rounded-[10px] px-6 py-2.5 text-sm font-bold hover:bg-[var(--sage-lt)] transition-colors">
+                <Home size={16} /> Back to home page
+              </a>
+              <button onClick={() => { setStep(1); setData(EMPTY); setTcAccepted(false); }}
+                className="flex items-center gap-2 bg-[var(--sage)] text-white rounded-[10px] px-6 py-2.5 text-sm font-bold hover:bg-[var(--sage-dk)] transition-colors">
+                <Plus size={16} /> Register another student
+              </button>
+            </div>
           </div>
         </div>
       </div>

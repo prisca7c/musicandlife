@@ -881,7 +881,6 @@ export default function CalendarPage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setShowQuickAdd(true)} className="ui-btn-ghost">+ New default lesson</button>
           <button onClick={() => setShowAdd(true)} className="ui-btn-primary">+ Add lesson</button>
         </div>
       </div>

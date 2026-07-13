@@ -7,6 +7,7 @@ import { EmailPort } from '../email/ports/email.port';
 
 export type TriggerEvent =
   | 'registration.received'
+  | 'registration.submitted'
   | 'registration.approved'
   | 'registration.denied'
   | 'lesson.reminder_24h'
@@ -31,6 +32,10 @@ const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: string; html
   'registration.received.admin': (ctx) => ({
     subject: 'New registration received',
     html: `<p>A new student registration has been submitted and is pending your review.</p><p>${ctx.body}</p>`,
+  }),
+  'registration.submitted.family': (ctx) => ({
+    subject: 'We received your registration — Music & Life',
+    html: `<p>Thank you for registering with Music &amp; Life!</p><p>${ctx.body}</p><p>Our team will review your registration within 2–3 business days. Once it's approved, you'll receive a welcome email with your portal login details.</p><p>If you have any questions in the meantime, just reply to this email.</p>`,
   }),
   'registration.approved.family': (ctx) => ({
     subject: 'Welcome to Music & Life!',
@@ -65,6 +70,7 @@ export const DEFAULT_RULES: Array<{
   channels: string[];
 }> = [
   { triggerEvent: 'registration.received', templateId: 'registration.received.admin', channels: ['email'] },
+  { triggerEvent: 'registration.submitted', templateId: 'registration.submitted.family', channels: ['email'] },
   { triggerEvent: 'registration.approved', templateId: 'registration.approved.family', channels: ['email'] },
   { triggerEvent: 'registration.denied', templateId: 'registration.denied.family', channels: ['email'] },
   { triggerEvent: 'lesson.reminder_24h', templateId: 'lesson.reminder_24h', channels: ['email'] },
