@@ -104,25 +104,32 @@ function AddStudentModal({ open, onClose, onCreated }: { open: boolean; onClose:
   );
 }
 
+const PAGE_SIZE = 50;
+
 export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(0);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  function load(q = search) {
-    const qs = q ? `?search=${encodeURIComponent(q)}` : '';
-    apiFetch<Student[]>(`/students${qs}`, { token: tok() }).then(setStudents).catch(() => {});
+  function load(q = search, off = offset) {
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(off) });
+    if (q) params.set('search', q);
+    apiFetch<{ data: Student[]; total: number }>(`/students?${params.toString()}`, { token: tok() })
+      .then(r => { setStudents(r.data); setTotal(r.total); })
+      .catch(() => {});
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(search, offset); }, [offset]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>
       <AddStudentModal open={showAdd} onClose={() => setShowAdd(false)} onCreated={() => load()} />
       <PageHeader
         title="Students"
-        subtitle={`${students.length} student${students.length !== 1 ? 's' : ''}`}
+        subtitle={`${total} student${total !== 1 ? 's' : ''}`}
         action={
           <button onClick={() => setShowAdd(true)} className="ui-btn-primary">
             <UserPlus size={15} /> Add student
@@ -137,7 +144,7 @@ export default function StudentsPage() {
         </span>
         <input
           value={search}
-          onChange={e => { setSearch(e.target.value); load(e.target.value); }}
+          onChange={e => { setSearch(e.target.value); setOffset(0); load(e.target.value, 0); }}
           placeholder="Search by name…"
           className="ui-search pl-9"
         />
@@ -180,6 +187,30 @@ export default function StudentsPage() {
           </tbody>
         </table>
       </div>
+
+      {total > 0 && (
+        <div className="flex items-center justify-between mt-4 text-sm" style={{ color: 'var(--txt3)' }}>
+          <span>
+            Showing {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
+          </span>
+          <div className="flex gap-2">
+            <button
+              className="ui-btn-ghost"
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+            >
+              ← Prev
+            </button>
+            <button
+              className="ui-btn-ghost"
+              disabled={offset + PAGE_SIZE >= total}
+              onClick={() => setOffset(offset + PAGE_SIZE)}
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { parsePage } from '../common/pagination';
 import type { RequestUser } from '@music-life/types';
 
 @Controller('students')
@@ -20,8 +21,16 @@ export class StudentsController {
 
   @Get()
   @Roles('teacher')
-  findAll(@CurrentUser() user: RequestUser, @Query('search') search?: string) {
-    return this.students.findAll(user.orgId, user.userId, user.role, search);
+  findAll(
+    @CurrentUser() user: RequestUser,
+    @Query('search') search?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.students.findAll(user.orgId, user.userId, user.role, {
+      search,
+      page: parsePage(limit, offset),
+    });
   }
 
   @Post()
