@@ -268,52 +268,88 @@ export class BillingService {
 
   // ─── Payments ──────────────────────────────────────────────────────────────
   async recordPayment(orgId: string, dto: RecordPaymentDto) {
-    const family = await this.db.db.query.families.findFirst({
-      where: and(eq(families.id, dto.familyId), eq(families.organizationId, orgId)),
-    });
-    if (!family) throw new NotFoundException('Family not found');
+    // De-dupe key: explicit client key wins, then a provider reference. Cash/card
+    // with neither gets a per-request key (no cross-request de-dupe possible).
+    const dedupeKey = dto.idempotencyKey ?? (dto.providerRef ? `${dto.method}-${dto.providerRef}` : undefined);
 
-    const idempotencyKey = dto.providerRef
-      ? `${dto.method}-${dto.providerRef}`
-      : `pay-${dto.familyId}-${Date.now()}`;
+    // Fast path: this exact payment was already recorded → return it, don't double-post.
+    if (dedupeKey) {
+      const existing = await this.db.db.query.payments.findFirst({
+        where: and(eq(payments.idempotencyKey, dedupeKey), eq(payments.organizationId, orgId)),
+      });
+      if (existing) return existing;
+    }
 
-    const [payment] = await this.db.db.insert(payments).values({
-      ...dto,
-      organizationId: orgId,
-      idempotencyKey,
-    }).returning();
+    let payment;
+    try {
+      payment = await this.db.db.transaction(async (tx) => {
+        // Lock the family row for the duration of the txn so two concurrent
+        // payments can't both read the same balanceCached and clobber each other
+        // (lost update). The second waits here until the first commits.
+        const [family] = await tx.select().from(families)
+          .where(and(eq(families.id, dto.familyId), eq(families.organizationId, orgId)))
+          .for('update');
+        if (!family) throw new NotFoundException('Family not found');
 
-    const newBalance = family.balanceCached + dto.amount;
-    await this.db.db.insert(ledgerEntries).values({
-      organizationId: orgId,
-      familyId: dto.familyId,
-      type: 'payment',
-      amount: dto.amount,
-      balanceAfter: newBalance,
-      invoiceId: dto.invoiceId,
-      description: `Payment via ${dto.method}${dto.providerRef ? ` (ref: ${dto.providerRef})` : ''}`,
-    });
+        const [created] = await tx.insert(payments).values({
+          ...dto,
+          organizationId: orgId,
+          // Unique column enforces exactly-once even if two requests race past the
+          // fast-path check above (second insert violates the constraint → caught below).
+          idempotencyKey: dedupeKey ?? `pay-${dto.familyId}-${Date.now()}`,
+        }).returning();
 
-    await this.db.db.update(families)
-      .set({ balanceCached: newBalance, updatedAt: new Date() })
-      .where(eq(families.id, dto.familyId));
+        const newBalance = family.balanceCached + dto.amount;
+        await tx.insert(ledgerEntries).values({
+          organizationId: orgId,
+          familyId: dto.familyId,
+          type: 'payment',
+          amount: dto.amount,
+          balanceAfter: newBalance,
+          invoiceId: dto.invoiceId,
+          description: `Payment via ${dto.method}${dto.providerRef ? ` (ref: ${dto.providerRef})` : ''}`,
+        });
 
-    if (dto.invoiceId) {
-      const inv = await this.db.db.query.invoices.findFirst({ where: eq(invoices.id, dto.invoiceId) });
-      if (inv && dto.amount >= inv.total && inv.status !== 'void') {
-        await this.db.db.update(invoices)
-          .set({ status: 'paid', updatedAt: new Date() })
-          .where(eq(invoices.id, dto.invoiceId));
+        await tx.update(families)
+          .set({ balanceCached: newBalance, updatedAt: new Date() })
+          .where(eq(families.id, dto.familyId));
+
+        if (dto.invoiceId) {
+          const inv = await tx.query.invoices.findFirst({ where: eq(invoices.id, dto.invoiceId) });
+          if (inv && dto.amount >= inv.total && inv.status !== 'void') {
+            await tx.update(invoices)
+              .set({ status: 'paid', updatedAt: new Date() })
+              .where(eq(invoices.id, dto.invoiceId));
+          }
+        }
+
+        return created!;
+      });
+    } catch (err) {
+      // Two identical requests raced: the loser's insert hit the unique idempotency
+      // key. Return the payment the winner recorded rather than erroring.
+      if (dedupeKey && this.isUniqueViolation(err)) {
+        const existing = await this.db.db.query.payments.findFirst({
+          where: and(eq(payments.idempotencyKey, dedupeKey), eq(payments.organizationId, orgId)),
+        });
+        if (existing) return existing;
       }
+      throw err;
     }
 
-    // Payments not tied to a specific invoice are prepaid top-ups → auto-issue lesson credits
+    // Payments not tied to a specific invoice are prepaid top-ups → auto-issue
+    // lesson credits. Runs after the payment transaction commits.
     if (!dto.invoiceId) {
-      this.allocatePaymentToCredits(orgId, dto.familyId, payment!.id, dto.amount)
-        .catch(err => this.logger.warn(`Credit allocation failed for payment ${payment!.id}: ${err}`));
+      this.allocatePaymentToCredits(orgId, dto.familyId, payment.id, dto.amount)
+        .catch(err => this.logger.warn(`Credit allocation failed for payment ${payment.id}: ${err}`));
     }
 
-    return payment!;
+    return payment;
+  }
+
+  // Postgres unique-violation SQLSTATE is 23505 (surfaced by postgres-js on err.code).
+  private isUniqueViolation(err: unknown): boolean {
+    return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
   }
 
   // ─── Credit allocation ────────────────────────────────────────────────────

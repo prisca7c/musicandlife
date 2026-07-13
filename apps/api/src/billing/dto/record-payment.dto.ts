@@ -22,4 +22,13 @@ export class RecordPaymentDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  // Client-supplied de-duplication key. Send a stable value per logical payment
+  // (e.g. a UUID generated when the "Record payment" form is opened) so a
+  // double-click / retry records the payment exactly once. Cash/card payments
+  // have no provider reference, so without this a double-submit would otherwise
+  // create two payments and double-count the balance.
+  @IsOptional()
+  @IsString()
+  idempotencyKey?: string;
 }

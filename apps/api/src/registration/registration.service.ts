@@ -1,12 +1,24 @@
 import { Injectable, NotFoundException, ConflictException, Logger, BadRequestException } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
-import { registrations, organizations, families, students, enrollments, users, memberships } from '@music-life/db';
+import { registrations, organizations, families, students, enrollments, users, memberships, passwordResetTokens } from '@music-life/db';
+import type { Db } from '@music-life/db';
 import { randomBytes, createHash } from 'crypto';
 import { DbService } from '../db/db.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailPort } from '../email/ports/email.port';
 import { parseCsv } from '../common/csv';
 import type { SubmitRegistrationDto } from './dto/submit-registration.dto';
+
+// Either the pooled db or an open transaction — the family/student/enrollment
+// creation runs on whichever the caller passes so it can share a transaction
+// with the registration-approval claim (all-or-nothing).
+type Executor = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
+
+type CreationPayload = {
+  studentFirstName: string; studentLastName: string; studentDob?: string; studentEmail?: string;
+  familyName: string; contactName: string; contactEmail?: string; contactPhone?: string; address?: string;
+  instruments: { instrument: string; lessonType: 'private' | 'group' }[];
+};
 
 @Injectable()
 export class RegistrationService {
@@ -61,14 +73,16 @@ export class RegistrationService {
     });
   }
 
-  /** Shared by registration approval and CSV import: atomically creates family + student + enrollments (+ portal account). */
-  async createFamilyStudentEnrollments(orgId: string, payload: {
-    studentFirstName: string; studentLastName: string; studentDob?: string; studentEmail?: string;
-    familyName: string; contactName: string; contactEmail?: string; contactPhone?: string; address?: string;
-    instruments: { instrument: string; lessonType: 'private' | 'group' }[];
-  }) {
+  /**
+   * Creates family + student + enrollments (+ portal account) on the given
+   * executor. The welcome/invite email is NOT sent here — it's returned as a
+   * `pendingInvite` so the caller can send it only after the surrounding
+   * transaction commits (otherwise a rolled-back approval could still email a
+   * "set your password" link for a user that no longer exists).
+   */
+  private async createFamilyStudentEnrollmentsTx(tx: Executor, orgId: string, payload: CreationPayload) {
     // Create family
-    const [family] = await this.db.db.insert(families).values({
+    const [family] = await tx.insert(families).values({
       organizationId: orgId,
       name: payload.familyName,
       contactName: payload.contactName,
@@ -78,7 +92,7 @@ export class RegistrationService {
     }).returning();
 
     // Create student
-    const [student] = await this.db.db.insert(students).values({
+    const [student] = await tx.insert(students).values({
       organizationId: orgId,
       familyId: family!.id,
       firstName: payload.studentFirstName,
@@ -90,7 +104,7 @@ export class RegistrationService {
 
     // Create enrollments for each instrument
     for (const inst of payload.instruments ?? []) {
-      await this.db.db.insert(enrollments).values({
+      await tx.insert(enrollments).values({
         organizationId: orgId,
         studentId: student!.id,
         instrument: inst.instrument,
@@ -101,56 +115,84 @@ export class RegistrationService {
       });
     }
 
+    let pendingInvite: { to: string; contactName: string; link: string } | undefined;
+
     // If contact email provided, create portal account
     if (payload.contactEmail) {
-      const existing = await this.db.db.query.users.findFirst({
+      const existing = await tx.query.users.findFirst({
         where: eq(users.email, payload.contactEmail.toLowerCase()),
       });
       if (!existing) {
-        const [newUser] = await this.db.db.insert(users).values({
+        const [newUser] = await tx.insert(users).values({
           email: payload.contactEmail.toLowerCase(),
           passwordHash: 'INVITE_PENDING',
           emailVerifiedAt: new Date(),
         }).returning();
-        await this.db.db.insert(memberships).values({
+        await tx.insert(memberships).values({
           userId: newUser!.id, organizationId: orgId, baseRole: 'guardian',
         });
-        // Non-blocking invite email
         const rawToken = randomBytes(32).toString('hex');
         const tokenHash = createHash('sha256').update(rawToken).digest('hex');
-        const { passwordResetTokens } = await import('@music-life/db');
-        await this.db.db.insert(passwordResetTokens).values({
+        await tx.insert(passwordResetTokens).values({
           userId: newUser!.id, tokenHash,
           expiresAt: new Date(Date.now() + 7 * 86400000),
         });
-        const link = `${process.env.WEB_URL}/reset-password?token=${rawToken}`;
-        this.email.send({
+        pendingInvite = {
           to: payload.contactEmail,
-          subject: 'Welcome to Music & Life — set your password',
-          html: `<p>Hi ${payload.contactName},</p><p>Your registration has been approved! Set your portal password here:</p><p><a href="${link}">Set password</a></p>`,
-        }).catch(e => this.logger.warn('Welcome email failed', e));
+          contactName: payload.contactName,
+          link: `${process.env.WEB_URL}/reset-password?token=${rawToken}`,
+        };
       }
     }
 
-    return { familyId: family!.id, studentId: student!.id };
+    return { familyId: family!.id, studentId: student!.id, pendingInvite };
   }
 
-  /** Admin: approve — atomically creates family + student + enrollments */
+  /** Best-effort welcome email, fired after the creating transaction commits. */
+  private sendWelcomeInvite(invite: { to: string; contactName: string; link: string }) {
+    this.email.send({
+      to: invite.to,
+      subject: 'Welcome to Music & Life — set your password',
+      html: `<p>Hi ${invite.contactName},</p><p>Your registration has been approved! Set your portal password here:</p><p><a href="${invite.link}">Set password</a></p>`,
+    }).catch(e => this.logger.warn('Welcome email failed', e));
+  }
+
+  /** Shared by registration approval and CSV import: atomically creates family + student + enrollments (+ portal account). */
+  async createFamilyStudentEnrollments(orgId: string, payload: CreationPayload) {
+    const result = await this.db.db.transaction(tx => this.createFamilyStudentEnrollmentsTx(tx, orgId, payload));
+    if (result.pendingInvite) this.sendWelcomeInvite(result.pendingInvite);
+    return { familyId: result.familyId, studentId: result.studentId };
+  }
+
+  /** Admin: approve — atomically claims the registration then creates family + student + enrollments */
   async approve(orgId: string, regId: string, decidedBy: string) {
-    const reg = await this.db.db.query.registrations.findFirst({
-      where: and(eq(registrations.id, regId), eq(registrations.organizationId, orgId)),
+    const result = await this.db.db.transaction(async (tx) => {
+      // Guarded claim: flip pending -> approved only if still pending. Two
+      // concurrent approvals race here; exactly one matches a row, the other
+      // gets zero rows and aborts, so the family/student are created only once.
+      const claimed = await tx.update(registrations)
+        .set({ status: 'approved', decidedBy, decidedAt: new Date() })
+        .where(and(
+          eq(registrations.id, regId),
+          eq(registrations.organizationId, orgId),
+          eq(registrations.status, 'pending'),
+        ))
+        .returning({ payload: registrations.payload });
+
+      if (claimed.length === 0) {
+        const existing = await tx.query.registrations.findFirst({
+          where: and(eq(registrations.id, regId), eq(registrations.organizationId, orgId)),
+        });
+        if (!existing) throw new NotFoundException('Registration not found');
+        throw new BadRequestException('Already decided');
+      }
+
+      const payload = claimed[0]!.payload as SubmitRegistrationDto;
+      return this.createFamilyStudentEnrollmentsTx(tx, orgId, payload);
     });
-    if (!reg) throw new NotFoundException('Registration not found');
-    if (reg.status !== 'pending') throw new BadRequestException('Already decided');
 
-    const payload = reg.payload as SubmitRegistrationDto;
-    const { familyId, studentId } = await this.createFamilyStudentEnrollments(orgId, payload);
-
-    await this.db.db.update(registrations)
-      .set({ status: 'approved', decidedBy, decidedAt: new Date() })
-      .where(eq(registrations.id, regId));
-
-    return { id: regId, status: 'approved', familyId, studentId };
+    if (result.pendingInvite) this.sendWelcomeInvite(result.pendingInvite);
+    return { id: regId, status: 'approved', familyId: result.familyId, studentId: result.studentId };
   }
 
   // ─── CSV student import ─────────────────────────────────────────────────────
