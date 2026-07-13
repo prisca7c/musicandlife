@@ -24,6 +24,6 @@ export class FilesController {
 
   @Get(':id/sign-download')
   signDownload(@CurrentUser() user: RequestUser, @Param('id') id: string) {
-    return this.files.signDownload(id, user.orgId);
+    return this.files.signDownload(id, { userId: user.userId, orgId: user.orgId, role: user.role });
   }
 }

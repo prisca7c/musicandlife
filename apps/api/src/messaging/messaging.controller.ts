@@ -21,7 +21,7 @@ export class MessagingController {
   @Post()
   @Roles('guardian')
   createThread(@CurrentUser() user: RequestUser, @Body() dto: CreateThreadDto) {
-    return this.messaging.createThread(user.orgId, user.userId, dto);
+    return this.messaging.createThread(user.orgId, user.userId, user.role, dto);
   }
 
   @Get(':id')
