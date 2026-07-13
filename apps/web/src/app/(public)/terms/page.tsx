@@ -1,11 +1,11 @@
-import Link from 'next/link';
+import BackToRegistration from './back-button';
 
 export default function TermsPage() {
   return (
     <div className="min-h-screen bg-gray-50 py-12 px-4">
       <div className="max-w-3xl mx-auto">
         <div className="mb-6">
-          <Link href="/register" className="text-sm text-[var(--sage)] hover:underline">← Back to registration</Link>
+          <BackToRegistration />
         </div>
         <div className="bg-white rounded-xl border shadow-sm p-8 prose prose-sm max-w-none">
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Music &amp; Life Academy — Terms &amp; Conditions</h1>

@@ -49,14 +49,10 @@ export class ReminderWorker implements OnModuleInit {
     const window24hStart = new Date(now.getTime() + 23 * 3600000);
     const window24hEnd = new Date(now.getTime() + 25 * 3600000);
 
-    // 2h window: lessons starting between 1.75h and 2.25h from now
-    const window2hStart = new Date(now.getTime() + 1.75 * 3600000);
-    const window2hEnd = new Date(now.getTime() + 2.25 * 3600000);
-
     const upcomingLessons = await this.db.db.query.lessons.findMany({
       where: and(
         eq(lessons.status, 'scheduled'),
-        gte(lessons.startsAt, window2hStart),
+        gte(lessons.startsAt, window24hStart),
         lte(lessons.startsAt, window24hEnd),
       ),
       with: {
@@ -74,14 +70,6 @@ export class ReminderWorker implements OnModuleInit {
           orgId: lesson.organizationId,
           email: family.email,
           body: `Your lesson is tomorrow at ${lesson.startsAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.`,
-        });
-      }
-
-      if (hoursUntil >= 1.75 && hoursUntil <= 2.25 && family?.email) {
-        await this.notifications.trigger('lesson.reminder_2h', {
-          orgId: lesson.organizationId,
-          email: family.email,
-          body: `Lesson in 2 hours at ${lesson.startsAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.`,
         });
       }
     }

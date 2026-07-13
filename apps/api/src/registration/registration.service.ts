@@ -60,6 +60,18 @@ export class RegistrationService {
       body: `New registration from ${dto.contactName} for ${dto.studentFirstName} ${dto.studentLastName}.`,
     }).catch(e => this.logger.warn('Notification failed', e));
 
+    // Confirmation to the registrant. This is also what auto-subscribes them to
+    // Mailrelay (ensureSubscriber runs inside email.send), so it must fire on
+    // submit — not just on approval — or the family gets no acknowledgement and
+    // is never added to the mailing list.
+    if (dto.contactEmail) {
+      this.notifications.trigger('registration.submitted', {
+        orgId: org.id,
+        email: dto.contactEmail,
+        body: `We've received ${dto.studentFirstName} ${dto.studentLastName}'s registration and will be in touch soon.`,
+      }).catch(e => this.logger.warn('Registration confirmation email failed', e));
+    }
+
     return { id: reg!.id, status: 'pending', message: 'Registration submitted. We\'ll be in touch soon.' };
   }
 
@@ -143,6 +155,25 @@ export class RegistrationService {
           link: `${process.env.WEB_URL}/reset-password?token=${rawToken}`,
         };
       }
+    }
+
+    // Auto-add to the Sender mailing list (best-effort, non-blocking): the
+    // family contact goes to the Families audience, and a 16+ student with their
+    // own email goes to the Students audience. This fires whenever an admin
+    // brings a student on board — approving a registration or a CSV import.
+    if (payload.contactEmail) {
+      this.email
+        .addContact({ email: payload.contactEmail, name: payload.contactName, audience: 'families' })
+        .catch((e) => this.logger.warn('Add family contact failed', e));
+    }
+    if (payload.studentEmail) {
+      this.email
+        .addContact({
+          email: payload.studentEmail,
+          name: `${payload.studentFirstName} ${payload.studentLastName}`.trim(),
+          audience: 'students',
+        })
+        .catch((e) => this.logger.warn('Add student contact failed', e));
     }
 
     return { familyId: family!.id, studentId: student!.id, pendingInvite };
