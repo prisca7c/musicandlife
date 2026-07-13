@@ -1,10 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { eq, and, ilike, or, inArray } from 'drizzle-orm';
+import { eq, and, ilike, or, inArray, sql, type SQL } from 'drizzle-orm';
 import { students, teacherAssignments, enrollments, families, staffMembers } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateStudentDto } from './dto/create-student.dto';
 import type { UpdateStudentDto } from './dto/update-student.dto';
 import type { BaseRole } from '@music-life/types';
+import type { PageParams, Paginated } from '../common/pagination';
 
 @Injectable()
 export class StudentsService {
@@ -36,42 +37,56 @@ export class StudentsService {
     return [...new Set([...assignments.map((a) => a.studentId), ...enrolled.map((e) => e.studentId)])];
   }
 
-  async findAll(orgId: string, userId: string, role: BaseRole, search?: string) {
-    // Teachers only see their own assigned students
+  async findAll(
+    orgId: string,
+    userId: string,
+    role: BaseRole,
+    opts: { search?: string; page?: PageParams | null } = {},
+  ) {
+    const { search, page = null } = opts;
+    const searchClause: SQL | undefined = search
+      ? or(ilike(students.firstName, `%${search}%`), ilike(students.lastName, `%${search}%`))
+      : undefined;
+
+    // Build the WHERE once so the count and the page share identical filtering.
+    let whereClause: SQL | undefined;
     if (role === 'teacher') {
       const staffId = await this.resolveStaffId(orgId, userId);
       const ids = staffId ? await this.getAssignedStudentIds(orgId, staffId) : [];
-      if (ids.length === 0) return [];
+      if (ids.length === 0) {
+        return page ? { data: [], total: 0, limit: page.limit, offset: page.offset } : [];
+      }
+      whereClause = and(eq(students.organizationId, orgId), inArray(students.id, ids), searchClause);
+    } else {
+      whereClause = and(eq(students.organizationId, orgId), searchClause);
+    }
 
+    // Back-compat: no pagination params → return the full array as before.
+    if (!page) {
       return this.db.db.query.students.findMany({
-        where: and(
-          eq(students.organizationId, orgId),
-          inArray(students.id, ids),
-          search
-            ? or(
-                ilike(students.firstName, `%${search}%`),
-                ilike(students.lastName, `%${search}%`),
-              )
-            : undefined,
-        ),
+        where: whereClause,
         with: { family: { columns: { id: true, name: true } } },
         orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
       });
     }
 
-    return this.db.db.query.students.findMany({
-      where: search
-        ? and(
-            eq(students.organizationId, orgId),
-            or(
-              ilike(students.firstName, `%${search}%`),
-              ilike(students.lastName, `%${search}%`),
-            ),
-          )
-        : eq(students.organizationId, orgId),
-      with: { family: { columns: { id: true, name: true } } },
-      orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
-    });
+    const [rows, countRows] = await Promise.all([
+      this.db.db.query.students.findMany({
+        where: whereClause,
+        with: { family: { columns: { id: true, name: true } } },
+        orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
+        limit: page.limit,
+        offset: page.offset,
+      }),
+      this.db.db.select({ c: sql<number>`count(*)::int` }).from(students).where(whereClause),
+    ]);
+    const result: Paginated<(typeof rows)[number]> = {
+      data: rows,
+      total: countRows[0]?.c ?? 0,
+      limit: page.limit,
+      offset: page.offset,
+    };
+    return result;
   }
 
   async findOne(orgId: string, id: string, teacherScope?: { userId: string }) {
