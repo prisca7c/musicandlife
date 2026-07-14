@@ -197,6 +197,14 @@ export class StaffService {
     return this.getAvailability(orgId, await this.resolveOwnStaffId(orgId, userId));
   }
 
+  /** Every teacher's windows across the org — powers the admin calendar availability overlay. */
+  async getAllAvailability(orgId: string) {
+    return this.db.db.query.availability.findMany({
+      where: eq(availability.organizationId, orgId),
+      orderBy: (a, { asc }) => [asc(a.weekday), asc(a.startTime)],
+    });
+  }
+
   async addMyAvailability(orgId: string, userId: string, weekday: string, startTime: string, endTime: string) {
     return this.addAvailability(orgId, await this.resolveOwnStaffId(orgId, userId), weekday, startTime, endTime);
   }
