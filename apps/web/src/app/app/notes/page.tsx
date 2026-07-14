@@ -134,18 +134,18 @@ export default function NotesPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="ui-label flex items-center gap-1.5">
-                    <Users size={13} /> Family note
+                    <Users size={13} /> Notes for family
                   </label>
-                  <p className="text-xs mb-1.5" style={{ color: 'var(--txt4)' }}>Visible to the family on their portal.</p>
+                  <p className="text-xs mb-1.5" style={{ color: 'var(--txt4)' }}>Progress, practice tips, what to work on next — visible to the family on their portal.</p>
                   <textarea value={familyNote} onChange={e => setFamilyNote(e.target.value)} rows={4}
                     placeholder="e.g. Great progress on scales this week — keep practicing the left hand."
                     className="ui-input" style={{ resize: 'vertical' }} />
                 </div>
                 <div>
                   <label className="ui-label flex items-center gap-1.5">
-                    <Lock size={13} /> Private note
+                    <Lock size={13} /> Notes for staff
                   </label>
-                  <p className="text-xs mb-1.5" style={{ color: 'var(--txt4)' }}>Staff only — never shown to the family.</p>
+                  <p className="text-xs mb-1.5" style={{ color: 'var(--txt4)' }}>Internal observations, not shown to the family.</p>
                   <textarea value={internalNote} onChange={e => setInternalNote(e.target.value)} rows={4}
                     placeholder="e.g. Struggling with rhythm — flag for the next staff meeting."
                     className="ui-input" style={{ resize: 'vertical' }} />

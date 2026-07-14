@@ -22,9 +22,15 @@ export class EnrollmentsService {
       if (!teacher) throw new NotFoundException('Teacher not found');
     }
 
+    const { duration, ...rest } = dto;
     const [enrollment] = await this.db.db
       .insert(enrollments)
-      .values({ ...dto, studentId, organizationId: orgId })
+      .values({
+        ...rest,
+        ...(duration != null ? { defaultDuration: duration } : {}),
+        studentId,
+        organizationId: orgId,
+      })
       .returning();
     return enrollment!;
   }
