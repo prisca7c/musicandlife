@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { fmtTime } from '@/lib/datetime';
 import { Badge } from '@/components/badge';
 import { linkify } from '@/lib/linkify';
 import { useRouter } from 'next/navigation';
@@ -144,7 +145,7 @@ function AdminDashboard() {
         )}
         <StatCard label="Lessons today" href="/app/calendar" icon={<Clock size={20} />}
           value={todayLessons.length}
-          sub={todayLessons.length > 0 ? `next: ${new Date(todayLessons[0]!.startsAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'none scheduled'} />
+          sub={todayLessons.length > 0 ? `next: ${fmtTime(todayLessons[0]!.startsAt)}` : 'none scheduled'} />
       </div>
 
       {/* Row 2 — Activity (financials hidden for teachers) */}
@@ -243,7 +244,7 @@ function AdminDashboard() {
                     return (
                       <tr key={l.id} className="hover:bg-[var(--surf)]">
                         <td className="px-4 py-2.5 font-bold text-[var(--sage)] whitespace-nowrap tabular-nums">
-                          {new Date(l.startsAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                          {fmtTime(l.startsAt)}
                         </td>
                         <td className="px-4 py-2.5 font-medium">{l.student?.firstName} {l.student?.lastName}</td>
                         <td className="px-4 py-2.5">

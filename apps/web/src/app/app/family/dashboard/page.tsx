@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { fmtTime, fmtDate } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
@@ -52,7 +53,11 @@ export default function FamilyDashboardPage() {
     if (!reschedTimes[0]) { setReschedErr('Please choose at least a first preferred time.'); return; }
     setReschedSaving(true); setReschedErr('');
     try {
-      const toIso = (v: string) => (v ? new Date(v).toISOString() : undefined);
+      // Send the naive wall-clock exactly as picked (e.g. "2026-07-13T16:00"); the
+      // backend interprets it in the studio timezone. Converting via new Date().toISOString()
+      // here would wrongly bake in the parent's *browser* timezone. Append seconds if the
+      // datetime-local value omits them ("YYYY-MM-DDTHH:MM" is 16 chars).
+      const toIso = (v: string) => (v ? (v.length === 16 ? `${v}:00` : v) : undefined);
       await apiFetch('/reschedule-requests', {
         method: 'POST', token: tok(),
         body: JSON.stringify({
@@ -117,11 +122,11 @@ export default function FamilyDashboardPage() {
                 <div className="flex items-center gap-4 mt-3 text-sm" style={{ color: 'var(--txt3)' }}>
                   <span className="flex items-center gap-1.5">
                     <Calendar size={14} />
-                    {new Date(nextLesson.startsAt).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+                    {fmtDate(nextLesson.startsAt, { weekday: 'long', day: 'numeric', month: 'long' })}
                   </span>
                   <span className="flex items-center gap-1.5">
                     <Clock size={14} />
-                    {new Date(nextLesson.startsAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                    {fmtTime(nextLesson.startsAt)}
                     {' '}({nextLesson.duration} min)
                   </span>
                 </div>

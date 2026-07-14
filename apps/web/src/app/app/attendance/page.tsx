@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { fmtTime } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
@@ -139,7 +140,7 @@ export default function AttendancePage() {
                   <div className="flex items-start justify-between gap-3 flex-wrap">
                     <div>
                       <p className="font-semibold text-sm text-[var(--txt)]">
-                        {new Date(l.startsAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                        {fmtTime(l.startsAt)}
                         {' · '}
                         {l.student?.firstName} {l.student?.lastName}
                       </p>
@@ -174,7 +175,7 @@ export default function AttendancePage() {
             {marked.map(l => (
               <div key={l.id} className="bg-white rounded-xl border border-[var(--bd)] px-4 py-2.5 flex items-center justify-between opacity-70">
                 <p className="text-sm text-[var(--txt)]">
-                  {new Date(l.startsAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                  {fmtTime(l.startsAt)}
                   {' · '}
                   {l.student?.firstName} {l.student?.lastName}
                 </p>

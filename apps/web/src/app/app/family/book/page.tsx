@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { fmtTime, fmtDate } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { ChevronLeft, ChevronRight, Check, Loader2 } from 'lucide-react';
@@ -59,7 +60,7 @@ export default function BookLessonPage() {
   }, [selectedTeacher, weekStart, duration]);
 
   const slotsByDay = slots.reduce<Record<string, Slot[]>>((acc, s) => {
-    const day = new Date(s.startsAt).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+    const day = fmtDate(s.startsAt, { weekday: 'long', day: 'numeric', month: 'short' });
     (acc[day] = acc[day] ?? []).push(s);
     return acc;
   }, {});
@@ -164,10 +165,10 @@ export default function BookLessonPage() {
             <div className="bg-[var(--sage-lt)] rounded-2xl border border-[var(--sage-md)] p-4">
               <p className="text-xs font-bold uppercase tracking-widest mb-2 text-[var(--sage-dk)]">Selected slot</p>
               <p className="font-semibold text-sm" style={{ color: 'var(--txt)' }}>
-                {new Date(selectedSlot).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+                {fmtDate(selectedSlot, { weekday: 'long', day: 'numeric', month: 'long' })}
               </p>
               <p className="text-sm" style={{ color: 'var(--txt3)' }}>
-                {new Date(selectedSlot).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} · {duration} min
+                {fmtTime(selectedSlot)} · {duration} min
               </p>
               <button onClick={book} disabled={booking || !selectedEnrollment || !selectedStudent}
                 className="mt-3 w-full bg-[var(--sage)] text-white font-bold text-sm py-2.5 rounded-xl hover:bg-[var(--sage-dk)] disabled:opacity-50 flex items-center justify-center gap-2">
@@ -228,7 +229,7 @@ export default function BookLessonPage() {
                                   : 'border-[var(--bd2)] hover:border-[var(--sage-md)] hover:bg-[var(--sage-lt)]'
                                 }`}
                               style={{ color: active ? undefined : 'var(--txt)' }}>
-                              {new Date(slot.startsAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                              {fmtTime(slot.startsAt)}
                             </button>
                           );
                         })}

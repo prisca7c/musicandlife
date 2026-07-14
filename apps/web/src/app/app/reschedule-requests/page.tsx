@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '@/lib/api';
+import { STUDIO_TZ } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Check, X, CalendarClock } from 'lucide-react';
@@ -23,6 +24,7 @@ interface Req {
 
 function fmt(iso: string) {
   return new Date(iso).toLocaleString('en-GB', {
+    timeZone: STUDIO_TZ,
     weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
   });
 }
