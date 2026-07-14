@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
-import { jwtVerify } from 'jose';
+import { jwtVerify, decodeJwt, errors } from 'jose';
 import type { JwtPayload } from '@music-life/types';
 import { AppShell } from '@/components/app-shell';
 
@@ -13,7 +13,11 @@ async function getUser() {
   try {
     const { payload } = await jwtVerify<JwtPayload>(token, JWT_SECRET);
     return payload;
-  } catch {
+  } catch (err) {
+    // Token expired but validly signed: still render the shell using the decoded
+    // claims (for the role) — the client refreshes the token on its first API
+    // call. A forged/invalid token returns null and is redirected to /login.
+    if (err instanceof errors.JWTExpired) return decodeJwt<JwtPayload>(token);
     return null;
   }
 }

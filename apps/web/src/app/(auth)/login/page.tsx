@@ -28,7 +28,10 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
 
-      document.cookie = `access_token=${accessToken}; path=/; max-age=900; SameSite=Strict`;
+      // 30-day cookie (matches the refresh-token lifetime) with SameSite=Lax so
+      // the session survives closing the tab and following links in from email.
+      // The token inside still expires in ~15 min; apiFetch refreshes it silently.
+      document.cookie = `access_token=${accessToken}; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
       router.push('/app/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
