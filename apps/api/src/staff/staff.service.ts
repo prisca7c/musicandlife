@@ -183,6 +183,28 @@ export class StaffService {
   }
 
   // ─── Availability windows ─────────────────────────────────────────────────
+  /** Resolve the caller's own staff record id, so a teacher can only ever edit their own availability. */
+  private async resolveOwnStaffId(orgId: string, userId: string): Promise<string> {
+    const member = await this.db.db.query.staffMembers.findFirst({
+      where: and(eq(staffMembers.userId, userId), eq(staffMembers.organizationId, orgId)),
+      columns: { id: true },
+    });
+    if (!member) throw new NotFoundException('No staff profile is linked to this account');
+    return member.id;
+  }
+
+  async getMyAvailability(orgId: string, userId: string) {
+    return this.getAvailability(orgId, await this.resolveOwnStaffId(orgId, userId));
+  }
+
+  async addMyAvailability(orgId: string, userId: string, weekday: string, startTime: string, endTime: string) {
+    return this.addAvailability(orgId, await this.resolveOwnStaffId(orgId, userId), weekday, startTime, endTime);
+  }
+
+  async removeMyAvailability(orgId: string, userId: string, windowId: string) {
+    return this.removeAvailability(orgId, await this.resolveOwnStaffId(orgId, userId), windowId);
+  }
+
   async getAvailability(orgId: string, staffId: string) {
     return this.db.db.query.availability.findMany({
       where: and(eq(availability.staffId, staffId), eq(availability.organizationId, orgId)),
@@ -191,6 +213,9 @@ export class StaffService {
   }
 
   async addAvailability(orgId: string, staffId: string, weekday: string, startTime: string, endTime: string) {
+    if (endTime <= startTime) {
+      throw new ConflictException('End time must be after start time');
+    }
     const [row] = await this.db.db.insert(availability).values({
       organizationId: orgId, staffId, weekday: weekday as typeof availability.$inferInsert['weekday'], startTime, endTime,
     }).returning();

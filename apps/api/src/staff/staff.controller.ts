@@ -37,6 +37,27 @@ export class StaffController {
     return this.staff.findByUserId(user.orgId, user.userId);
   }
 
+  // ─── My own availability (teacher self-service) ──────────────────────────────
+  // Declared before the `:id/availability` routes so `me` is not captured by `:id`.
+  @Get('me/availability')
+  @Roles('teacher')
+  getMyAvailability(@CurrentUser() user: RequestUser) {
+    return this.staff.getMyAvailability(user.orgId, user.userId);
+  }
+
+  @Post('me/availability')
+  @Roles('teacher')
+  addMyAvailability(@CurrentUser() user: RequestUser, @Body() dto: AddAvailabilityDto) {
+    return this.staff.addMyAvailability(user.orgId, user.userId, dto.weekday, dto.startTime, dto.endTime);
+  }
+
+  @Delete('me/availability/:windowId')
+  @Roles('teacher')
+  @HttpCode(200)
+  removeMyAvailability(@CurrentUser() user: RequestUser, @Param('windowId') windowId: string) {
+    return this.staff.removeMyAvailability(user.orgId, user.userId, windowId);
+  }
+
   @Post()
   @Roles('manager')
   create(@CurrentUser() user: RequestUser, @Body() dto: CreateStaffDto) {

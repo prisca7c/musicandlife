@@ -25,6 +25,7 @@ const NAV: NavItem[] = [
   { label: 'Calendar',     href: '/app/calendar',          roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <Calendar size={16} /> },
   { label: 'Attendance',   href: '/app/attendance',        roles: ['system_admin','admin','manager','teacher'],               icon: <ClipboardCheck size={16} /> },
   { label: 'Reschedules',  href: '/app/reschedule-requests', roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <CalendarClock size={16} /> },
+  { label: 'My availability', href: '/app/availability',    roles: ['teacher'],                                                icon: <Clock size={16} /> },
   { label: 'Notes',        href: '/app/notes',             roles: ['system_admin','admin','manager','teacher'],               icon: <FileText size={16} /> },
   { label: 'Students',     href: '/app/students',          roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <UserCheck size={16} /> },
   { label: 'Families',     href: '/app/families',          roles: ['system_admin','admin','manager','receptionist'],          icon: <Home size={16} /> },
@@ -43,7 +44,7 @@ const NAV: NavItem[] = [
 // Group nav sections
 const GROUPS = [
   { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History'] },
-  { label: 'Studio',   items: ['Calendar','Attendance','Reschedules','Notes','Intake','Messages'] },
+  { label: 'Studio',   items: ['Calendar','Attendance','Reschedules','My availability','Notes','Intake','Messages'] },
   { label: 'People',   items: ['Students','Families','Staff','Payroll'] },
   { label: 'Finance',  items: ['Billing'] },
   { label: 'Content',  items: ['Resources','Content','Studio News'] },
