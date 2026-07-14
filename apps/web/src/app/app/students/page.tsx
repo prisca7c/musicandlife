@@ -5,104 +5,10 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
-import { Modal } from '@/components/modal';
 import { UserPlus, Search } from 'lucide-react';
-import { SearchableSelect } from '@/components/searchable-select';
+import { AddStudentModal } from '@/components/add-student-modal';
 
 interface Student { id: string; firstName: string; lastName: string; status: string; family: { id: string; name: string } | null; enrollments?: { instrument: string }[]; }
-interface Family { id: string; name: string; }
-
-function AddStudentModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
-  const [families, setFamilies] = useState<Family[]>([]);
-  const [familyId, setFamilyId] = useState('');
-  const [status, setStatus] = useState('active');
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
-
-  useEffect(() => {
-    if (open) {
-      apiFetch<Family[]>('/families', { token: tok() }).then(setFamilies).catch(() => {});
-      setFamilyId(''); setStatus('active'); setError('');
-    }
-  }, [open]);
-
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault(); setSaving(true); setError('');
-    const f = new FormData(e.currentTarget);
-    try {
-      await apiFetch<{ id: string }>('/students', { method: 'POST', token: tok(), body: JSON.stringify({
-        familyId, firstName: f.get('firstName'), lastName: f.get('lastName'),
-        dob: f.get('dob') || undefined, email: f.get('email') || undefined, status,
-        notes: f.get('notes') || undefined,
-      })});
-      onCreated(); onClose();
-    } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
-    finally { setSaving(false); }
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title="Add student">
-      {error && (
-        <div className="mb-4 text-sm rounded-xl px-4 py-3"
-          style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
-          {error}
-        </div>
-      )}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="ui-label">Family <span style={{ color: 'var(--coral)' }}>*</span></label>
-          <SearchableSelect
-            options={families.map(f => ({ value: f.id, label: f.name }))}
-            value={familyId} onChange={setFamilyId} placeholder="Select a family…"
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="ui-label">First name <span style={{ color: 'var(--coral)' }}>*</span></label>
-            <input name="firstName" required className="ui-input" />
-          </div>
-          <div>
-            <label className="ui-label">Last name <span style={{ color: 'var(--coral)' }}>*</span></label>
-            <input name="lastName" required className="ui-input" />
-          </div>
-        </div>
-        <div>
-          <label className="ui-label">Date of birth</label>
-          <input name="dob" type="date" className="ui-input" />
-        </div>
-        <div>
-          <label className="ui-label">
-            Student email{' '}
-            <span className="font-normal text-[11px]" style={{ color: 'var(--txt4)' }}>(optional — creates portal login)</span>
-          </label>
-          <input name="email" type="email" className="ui-input" />
-        </div>
-        <div>
-          <label className="ui-label">Status</label>
-          <SearchableSelect
-            options={[
-              { value: 'trial', label: 'Trial' },
-              { value: 'active', label: 'Active' },
-              { value: 'paused', label: 'Paused' },
-            ]}
-            value={status} onChange={setStatus}
-          />
-        </div>
-        <div>
-          <label className="ui-label">Notes</label>
-          <textarea name="notes" rows={2} className="ui-input" style={{ resize: 'vertical' }} />
-        </div>
-        <div className="flex gap-3 pt-1">
-          <button type="submit" disabled={saving} className="ui-btn-primary">
-            {saving ? 'Saving…' : 'Add student'}
-          </button>
-          <button type="button" onClick={onClose} className="ui-btn-ghost">Cancel</button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
 
 const PAGE_SIZE = 50;
 
