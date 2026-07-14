@@ -6,6 +6,7 @@ import { Badge } from '@/components/badge';
 import { PrivilegeMatrix } from '@/components/privilege-matrix';
 import { StaffAvailability } from '@/components/staff-availability';
 import { StaffInstruments } from '@/components/staff-instruments';
+import { AssignStudentsButton } from '@/components/assign-students-button';
 import { BackButton } from '@/components/back-button';
 
 interface StaffDetail {
@@ -88,10 +89,11 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
         {/* Right column */}
         <div className="lg:col-span-2 space-y-6">
           <div className="data-table-wrap overflow-hidden">
-            <div className="px-5 py-3.5 border-b" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+            <div className="px-5 py-3.5 border-b flex items-center justify-between gap-3" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
               <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>
                 Assigned Students ({member.assignments.length})
               </h2>
+              <AssignStudentsButton teacherId={member.id} teacherName={`${member.firstName} ${member.lastName}`} />
             </div>
             <table className="data-table">
               <thead>

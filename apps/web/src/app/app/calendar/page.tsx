@@ -8,8 +8,10 @@ import { Badge } from '@/components/badge';
 import { SearchableSelect } from '@/components/searchable-select';
 import { InstrumentIcon } from '@/components/instrument-icons';
 import { InfoTooltip } from '@/components/info-tooltip';
+import { AddStudentModal } from '@/components/add-student-modal';
+import { AssignStudentsModal } from '@/components/assign-students-modal';
 import { PRIVATE_INSTRUMENTS, GROUP_INSTRUMENTS, lessonRate } from '@music-life/types';
-import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, UserPlus, Users } from 'lucide-react';
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string; notes: string | null;
@@ -766,6 +768,9 @@ export default function CalendarPage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [showAddStudent, setShowAddStudent] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
+  const [role, setRole] = useState('');
   const [slotDate, setSlotDate] = useState<string | undefined>();
   const [slotTime, setSlotTime] = useState<string | undefined>();
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
@@ -782,6 +787,7 @@ export default function CalendarPage() {
   useEffect(() => {
     const t = tok();
     const role = getRoleFromToken(t);
+    setRole(role);
     if (role === 'teacher') {
       apiFetch<StaffMember | null>('/staff/me', { token: t }).then(me => {
         const list = me ? [me] : [];
@@ -889,6 +895,8 @@ export default function CalendarPage() {
         defaultDate={view === 'day' ? anchorStr : formatDate(weekStart)}
       />
       <LessonDetailModal lesson={selectedLesson} open={!!selectedLesson} onClose={() => setSelectedLesson(null)} onUpdated={load} />
+      <AddStudentModal open={showAddStudent} onClose={() => setShowAddStudent(false)} onCreated={load} />
+      <AssignStudentsModal open={showAssign} onClose={() => setShowAssign(false)} teachers={staff} onChanged={load} />
 
       {/* Toolbar */}
       <div className="flex items-center justify-between mb-4 shrink-0 flex-wrap gap-2">
@@ -931,6 +939,16 @@ export default function CalendarPage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {role !== 'teacher' && (
+            <>
+              <button onClick={() => setShowAssign(true)} className="ui-btn-ghost">
+                <Users size={15} /> Assign students
+              </button>
+              <button onClick={() => setShowAddStudent(true)} className="ui-btn-ghost">
+                <UserPlus size={15} /> Add student
+              </button>
+            </>
+          )}
           <button onClick={() => setShowAdd(true)} className="ui-btn-primary">+ Add lesson</button>
         </div>
       </div>
