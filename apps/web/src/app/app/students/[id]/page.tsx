@@ -42,11 +42,12 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
   const autoRate = (lessonRate(lessonType, duration) / 100).toFixed(2);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<{ created: number; through: string } | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   useEffect(() => {
     if (!open) return;
-    setInstrument(''); setTeacherId(''); setWeekday(''); setEnrollStatus('active'); setError('');
+    setInstrument(''); setTeacherId(''); setWeekday(''); setEnrollStatus('active'); setError(''); setResult(null);
     const t = tok();
     Promise.all([
       apiFetch<StaffMember[]>('/staff', { token: t }).catch(() => []),
@@ -63,16 +64,28 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSaving(true); setError('');
     const f = new FormData(e.currentTarget);
+    const startTime = (f.get('startTime') as string) || '';
+    const hasSchedule = !!weekday && !!startTime;
     try {
-      await apiFetch(`/students/${studentId}/enrollments`, { method: 'POST', token: tok(), body: JSON.stringify({
+      const enrollment = await apiFetch<{ id: string }>(`/students/${studentId}/enrollments`, { method: 'POST', token: tok(), body: JSON.stringify({
         termId: termId || undefined, instrument, lessonType,
         duration,
         teacherId: teacherId || undefined,
         rate: lessonRate(lessonType, duration),
-        scheduleRule: weekday ? { weekday, startTime: f.get('startTime') } : undefined,
+        scheduleRule: hasSchedule ? { weekday, startTime } : undefined,
         autoRenew: f.get('autoRenew') === 'on', status: enrollStatus,
       })});
-      onCreated(); onClose();
+      onCreated();
+      // A weekly schedule was set → materialise the upcoming lessons now so they
+      // appear on the calendar immediately, and show how many were booked.
+      if (hasSchedule) {
+        const r = await apiFetch<{ created: number; through: string }>('/lessons/recurring', {
+          method: 'POST', token: tok(), body: JSON.stringify({ enrollmentId: enrollment.id }),
+        });
+        setResult({ created: r.created, through: r.through });
+      } else {
+        onClose();
+      }
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
     finally { setSaving(false); }
   }
@@ -85,6 +98,24 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
           {error}
         </div>
       )}
+      {result ? (
+        <div className="space-y-4">
+          <div className="rounded-xl px-4 py-4 text-sm"
+            style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)', border: '1px solid var(--sage)' }}>
+            <p className="font-bold text-base mb-1">Enrollment added ✓</p>
+            {result.created > 0 ? (
+              <p>Booked <strong>{result.created}</strong> weekly lesson{result.created !== 1 ? 's' : ''} through{' '}
+                {new Date(result.through).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.
+                They’re on the calendar now.</p>
+            ) : (
+              <p>No new lessons were booked (they may already exist for this schedule).</p>
+            )}
+          </div>
+          <div className="flex gap-3">
+            <button type="button" onClick={onClose} className="ui-btn-primary">Done</button>
+          </div>
+        </div>
+      ) : (
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -177,6 +208,7 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
           <button type="button" onClick={onClose} className="ui-btn-ghost">Cancel</button>
         </div>
       </form>
+      )}
     </Modal>
   );
 }
