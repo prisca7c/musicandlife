@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { fmtTime } from '@/lib/datetime';
 import { Badge } from '@/components/badge';
 import { PaidDot } from '@/components/paid-dot';
+import { AvailabilityWeekGrid, type AvailWindow } from '@/components/availability-week-grid';
 import { linkify } from '@/lib/linkify';
 import { useRouter } from 'next/navigation';
 import {
@@ -89,6 +90,7 @@ function StatCard({ label, value, sub, href, icon, warn = false, muted = false }
 function AdminDashboard() {
   const [kpis, setKpis] = useState<KpiData | null>(null);
   const [todayLessons, setTodayLessons] = useState<Lesson[]>([]);
+  const [myAvailability, setMyAvailability] = useState<AvailWindow[]>([]);
   const [news, setNews] = useState<NewsPost[]>([]);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
@@ -98,6 +100,8 @@ function AdminDashboard() {
     mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
     mon.setHours(0, 0, 0, 0);
     apiFetch<NewsPost[]>('/news', { token: t }).then(rows => setNews(rows.slice(0, 3))).catch(() => {});
+    // Teachers get their own availability grid; non-teachers (no staff record) get an empty list.
+    apiFetch<AvailWindow[]>('/staff/me/availability', { token: t }).then(setMyAvailability).catch(() => {});
     Promise.all([
       apiFetch<KpiData>('/reports/dashboard', { token: t }).catch(() => null),
       apiFetch<Lesson[]>(`/lessons?weekStart=${mon.toISOString().split('T')[0]}`, { token: t }).catch(() => []),
@@ -276,6 +280,22 @@ function AdminDashboard() {
           )}
         </div>
       </div>
+
+      {/* My availability — teachers only */}
+      {kpis?.scoped && myAvailability.length > 0 && (
+        <div className="bg-white rounded-2xl border border-[var(--bd)] overflow-hidden mb-4">
+          <div className="px-5 py-3.5 border-b border-[var(--bd)] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Clock size={16} style={{ color: 'var(--sage)' }} />
+              <h2 className="font-bold text-[var(--txt)] text-sm">My weekly availability</h2>
+            </div>
+            <Link href="/app/availability" className="text-xs text-[var(--sage)] hover:underline font-medium">Edit →</Link>
+          </div>
+          <div className="px-5 py-4">
+            <AvailabilityWeekGrid windows={myAvailability} />
+          </div>
+        </div>
+      )}
 
       {/* Row 4 — Studio News */}
       {news.length > 0 && (
