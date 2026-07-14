@@ -7,6 +7,7 @@ import { fmtTime, fmtDate } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { PaidDot } from '@/components/paid-dot';
+import { AvailabilityWeekGrid, type AvailWindow } from '@/components/availability-week-grid';
 import { Modal } from '@/components/modal';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { linkify } from '@/lib/linkify';
@@ -34,6 +35,7 @@ interface DashboardData {
 
 export default function FamilyDashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [teacherAvail, setTeacherAvail] = useState<AvailWindow[]>([]);
   const [news, setNews] = useState<NewsPost[]>([]);
   const [cancelModal, setCancelModal] = useState<{ lessonId: string; hoursUntil: number } | null>(null);
   const [cancelling, setCancelling] = useState(false);
@@ -76,6 +78,8 @@ export default function FamilyDashboardPage() {
   useEffect(() => {
     apiFetch<DashboardData>('/family/dashboard', { token: tok() })
       .then(setData).catch(() => {});
+    apiFetch<AvailWindow[]>('/family/teacher-availability', { token: tok() })
+      .then(setTeacherAvail).catch(() => {});
     apiFetch<NewsPost[]>('/news', { token: tok() })
       .then(rows => setNews(rows.slice(0, 3))).catch(() => {});
   }, []);
@@ -221,6 +225,17 @@ export default function FamilyDashboardPage() {
             )}
           </div>
         </div>
+
+        {/* ── Teacher availability ── */}
+        {teacherAvail.length > 0 && (
+          <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+            <p className="text-xs font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5" style={{ color: 'var(--txt3)' }}>
+              <CalendarClock size={12} /> When your teacher is free
+            </p>
+            <p className="text-[11px] mb-3" style={{ color: 'var(--txt4)' }}>Shaded hours are when your teacher can take lessons — use “Book a lesson” to grab a slot.</p>
+            <AvailabilityWeekGrid windows={teacherAvail} />
+          </div>
+        )}
 
         {/* ── Studio News ── */}
         {news.length > 0 && (

@@ -195,7 +195,7 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
   return (
     <button
       onClick={onClick}
-      style={{ top, height, left, width, borderLeftColor: tColor, borderLeftWidth: 3, background: style.bg, borderColor: style.border }}
+      style={{ top, height, left, width, background: style.bg, borderTopColor: style.border, borderRightColor: style.border, borderBottomColor: style.border, borderLeftColor: tColor, borderLeftWidth: 3 }}
       className="absolute rounded-r-lg border cursor-pointer text-left px-1.5 py-1 overflow-hidden transition-all hover:brightness-95 hover:shadow-md group z-10"
     >
       {/* Time range — always shown */}
