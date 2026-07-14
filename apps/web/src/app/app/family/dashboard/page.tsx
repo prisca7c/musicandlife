@@ -6,10 +6,11 @@ import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { linkify } from '@/lib/linkify';
 import {
   Calendar, Clock, BookOpen, AlertCircle,
-  Plus, X, Check, Megaphone,
+  Plus, X, Check, Megaphone, CalendarClock,
 } from 'lucide-react';
 
 interface NewsPost { id: string; title: string; body: string; publishedAt: string; }
@@ -34,7 +35,37 @@ export default function FamilyDashboardPage() {
   const [news, setNews] = useState<NewsPost[]>([]);
   const [cancelModal, setCancelModal] = useState<{ lessonId: string; hoursUntil: number } | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [reschedModal, setReschedModal] = useState<{ lessonId: string } | null>(null);
+  const [reschedTimes, setReschedTimes] = useState<[string, string, string]>(['', '', '']);
+  const [reschedErr, setReschedErr] = useState('');
+  const [reschedSaving, setReschedSaving] = useState(false);
+  const [reschedDone, setReschedDone] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  function openReschedule(lessonId: string) {
+    setReschedTimes(['', '', '']); setReschedErr(''); setReschedDone(false);
+    setReschedModal({ lessonId });
+  }
+
+  async function submitReschedule() {
+    if (!reschedModal) return;
+    if (!reschedTimes[0]) { setReschedErr('Please choose at least a first preferred time.'); return; }
+    setReschedSaving(true); setReschedErr('');
+    try {
+      const toIso = (v: string) => (v ? new Date(v).toISOString() : undefined);
+      await apiFetch('/reschedule-requests', {
+        method: 'POST', token: tok(),
+        body: JSON.stringify({
+          lessonId: reschedModal.lessonId,
+          proposedStartsAt: toIso(reschedTimes[0]),
+          proposedStartsAt2: toIso(reschedTimes[1]),
+          proposedStartsAt3: toIso(reschedTimes[2]),
+        }),
+      });
+      setReschedDone(true);
+    } catch (e) { setReschedErr(e instanceof Error ? e.message : 'Could not send request'); }
+    finally { setReschedSaving(false); }
+  }
 
   useEffect(() => {
     apiFetch<DashboardData>('/family/dashboard', { token: tok() })
@@ -101,6 +132,14 @@ export default function FamilyDashboardPage() {
                   style={{ borderColor: 'var(--bd2)', color: 'var(--txt)' }}>
                   <Plus size={13} /> Book another
                 </Link>
+                {hoursUntil >= 24 && (
+                  <button
+                    onClick={() => openReschedule(nextLesson.id)}
+                    className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-xl border font-medium hover:bg-[var(--surf)]"
+                    style={{ borderColor: 'var(--bd2)', color: 'var(--txt)' }}>
+                    <CalendarClock size={13} /> Request reschedule
+                  </button>
+                )}
                 {hoursUntil > 0 && (
                   <button
                     onClick={() => setCancelModal({ lessonId: nextLesson.id, hoursUntil })}
@@ -252,6 +291,56 @@ export default function FamilyDashboardPage() {
             </>
           )}
         </div>
+      </Modal>
+
+      {/* ── Request reschedule ── */}
+      <Modal open={!!reschedModal} onClose={() => setReschedModal(null)} title="Request a reschedule">
+        {reschedDone ? (
+          <div className="text-center py-4">
+            <div className="inline-flex items-center justify-center w-11 h-11 rounded-full mb-3"
+              style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)' }}>
+              <Check size={22} />
+            </div>
+            <p className="font-semibold" style={{ color: 'var(--txt)' }}>Request sent</p>
+            <p className="text-sm mt-1" style={{ color: 'var(--txt3)' }}>
+              The studio will pick whichever of your preferred times works best for the teacher and let you know.
+            </p>
+            <button onClick={() => setReschedModal(null)} className="ui-btn-primary mt-4">Done</button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm flex items-start gap-1.5" style={{ color: 'var(--txt3)' }}>
+              <span>Give up to three preferred times, in order of preference.</span>
+              <InfoTooltip text="You don't have to match the teacher's schedule yourself — offering a few options lets the studio slot you into a time the teacher is actually free, often back-to-back with other lessons. Only your 1st choice is required." />
+            </p>
+            {reschedErr && (
+              <div className="text-sm rounded-xl px-4 py-3"
+                style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
+                {reschedErr}
+              </div>
+            )}
+            {([0, 1, 2] as const).map((i) => (
+              <div key={i}>
+                <label className="ui-label">
+                  {i === 0 ? '1st choice' : i === 1 ? '2nd choice' : '3rd choice'}
+                  {i === 0 ? <span style={{ color: 'var(--coral)' }}> *</span> : <span className="font-normal text-[11px]" style={{ color: 'var(--txt4)' }}> (optional)</span>}
+                </label>
+                <input
+                  type="datetime-local"
+                  value={reschedTimes[i]}
+                  onChange={(e) => setReschedTimes((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
+                  className="ui-input"
+                />
+              </div>
+            ))}
+            <div className="flex gap-3 pt-1">
+              <button onClick={submitReschedule} disabled={reschedSaving} className="ui-btn-primary">
+                {reschedSaving ? 'Sending…' : 'Send request'}
+              </button>
+              <button onClick={() => setReschedModal(null)} className="ui-btn-ghost">Cancel</button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

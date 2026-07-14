@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and, gte, lte, ne, isNull, sql } from 'drizzle-orm';
-import { lessons, rescheduleRequests, lessonCredits, availability, blockedTime, students, staffMembers, rooms } from '@music-life/db';
+import { lessons, rescheduleRequests, lessonCredits, availability, blockedTime, students, staffMembers, rooms, organizations } from '@music-life/db';
 import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateLessonDto } from './dto/create-lesson.dto';
@@ -175,6 +175,12 @@ export class SchedulingService {
       await this.lockResources(tx, orgId, teacherId, roomId);
       await this.checkConflicts(tx, orgId, newStartsAt, lesson.duration, teacherId, roomId, id);
 
+      // Reasonable-for-the-teacher check: the new slot must sit inside the
+      // teacher's availability windows and not clash with their blocked time.
+      const tz = await this.getOrgTimezone(tx, orgId);
+      const reason = await this.teacherUnavailableReason(tx, orgId, teacherId, newStartsAt, lesson.duration, tz);
+      if (reason) throw new BadRequestException(reason);
+
       const [updated] = await tx
         .update(lessons)
         .set({ startsAt: new Date(newStartsAt), roomId: newRoomId ?? lesson.roomId, updatedAt: new Date() })
@@ -211,6 +217,74 @@ export class SchedulingService {
     });
   }
 
+  // ─── Teacher availability ───────────────────────────────────────────────────
+  private async getOrgTimezone(exec: Executor, orgId: string): Promise<string> {
+    const org = await exec.query.organizations.findFirst({
+      where: eq(organizations.id, orgId),
+      columns: { timezone: true },
+    });
+    return org?.timezone ?? 'Europe/London';
+  }
+
+  private static readonly WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
+
+  /** Wall-clock weekday + minutes-since-midnight for an absolute instant, in the studio's timezone. */
+  private localParts(date: Date, timeZone: string): { weekday: string; minutes: number } {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone, weekday: 'long', hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(date);
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+    let hour = parseInt(get('hour'), 10);
+    if (hour === 24) hour = 0; // some engines render midnight as 24
+    return { weekday: get('weekday').toLowerCase(), minutes: hour * 60 + parseInt(get('minute'), 10) };
+  }
+
+  /**
+   * Returns a human-readable reason if the teacher is NOT available for a lesson
+   * at `startsAtISO` (blocked time clash, or outside their availability windows),
+   * or null if the slot is fine. If the teacher has set no availability windows
+   * at all, only blocked time is enforced (we don't lock out teachers who simply
+   * haven't filled in their hours yet).
+   */
+  async teacherUnavailableReason(
+    exec: Executor,
+    orgId: string,
+    teacherId: string | undefined,
+    startsAtISO: string,
+    duration: number,
+    timeZone: string,
+  ): Promise<string | null> {
+    if (!teacherId) return null;
+    const start = new Date(startsAtISO);
+    const end = new Date(start.getTime() + duration * 60000);
+
+    const blocks = await exec.query.blockedTime.findMany({
+      where: and(eq(blockedTime.organizationId, orgId), eq(blockedTime.staffId, teacherId)),
+    });
+    if (blocks.some((b) => b.startsAt < end && b.endsAt > start)) {
+      return 'The teacher has blocked time at that slot. Please pick another time.';
+    }
+
+    const windows = await exec.query.availability.findMany({
+      where: and(eq(availability.organizationId, orgId), eq(availability.staffId, teacherId)),
+    });
+    if (windows.length === 0) return null; // no availability set → don't block
+
+    const { weekday, minutes: startMin } = this.localParts(start, timeZone);
+    const endMin = this.localParts(end, timeZone).minutes;
+    const toMin = (t: string) => { const [h, m] = t.split(':'); return parseInt(h!, 10) * 60 + parseInt(m ?? '0', 10); };
+    const dayWindows = windows.filter((w) => w.weekday === weekday);
+    if (dayWindows.length === 0) {
+      return `The teacher isn't available on ${weekday[0]!.toUpperCase()}${weekday.slice(1)}s. Please pick another day.`;
+    }
+    const fits = dayWindows.some((w) => startMin >= toMin(w.startTime) && endMin <= toMin(w.endTime));
+    if (!fits) {
+      const hours = dayWindows.map((w) => `${w.startTime}–${w.endTime}`).join(', ');
+      return `That time is outside the teacher's hours (${hours}). Please pick a time within their availability.`;
+    }
+    return null;
+  }
+
   // ─── Reschedule requests ──────────────────────────────────────────────────
   async createRescheduleRequest(orgId: string, dto: CreateRescheduleRequestDto, requestedBy: string) {
     const lesson = await this.getLesson(orgId, dto.lessonId);
@@ -222,14 +296,29 @@ export class SchedulingService {
       lessonId: dto.lessonId,
       requestedBy,
       proposedStartsAt: new Date(dto.proposedStartsAt),
+      proposedStartsAt2: dto.proposedStartsAt2 ? new Date(dto.proposedStartsAt2) : undefined,
+      proposedStartsAt3: dto.proposedStartsAt3 ? new Date(dto.proposedStartsAt3) : undefined,
       proposedRoomId: dto.proposedRoomId,
       status: 'pending',
     }).returning();
     return req!;
   }
 
+  /** Did this slot clash with an existing lesson? Non-throwing wrapper over checkConflicts. */
+  private async hasConflict(
+    exec: Executor, orgId: string, startsAt: string, duration: number,
+    teacherId?: string, roomId?: string, excludeLessonId?: string,
+  ): Promise<boolean> {
+    try {
+      await this.checkConflicts(exec, orgId, startsAt, duration, teacherId, roomId, excludeLessonId);
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
   async getRescheduleRequests(orgId: string, status?: string) {
-    return this.db.db.query.rescheduleRequests.findMany({
+    const rows = await this.db.db.query.rescheduleRequests.findMany({
       where: status
         ? and(eq(rescheduleRequests.organizationId, orgId), eq(rescheduleRequests.status, status as 'pending' | 'approved' | 'denied'))
         : eq(rescheduleRequests.organizationId, orgId),
@@ -239,14 +328,58 @@ export class SchedulingService {
       },
       orderBy: (r, { desc }) => [desc(r.createdAt)],
     });
+
+    // Annotate each ranked option so staff can see at a glance which times are
+    // free + within the teacher's hours — the basis for slotting students
+    // back-to-back instead of chasing one proposed time at a time.
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    return Promise.all(rows.map(async (r) => {
+      const lesson = r.lesson;
+      const duration = lesson?.duration ?? 30;
+      const teacherId = lesson?.teacherId ?? undefined;
+      const roomId = r.proposedRoomId ?? lesson?.roomId ?? undefined;
+      const ranked = [r.proposedStartsAt, r.proposedStartsAt2, r.proposedStartsAt3].filter(Boolean) as Date[];
+      const options = await Promise.all(ranked.map(async (t, i) => {
+        const iso = t.toISOString();
+        const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, teacherId, iso, duration, tz);
+        const conflict = unavailable ? false : await this.hasConflict(this.db.db, orgId, iso, duration, teacherId, roomId, r.lessonId);
+        return {
+          rank: i + 1,
+          startsAt: iso,
+          ok: !unavailable && !conflict,
+          reason: unavailable ?? (conflict ? 'Clashes with another lesson at that time.' : null),
+        };
+      }));
+      return { ...r, options };
+    }));
   }
 
-  async decideRescheduleRequest(orgId: string, id: string, decision: 'approved' | 'denied', decidedBy: string, reason?: string) {
+  async decideRescheduleRequest(orgId: string, id: string, decision: 'approved' | 'denied', decidedBy: string, reason?: string, chosenStartsAt?: string) {
     const req = await this.db.db.query.rescheduleRequests.findFirst({
       where: and(eq(rescheduleRequests.id, id), eq(rescheduleRequests.organizationId, orgId)),
     });
     if (!req) throw new NotFoundException('Request not found');
     if (req.status !== 'pending') throw new BadRequestException('Request already decided');
+
+    // Resolve which ranked time to approve (defaults to the 1st choice), and
+    // validate it BEFORE claiming so a bad pick fails cleanly without leaving the
+    // request marked approved but the lesson unmoved.
+    let target: string | undefined;
+    if (decision === 'approved') {
+      const ranked = [req.proposedStartsAt, req.proposedStartsAt2, req.proposedStartsAt3]
+        .filter(Boolean).map((d) => (d as Date).toISOString());
+      target = chosenStartsAt ? new Date(chosenStartsAt).toISOString() : ranked[0]!;
+      if (chosenStartsAt && !ranked.includes(target)) {
+        throw new BadRequestException('Chosen time is not one of the requested options');
+      }
+      const lesson = await this.getLesson(orgId, req.lessonId);
+      const tz = await this.getOrgTimezone(this.db.db, orgId);
+      const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, lesson.teacherId ?? undefined, target, lesson.duration, tz);
+      if (unavailable) throw new BadRequestException(unavailable);
+      if (await this.hasConflict(this.db.db, orgId, target, lesson.duration, lesson.teacherId ?? undefined, req.proposedRoomId ?? lesson.roomId ?? undefined, req.lessonId)) {
+        throw new BadRequestException('That time clashes with another lesson.');
+      }
+    }
 
     // Guarded claim: only transition if still pending. If a concurrent request
     // already decided it, the WHERE matches zero rows and we stop — so the
@@ -261,8 +394,8 @@ export class SchedulingService {
       .returning({ id: rescheduleRequests.id });
     if (claimed.length === 0) throw new BadRequestException('Request already decided');
 
-    if (decision === 'approved') {
-      await this.directReschedule(orgId, req.lessonId, req.proposedStartsAt.toISOString(), req.proposedRoomId ?? undefined);
+    if (decision === 'approved' && target) {
+      await this.directReschedule(orgId, req.lessonId, target, req.proposedRoomId ?? undefined);
     }
 
     return { id, status: decision };

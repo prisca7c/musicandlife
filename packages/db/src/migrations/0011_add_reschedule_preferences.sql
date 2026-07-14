@@ -1,0 +1,2 @@
+ALTER TABLE "reschedule_requests" ADD COLUMN "proposed_starts_at_2" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "reschedule_requests" ADD COLUMN "proposed_starts_at_3" timestamp with time zone;

@@ -77,7 +77,7 @@ export class SchedulingController {
   @Post('reschedule-requests/:id/approve')
   @Roles('receptionist')
   approve(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: DecideRescheduleDto) {
-    return this.scheduling.decideRescheduleRequest(user.orgId, id, 'approved', user.userId, dto.reason);
+    return this.scheduling.decideRescheduleRequest(user.orgId, id, 'approved', user.userId, dto.reason, dto.chosenStartsAt);
   }
 
   @Post('reschedule-requests/:id/deny')
