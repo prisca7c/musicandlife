@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { PrivilegeMatrix } from '@/components/privilege-matrix';
 import { StaffAvailability } from '@/components/staff-availability';
+import { StaffInstruments } from '@/components/staff-instruments';
 import { BackButton } from '@/components/back-button';
 
 interface StaffDetail {
@@ -81,16 +82,7 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
             </dl>
           </div>
 
-          {member.instruments.length > 0 && (
-            <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
-              <h2 className="font-bold mb-4 text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Instruments</h2>
-              <div className="flex flex-wrap gap-2">
-                {member.instruments.map((i) => (
-                  <Badge key={i} variant="default">{i}</Badge>
-                ))}
-              </div>
-            </div>
-          )}
+          <StaffInstruments staffId={member.id} instruments={member.instruments} />
         </div>
 
         {/* Right column */}
