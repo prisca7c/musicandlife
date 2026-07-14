@@ -1,7 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import Redis from 'ioredis';
+import { getRedisConnection } from './common/redis-connection';
+import { RedisThrottlerStorage } from './common/redis-throttler.storage';
 import { HealthModule } from './health/health.module';
 import { DbModule } from './db/db.module';
 import { EmailModule } from './email/email.module';
@@ -32,7 +35,20 @@ import { FamilyPortalModule } from './family-portal/family-portal.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '../../.env' }),
-    ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 120 }]),
+    // Rate limiting. Counters live in Redis (shared across instances + survive
+    // restarts) when REDIS_URL is set; otherwise the built-in in-memory store is
+    // used (local dev, where REDIS_URL is intentionally blank).
+    ThrottlerModule.forRootAsync({
+      useFactory: () => {
+        const throttlers = [{ name: 'default', ttl: 60_000, limit: 120 }];
+        const conn = getRedisConnection();
+        if (!conn) return { throttlers };
+        const redis = new Redis({ ...conn, maxRetriesPerRequest: null, enableOfflineQueue: false, lazyConnect: true });
+        redis.on('error', (e) => new Logger('ThrottlerRedis').warn(`Redis error: ${e.message}`));
+        redis.connect().catch((e) => new Logger('ThrottlerRedis').warn(`Redis connect failed: ${e.message}`));
+        return { throttlers, storage: new RedisThrottlerStorage(redis) };
+      },
+    }),
     DbModule, EmailModule,
     // @Global modules first
     NotificationsModule, FilesModule,
