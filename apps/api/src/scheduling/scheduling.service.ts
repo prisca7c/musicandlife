@@ -9,6 +9,7 @@ import type { CancelLessonDto } from './dto/cancel-lesson.dto';
 import type { CreateRescheduleRequestDto } from './dto/reschedule-request.dto';
 import type { BaseRole } from '@music-life/types';
 import { NotificationsService } from '../notifications/notifications.service';
+import { parseZonedDateTime } from '../common/timezone';
 
 // Resolves to the caller's own staffId when their role is exactly 'teacher' (so service
 // methods can scope/ownership-check); higher roles (receptionist+) act unrestricted.
@@ -107,12 +108,15 @@ export class SchedulingService {
 
   async createLesson(orgId: string, dto: CreateLessonDto) {
     return this.db.db.transaction(async (tx) => {
+      const tz = await this.getOrgTimezone(tx, orgId);
+      // Interpret a naive wall-clock ("...T16:00:00") as the studio's local time.
+      const startsAt = parseZonedDateTime(dto.startsAt, tz);
       await this.lockResources(tx, orgId, dto.teacherId, dto.roomId);
-      await this.checkConflicts(tx, orgId, dto.startsAt, dto.duration ?? 60, dto.teacherId, dto.roomId);
+      await this.checkConflicts(tx, orgId, startsAt.toISOString(), dto.duration ?? 60, dto.teacherId, dto.roomId);
 
       const [lesson] = await tx
         .insert(lessons)
-        .values({ ...dto, organizationId: orgId, startsAt: new Date(dto.startsAt) })
+        .values({ ...dto, organizationId: orgId, startsAt })
         .returning();
       return lesson!;
     });
@@ -121,6 +125,8 @@ export class SchedulingService {
   async updateLesson(orgId: string, id: string, dto: UpdateLessonDto) {
     const existing = await this.getLesson(orgId, id);
     return this.db.db.transaction(async (tx) => {
+      const tz = await this.getOrgTimezone(tx, orgId);
+      const startsAt = dto.startsAt ? parseZonedDateTime(dto.startsAt, tz) : undefined;
       if (dto.startsAt || dto.teacherId || dto.roomId) {
         const teacherId = dto.teacherId ?? existing.teacherId ?? undefined;
         const roomId = dto.roomId ?? existing.roomId ?? undefined;
@@ -128,7 +134,7 @@ export class SchedulingService {
         await this.checkConflicts(
           tx,
           orgId,
-          dto.startsAt ?? existing.startsAt.toISOString(),
+          (startsAt ?? existing.startsAt).toISOString(),
           dto.duration ?? existing.duration,
           teacherId,
           roomId,
@@ -137,7 +143,7 @@ export class SchedulingService {
       }
       const [updated] = await tx
         .update(lessons)
-        .set({ ...dto, startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined, updatedAt: new Date() })
+        .set({ ...dto, startsAt, updatedAt: new Date() })
         .where(and(eq(lessons.id, id), eq(lessons.organizationId, orgId)))
         .returning();
       return updated!;
@@ -172,18 +178,21 @@ export class SchedulingService {
     return this.db.db.transaction(async (tx) => {
       const teacherId = lesson.teacherId ?? undefined;
       const roomId = newRoomId ?? lesson.roomId ?? undefined;
+      const tz = await this.getOrgTimezone(tx, orgId);
+      // Interpret a naive wall-clock as studio-local; a zoned ISO passes through.
+      const startsAt = parseZonedDateTime(newStartsAt, tz);
+      const startsAtISO = startsAt.toISOString();
       await this.lockResources(tx, orgId, teacherId, roomId);
-      await this.checkConflicts(tx, orgId, newStartsAt, lesson.duration, teacherId, roomId, id);
+      await this.checkConflicts(tx, orgId, startsAtISO, lesson.duration, teacherId, roomId, id);
 
       // Reasonable-for-the-teacher check: the new slot must sit inside the
       // teacher's availability windows and not clash with their blocked time.
-      const tz = await this.getOrgTimezone(tx, orgId);
-      const reason = await this.teacherUnavailableReason(tx, orgId, teacherId, newStartsAt, lesson.duration, tz);
+      const reason = await this.teacherUnavailableReason(tx, orgId, teacherId, startsAtISO, lesson.duration, tz);
       if (reason) throw new BadRequestException(reason);
 
       const [updated] = await tx
         .update(lessons)
-        .set({ startsAt: new Date(newStartsAt), roomId: newRoomId ?? lesson.roomId, updatedAt: new Date() })
+        .set({ startsAt, roomId: newRoomId ?? lesson.roomId, updatedAt: new Date() })
         .where(eq(lessons.id, id))
         .returning();
       return updated!;
@@ -291,13 +300,14 @@ export class SchedulingService {
     const hoursUntil = (new Date(lesson.startsAt).getTime() - Date.now()) / 3600000;
     if (hoursUntil < 24) throw new BadRequestException('Reschedule requests must be made at least 24 hours before the lesson');
 
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
     const [req] = await this.db.db.insert(rescheduleRequests).values({
       organizationId: orgId,
       lessonId: dto.lessonId,
       requestedBy,
-      proposedStartsAt: new Date(dto.proposedStartsAt),
-      proposedStartsAt2: dto.proposedStartsAt2 ? new Date(dto.proposedStartsAt2) : undefined,
-      proposedStartsAt3: dto.proposedStartsAt3 ? new Date(dto.proposedStartsAt3) : undefined,
+      proposedStartsAt: parseZonedDateTime(dto.proposedStartsAt, tz),
+      proposedStartsAt2: dto.proposedStartsAt2 ? parseZonedDateTime(dto.proposedStartsAt2, tz) : undefined,
+      proposedStartsAt3: dto.proposedStartsAt3 ? parseZonedDateTime(dto.proposedStartsAt3, tz) : undefined,
       proposedRoomId: dto.proposedRoomId,
       status: 'pending',
     }).returning();

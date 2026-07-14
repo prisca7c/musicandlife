@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
+import { fmtTime, fmtDate } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
@@ -106,9 +107,9 @@ export default function FamilyHistoryPage() {
                   className="border-b last:border-0 hover:bg-[var(--surf)] transition-colors"
                   style={{ borderColor: 'var(--bd)', background: i % 2 === 0 ? undefined : 'var(--bg)' }}>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--txt3)' }}>
-                    {new Date(l.startsAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    {fmtDate(l.startsAt, { day: 'numeric', month: 'short', year: 'numeric' })}
                     <br />
-                    <span>{new Date(l.startsAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span>{fmtTime(l.startsAt)}</span>
                   </td>
                   <td className="px-4 py-3 font-medium" style={{ color: 'var(--txt)' }}>
                     {l.student?.firstName} {l.student?.lastName}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
+import { fmtTime, fmtTimeEnd, fmtDate, studioMinutesFromMidnight, studioDayString } from '@/lib/datetime';
 import { Modal } from '@/components/modal';
 import { Badge } from '@/components/badge';
 import { SearchableSelect } from '@/components/searchable-select';
@@ -53,18 +54,10 @@ function getWeekStart(date: Date) {
 }
 function formatDate(d: Date) { return d.toISOString().split('T')[0]!; }
 
+// Position on the day grid using the lesson's wall-clock time in the studio zone
+// (so a 16:00 lesson sits at the 16:00 row for every viewer, not the browser's zone).
 function minutesFromDayStart(iso: string): number {
-  const d = new Date(iso);
-  return (d.getHours() - DAY_START) * 60 + d.getMinutes();
-}
-
-function fmtTime(iso: string) {
-  return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-}
-
-function fmtTimeEnd(iso: string, dur: number) {
-  const d = new Date(new Date(iso).getTime() + dur * 60000);
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return studioMinutesFromMidnight(iso) - DAY_START * 60;
 }
 
 // ─── Overlap-aware column layout ──────────────────────────────────────────────
@@ -557,11 +550,9 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
   useEffect(() => {
     setShowReschedule(false); setActionError('');
     if (lesson) {
-      // Local-time date/time components — formatDate()'s toISOString() is UTC and can
-      // land on the wrong calendar day relative to what's shown elsewhere in this modal.
-      const d = new Date(lesson.startsAt);
-      const localDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      setNewDate(localDate);
+      // Prefill date + time in the studio zone so they match what's shown elsewhere
+      // and round-trip correctly (the backend interprets the naive value as studio-local).
+      setNewDate(studioDayString(lesson.startsAt));
       setNewTime(fmtTime(lesson.startsAt));
     }
   }, [lesson?.id]);
@@ -601,7 +592,6 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
     } finally { setSaving(false); }
   }
 
-  const start = new Date(lesson.startsAt);
   const instr = lesson.enrollment?.instrument;
   const isGrp = lesson.enrollment?.lessonType === 'group';
   const actions = isGrp ? GROUP_ATTENDANCE : PRIVATE_ATTENDANCE;
@@ -615,7 +605,7 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
           <div className="flex justify-between items-start gap-4">
             <span className="shrink-0" style={{ color: 'var(--txt3)' }}>Date &amp; time</span>
             <span className="font-semibold text-right">
-              {start.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+              {fmtDate(lesson.startsAt, { weekday: 'long', day: 'numeric', month: 'long' })}
               {', '}{fmtTime(lesson.startsAt)} – {fmtTimeEnd(lesson.startsAt, lesson.duration)}
             </span>
           </div>
@@ -803,14 +793,14 @@ export default function CalendarPage() {
   function dayLessons(dayIndex: number): Lesson[] {
     const d = new Date(weekStart);
     d.setDate(d.getDate() + dayIndex);
-    const dayStr = formatDate(d);
-    return lessons.filter(l => l.startsAt.startsWith(dayStr));
+    const dayStr = studioDayString(d);
+    return lessons.filter(l => studioDayString(l.startsAt) === dayStr);
   }
 
   // Lessons for a specific teacher on the anchor day — day view
   function teacherDayLessons(teacherId: string | null): Lesson[] {
-    const dayStr = formatDate(anchorDate);
-    return lessons.filter(l => l.startsAt.startsWith(dayStr) && (l.teacher?.id ?? null) === teacherId);
+    const dayStr = studioDayString(anchorDate);
+    return lessons.filter(l => studioDayString(l.startsAt) === dayStr && (l.teacher?.id ?? null) === teacherId);
   }
 
   const weekLabel = `${weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – ${new Date(weekStart.getTime() + 6 * 86400000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
@@ -820,7 +810,7 @@ export default function CalendarPage() {
   const isAnchorToday = anchorStr === todayStr;
 
   // teacher columns for day view: assigned teachers + an "Unassigned" bucket if needed
-  const dayLessonsToday = lessons.filter(l => l.startsAt.startsWith(anchorStr));
+  const dayLessonsToday = lessons.filter(l => studioDayString(l.startsAt) === studioDayString(anchorDate));
   const hasUnassigned = dayLessonsToday.some(l => !l.teacher);
   const teacherCols: { id: string | null; name: string }[] = [
     ...staff.map(s => ({ id: s.id, name: `${s.firstName} ${s.lastName}` })),
