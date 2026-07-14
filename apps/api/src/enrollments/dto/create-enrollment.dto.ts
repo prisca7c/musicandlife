@@ -24,6 +24,13 @@ export class CreateEnrollmentDto {
   @Min(0)
   rate?: number;
 
+  // The UI sends the chosen lesson length as `duration`; it's persisted on the
+  // enrollment as `defaultDuration` (the column name) by the service.
+  @IsOptional()
+  @IsInt()
+  @Min(15)
+  duration?: number;
+
   @IsOptional()
   @IsObject()
   scheduleRule?: { weekday: string; startTime: string };
