@@ -9,37 +9,45 @@ interface Window { id: string; weekday: string; startTime: string; endTime: stri
 
 const WEEKDAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
 
-export function StaffAvailability({ staffId }: { staffId: string }) {
+/**
+ * Availability editor. Managers pass a `staffId` to edit any teacher's windows;
+ * teachers pass `self` to edit their own via the self-scoped `/staff/me` routes.
+ */
+export function StaffAvailability({ staffId, self = false }: { staffId?: string; self?: boolean }) {
+  const base = self ? '/staff/me/availability' : `/staff/${staffId}/availability`;
   const [windows, setWindows] = useState<Window[]>([]);
   const [open, setOpen] = useState(false);
   const [weekday, setWeekday] = useState('monday');
   const [startTime, setStartTime] = useState('09:00');
   const [endTime, setEndTime] = useState('17:00');
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   function load() {
-    apiFetch<Window[]>(`/staff/${staffId}/availability`, { token: tok() })
+    apiFetch<Window[]>(base, { token: tok() })
       .then(setWindows).catch(() => {});
   }
 
-  useEffect(() => { load(); }, [staffId]);
+  useEffect(() => { load(); }, [base]);
 
   async function add() {
+    setError('');
+    if (endTime <= startTime) { setError('End time must be after start time.'); return; }
     setSaving(true);
     try {
-      await apiFetch(`/staff/${staffId}/availability`, {
+      await apiFetch(base, {
         method: 'POST', token: tok(),
         body: JSON.stringify({ weekday, startTime, endTime }),
       });
       setOpen(false);
       load();
-    } catch (e) { console.error(e); }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not add window'); }
     finally { setSaving(false); }
   }
 
   async function remove(windowId: string) {
-    await apiFetch(`/staff/${staffId}/availability/${windowId}`, { method: 'DELETE', token: tok() });
+    await apiFetch(`${base}/${windowId}`, { method: 'DELETE', token: tok() });
     load();
   }
 
@@ -52,7 +60,7 @@ export function StaffAvailability({ staffId }: { staffId: string }) {
     <div className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: 'var(--bd)' }}>
       <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
         <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Availability windows</h2>
-        <button onClick={() => setOpen(true)}
+        <button onClick={() => { setError(''); setOpen(true); }}
           className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-[var(--sage)] text-white hover:bg-[var(--sage-dk)]">
           <Plus size={13} /> Add window
         </button>
@@ -108,6 +116,7 @@ export function StaffAvailability({ staffId }: { staffId: string }) {
                 className="w-full border border-[var(--bd2)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[var(--sage)]" />
             </div>
           </div>
+          {error && <p className="text-xs" style={{ color: 'var(--coral)' }}>{error}</p>}
           <button onClick={add} disabled={saving}
             className="w-full bg-[var(--sage)] text-white font-bold text-sm py-2.5 rounded-xl hover:bg-[var(--sage-dk)] disabled:opacity-50">
             {saving ? 'Saving…' : 'Add window'}
