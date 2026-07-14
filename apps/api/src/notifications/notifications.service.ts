@@ -53,6 +53,10 @@ const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: string; html
     subject: 'Lesson cancelled',
     html: `<p>A lesson has been cancelled.</p><p>${ctx.body}</p>`,
   }),
+  'lesson.rescheduled': (ctx) => ({
+    subject: 'Your lesson has been rescheduled',
+    html: `<p>A lesson has been rescheduled to a new time.</p><p>${ctx.body}</p><p>If this new time doesn't work for you, please get in touch and we'll sort it out.</p>`,
+  }),
   'invoice.sent': (ctx) => ({
     subject: ctx.subject ?? 'New invoice from Music & Life',
     html: `<p>An invoice has been issued to your account.</p><p>${ctx.body}</p>`,
@@ -75,6 +79,7 @@ export const DEFAULT_RULES: Array<{
   { triggerEvent: 'registration.denied', templateId: 'registration.denied.family', channels: ['email'] },
   { triggerEvent: 'lesson.reminder_24h', templateId: 'lesson.reminder_24h', channels: ['email'] },
   { triggerEvent: 'lesson.cancelled', templateId: 'lesson.cancelled', channels: ['email'] },
+  { triggerEvent: 'lesson.rescheduled', templateId: 'lesson.rescheduled', channels: ['email'] },
   { triggerEvent: 'invoice.sent', templateId: 'invoice.sent', channels: ['email'] },
   { triggerEvent: 'invoice.preview_summary', templateId: 'invoice.preview_summary', channels: ['email'] },
 ];

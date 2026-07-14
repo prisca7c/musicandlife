@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and, gte, lte, ne, isNull, sql } from 'drizzle-orm';
 import { lessons, rescheduleRequests, lessonCredits, availability, blockedTime, students, staffMembers, rooms } from '@music-life/db';
 import type { Db } from '@music-life/db';
@@ -8,6 +8,7 @@ import type { UpdateLessonDto } from './dto/update-lesson.dto';
 import type { CancelLessonDto } from './dto/cancel-lesson.dto';
 import type { CreateRescheduleRequestDto } from './dto/reschedule-request.dto';
 import type { BaseRole } from '@music-life/types';
+import { NotificationsService } from '../notifications/notifications.service';
 
 // Resolves to the caller's own staffId when their role is exactly 'teacher' (so service
 // methods can scope/ownership-check); higher roles (receptionist+) act unrestricted.
@@ -20,7 +21,12 @@ type Executor = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
 
 @Injectable()
 export class SchedulingService {
-  constructor(private readonly db: DbService) {}
+  private readonly logger = new Logger(SchedulingService.name);
+
+  constructor(
+    private readonly db: DbService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   // Booking conflicts are check-then-act, which races: two concurrent bookings can
   // both pass the conflict check and then both insert, double-booking a teacher or
@@ -175,6 +181,33 @@ export class SchedulingService {
         .where(eq(lessons.id, id))
         .returning();
       return updated!;
+    }).then(async (updated) => {
+      // Notify the family their lesson moved (best-effort, never blocks the reschedule).
+      // Fires for BOTH the direct reschedule path and reschedule-request approval,
+      // since decideRescheduleRequest routes through here.
+      await this.notifyRescheduled(orgId, updated).catch((e) =>
+        this.logger.warn(`lesson.rescheduled notify failed: ${e}`),
+      );
+      return updated;
+    });
+  }
+
+  /** Emails the student's family that their lesson time changed. Best-effort. */
+  private async notifyRescheduled(orgId: string, lesson: { studentId: string; startsAt: Date }) {
+    const student = await this.db.db.query.students.findFirst({
+      where: eq(students.id, lesson.studentId),
+      columns: { firstName: true },
+      with: { family: { columns: { email: true } } },
+    });
+    const email = student?.family?.email;
+    if (!email) return;
+    const when = new Date(lesson.startsAt).toLocaleString('en-GB', {
+      weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
+    });
+    await this.notifications.trigger('lesson.rescheduled', {
+      orgId,
+      email,
+      body: `${student.firstName ?? 'Your child'}'s lesson is now on ${when}.`,
     });
   }
 
