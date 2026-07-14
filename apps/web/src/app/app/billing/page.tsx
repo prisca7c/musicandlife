@@ -4,6 +4,7 @@ import { useState, useEffect, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { SearchableSelect } from '@/components/searchable-select';
@@ -319,7 +320,12 @@ export default function BillingPage() {
       <CreateInvoiceModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={load} />
       <RecordPaymentModal open={showPayment} onClose={() => setShowPayment(false)} onCreated={load} />
       <PageHeader
-        title="Billing"
+        title={
+          <span className="inline-flex items-center gap-2">
+            Billing
+            <InfoTooltip text="'Outstanding' is the total still unpaid across all invoices. Staff see the whole studio's balance here; a parent signed in sees only their own family's invoices and what they owe." />
+          </span>
+        }
         subtitle={outstanding > 0 ? `£${(outstanding / 100).toFixed(2)} outstanding` : undefined}
         action={
           <div className="flex gap-2">

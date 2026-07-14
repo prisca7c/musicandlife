@@ -10,7 +10,7 @@ import {
   FileText, BarChart3, Settings,
   Briefcase, CreditCard, UserCheck, BookOpen,
   Clock, History, ChevronLeft, ChevronRight, ChevronDown,
-  LogOut, PanelLeftClose, PanelLeftOpen, Megaphone,
+  LogOut, PanelLeftClose, PanelLeftOpen, Megaphone, CalendarClock,
 } from 'lucide-react';
 import type { BaseRole } from '@music-life/types';
 import { apiFetch } from '@/lib/api';
@@ -24,6 +24,7 @@ const NAV: NavItem[] = [
   { label: 'History',      href: '/app/family/history',    roles: ['guardian','student'],                                     icon: <History size={16} /> },
   { label: 'Calendar',     href: '/app/calendar',          roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <Calendar size={16} /> },
   { label: 'Attendance',   href: '/app/attendance',        roles: ['system_admin','admin','manager','teacher'],               icon: <ClipboardCheck size={16} /> },
+  { label: 'Reschedules',  href: '/app/reschedule-requests', roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <CalendarClock size={16} /> },
   { label: 'Notes',        href: '/app/notes',             roles: ['system_admin','admin','manager','teacher'],               icon: <FileText size={16} /> },
   { label: 'Students',     href: '/app/students',          roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <UserCheck size={16} /> },
   { label: 'Families',     href: '/app/families',          roles: ['system_admin','admin','manager','receptionist'],          icon: <Home size={16} /> },
@@ -42,7 +43,7 @@ const NAV: NavItem[] = [
 // Group nav sections
 const GROUPS = [
   { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History'] },
-  { label: 'Studio',   items: ['Calendar','Attendance','Notes','Intake','Messages'] },
+  { label: 'Studio',   items: ['Calendar','Attendance','Reschedules','Notes','Intake','Messages'] },
   { label: 'People',   items: ['Students','Families','Staff','Payroll'] },
   { label: 'Finance',  items: ['Billing'] },
   { label: 'Content',  items: ['Resources','Content','Studio News'] },

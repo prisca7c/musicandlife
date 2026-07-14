@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
 import { Calendar } from 'lucide-react';
 
@@ -54,7 +55,15 @@ export default function FamilyHistoryPage() {
 
   return (
     <div>
-      <PageHeader title="Lesson history" subtitle="A record of all your family's lessons" />
+      <PageHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            Lesson history
+            <InfoTooltip text="Every lesson your family has had, plus any cancellations. A 'makeup credit' is a missed lesson you're allowed to rebook later at no extra charge — it'll show here when one is owed to you." />
+          </span>
+        }
+        subtitle="A record of all your family's lessons"
+      />
 
       {/* Filters */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">

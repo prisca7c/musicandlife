@@ -4,6 +4,7 @@ import { useState, useEffect, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { SearchableSelect } from '@/components/searchable-select';
@@ -234,7 +235,14 @@ export default function PayrollPage() {
     <div>
       <CreateRunModal open={showRun} onClose={() => setShowRun(false)} onCreated={load} />
       <AddExpenseModal open={showExpense} onClose={() => setShowExpense(false)} onCreated={load} />
-      <PageHeader title="Payroll & Expenses" subtitle="Under Teachers &amp; Staff"
+      <PageHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            Payroll &amp; Expenses
+            <InfoTooltip text="A payroll run totals each teacher's completed lessons over a period at their pay rate, plus any approved expenses. Nothing is paid out automatically — it's a summary you review and action outside the platform." />
+          </span>
+        }
+        subtitle="Under Teachers &amp; Staff"
         action={
           <div className="flex gap-2">
             <button onClick={() => setShowExpense(true)} className="ui-btn-ghost">+ Add expense</button>

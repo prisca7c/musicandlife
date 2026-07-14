@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-export function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: ReactNode }) {
+export function PageHeader({ title, subtitle, action }: { title: ReactNode; subtitle?: string; action?: ReactNode }) {
   return (
     <div className="flex items-start justify-between mb-7">
       <div>

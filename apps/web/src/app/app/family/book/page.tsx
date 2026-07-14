@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { ChevronLeft, ChevronRight, Check, Loader2 } from 'lucide-react';
 
 interface Teacher { id: string; firstName: string; lastName: string; instruments: string[]; defaultDuration: number; }
@@ -105,7 +106,15 @@ export default function BookLessonPage() {
 
   return (
     <div>
-      <PageHeader title="Book a lesson" subtitle="Pick a teacher, then choose a slot" />
+      <PageHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            Book a lesson
+            <InfoTooltip text="You'll only ever see times the teacher is genuinely free — we hide slots that clash with another lesson or fall outside their working hours. Pick a slot and the studio confirms it shortly after." />
+          </span>
+        }
+        subtitle="Pick a teacher, then choose a slot"
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* ── Step 1: Details ── */}

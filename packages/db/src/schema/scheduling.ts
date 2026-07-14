@@ -71,7 +71,12 @@ export const rescheduleRequests = pgTable(
     organizationId: uuid('organization_id').notNull().references(() => organizations.id),
     lessonId: uuid('lesson_id').notNull().references(() => lessons.id),
     requestedBy: uuid('requested_by').notNull().references(() => users.id),
+    // 1st choice (required) + optional 2nd/3rd preferences. Letting a family rank
+    // a few times lets staff/teachers slot students back-to-back instead of
+    // playing email tag over a single proposed time.
     proposedStartsAt: timestamp('proposed_starts_at', { withTimezone: true }).notNull(),
+    proposedStartsAt2: timestamp('proposed_starts_at_2', { withTimezone: true }),
+    proposedStartsAt3: timestamp('proposed_starts_at_3', { withTimezone: true }),
     proposedRoomId: uuid('proposed_room_id').references(() => rooms.id),
     status: text('status', { enum: ['pending','approved','denied'] }).notNull().default('pending'),
     decidedBy: uuid('decided_by').references(() => users.id),

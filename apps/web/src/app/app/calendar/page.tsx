@@ -6,6 +6,7 @@ import { Modal } from '@/components/modal';
 import { Badge } from '@/components/badge';
 import { SearchableSelect } from '@/components/searchable-select';
 import { InstrumentIcon } from '@/components/instrument-icons';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { PRIVATE_INSTRUMENTS, GROUP_INSTRUMENTS, lessonRate } from '@music-life/types';
 import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -691,7 +692,10 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
           <div>
             {showReschedule ? (
               <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
-                <p className="text-sm font-semibold" style={{ color: 'var(--txt2)' }}>Reschedule to</p>
+                <p className="text-sm font-semibold flex items-center gap-1.5" style={{ color: 'var(--txt2)' }}>
+                  Reschedule to
+                  <InfoTooltip text="We'll check the new time is free and inside the teacher's working hours — so you can't accidentally double-book a teacher or room, or pick a time they're unavailable." />
+                </p>
                 <div className="grid grid-cols-2 gap-3">
                   <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} className="ui-input" />
                   <input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} className="ui-input" />
