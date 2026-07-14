@@ -8,11 +8,11 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
-import { eq, and, gte, lte, ne } from 'drizzle-orm';
+import { eq, and, gte, lte, ne, inArray } from 'drizzle-orm';
 import {
   lessons, lessonCredits, notes, families, memberships, guardians,
   students, availability, blockedTime, enrollments, staffMembers,
-  attendance,
+  teacherAssignments, attendance,
 } from '@music-life/db';
 import { AttendanceService } from '../attendance/attendance.service';
 import type { RequestUser } from '@music-life/types';
@@ -363,6 +363,57 @@ export class FamilyPortalController {
       columns: { id: true, firstName: true, lastName: true, instruments: true, defaultDuration: true },
     });
     return teachers;
+  }
+
+  // ─── This family's own teachers' weekly availability windows ───────────────
+  // Powers the "when your teacher is free" visual on the family dashboard. Only
+  // returns windows for teachers the family's students are actually linked to
+  // (via enrollment or assignment), so families don't see the whole roster.
+  @Get('teacher-availability')
+  @Roles('guardian')
+  async teacherAvailability(@CurrentUser() user: RequestUser) {
+    const guardian = await this.db.db.query.guardians.findFirst({
+      where: and(eq(guardians.userId, user.userId), eq(guardians.organizationId, user.orgId)),
+    });
+    if (!guardian) return [];
+    const family = await this.db.db.query.families.findFirst({
+      where: eq(families.id, guardian.familyId),
+      with: { students: { columns: { id: true } } },
+    });
+    const studentIds = family?.students.map(s => s.id) ?? [];
+    if (studentIds.length === 0) return [];
+
+    const [enr, assigns] = await Promise.all([
+      this.db.db.query.enrollments.findMany({
+        where: and(eq(enrollments.organizationId, user.orgId), inArray(enrollments.studentId, studentIds)),
+        columns: { teacherId: true },
+      }),
+      this.db.db.query.teacherAssignments.findMany({
+        where: and(eq(teacherAssignments.organizationId, user.orgId), inArray(teacherAssignments.studentId, studentIds)),
+        columns: { staffId: true },
+      }),
+    ]);
+    const teacherIds = [...new Set([
+      ...enr.map(e => e.teacherId).filter((id): id is string => !!id),
+      ...assigns.map(a => a.staffId),
+    ])];
+    if (teacherIds.length === 0) return [];
+
+    const [wins, teachers] = await Promise.all([
+      this.db.db.query.availability.findMany({
+        where: and(eq(availability.organizationId, user.orgId), inArray(availability.staffId, teacherIds)),
+        orderBy: (a, { asc }) => [asc(a.weekday), asc(a.startTime)],
+      }),
+      this.db.db.query.staffMembers.findMany({
+        where: and(eq(staffMembers.organizationId, user.orgId), inArray(staffMembers.id, teacherIds)),
+        columns: { id: true, firstName: true, lastName: true },
+      }),
+    ]);
+    const nameById = Object.fromEntries(teachers.map(t => [t.id, `${t.firstName} ${t.lastName}`]));
+    return wins.map(w => ({
+      id: w.id, staffId: w.staffId, weekday: w.weekday, startTime: w.startTime, endTime: w.endTime,
+      teacherName: nameById[w.staffId] ?? 'Teacher',
+    }));
   }
 
   // ─── Confirmation emails ──────────────────────────────────────────────────

@@ -27,6 +27,7 @@ interface Enrollment {
   teacherId?: string | null; rate?: number; defaultDuration?: number;
 }
 interface StudentDetail { id: string; enrollments: Enrollment[]; }
+interface Availability { id: string; staffId: string; weekday: string; startTime: string; endTime: string; }
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 const PX_PER_HOUR = 88;          // pixel height per 1 hour band
@@ -34,7 +35,38 @@ const DAY_START   = 8;           // 08:00
 const DAY_END     = 21;          // 21:00
 const HOURS       = Array.from({ length: DAY_END - DAY_START }, (_, i) => i + DAY_START);
 const DAYS        = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const WEEKDAY_KEYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const TOTAL_H     = HOURS.length * PX_PER_HOUR; // 1144px
+
+// ─── Availability band geometry (windows are studio wall-clock "HH:MM") ─────────
+function hhmmToMin(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+/** Pixel top/height for a window, clamped to the visible DAY_START..DAY_END range. */
+function bandBox(startMin: number, endMin: number): { top: number; height: number } | null {
+  const top = Math.max((startMin - DAY_START * 60) / 60 * PX_PER_HOUR, 0);
+  const bottom = Math.min((endMin - DAY_START * 60) / 60 * PX_PER_HOUR, TOTAL_H);
+  if (bottom <= top) return null;
+  return { top, height: bottom - top };
+}
+/** Merge overlapping windows into a flat set of [start,end] minute ranges (for the week view union). */
+function mergeWindows(wins: Availability[]): [number, number][] {
+  const iv = wins.map(w => [hhmmToMin(w.startTime), hhmmToMin(w.endTime)] as [number, number])
+    .sort((a, b) => a[0] - b[0]);
+  const out: [number, number][] = [];
+  for (const [s, e] of iv) {
+    const last = out[out.length - 1];
+    if (last && s <= last[1]) last[1] = Math.max(last[1], e);
+    else out.push([s, e]);
+  }
+  return out;
+}
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function getRoleFromToken(token?: string): string {
@@ -163,7 +195,7 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
   return (
     <button
       onClick={onClick}
-      style={{ top, height, left, width, borderLeftColor: tColor, borderLeftWidth: 3, background: style.bg, borderColor: style.border }}
+      style={{ top, height, left, width, background: style.bg, borderTopColor: style.border, borderRightColor: style.border, borderBottomColor: style.border, borderLeftColor: tColor, borderLeftWidth: 3 }}
       className="absolute rounded-r-lg border cursor-pointer text-left px-1.5 py-1 overflow-hidden transition-all hover:brightness-95 hover:shadow-md group z-10"
     >
       {/* Time range — always shown */}
@@ -737,6 +769,7 @@ export default function CalendarPage() {
   const [slotDate, setSlotDate] = useState<string | undefined>();
   const [slotTime, setSlotTime] = useState<string | undefined>();
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
+  const [availability, setAvailability] = useState<Availability[]>([]);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   const weekStart = getWeekStart(anchorDate);
@@ -754,10 +787,14 @@ export default function CalendarPage() {
         const list = me ? [me] : [];
         setStaff(list); setTeacherColorMap(list);
       }).catch(() => {});
+      // A teacher sees only their own availability windows.
+      apiFetch<Availability[]>('/staff/me/availability', { token: t }).then(setAvailability).catch(() => {});
     } else {
       apiFetch<StaffMember[]>('/staff', { token: t }).then(list => {
         setStaff(list); setTeacherColorMap(list);
       }).catch(() => {});
+      // Admin/manager see every teacher's availability, coloured per teacher.
+      apiFetch<Availability[]>('/staff/availability/all', { token: t }).then(setAvailability).catch(() => {});
     }
   }, []);
 
@@ -801,6 +838,25 @@ export default function CalendarPage() {
   function teacherDayLessons(teacherId: string | null): Lesson[] {
     const dayStr = studioDayString(anchorDate);
     return lessons.filter(l => studioDayString(l.startsAt) === dayStr && (l.teacher?.id ?? null) === teacherId);
+  }
+
+  // Week view: merged "someone is available" bands for a given weekday column.
+  function weekAvailabilityBands(dayIndex: number): { top: number; height: number }[] {
+    const key = WEEKDAY_KEYS[dayIndex];
+    const wins = availability.filter(a => a.weekday === key);
+    return mergeWindows(wins)
+      .map(([s, e]) => bandBox(s, e))
+      .filter((b): b is { top: number; height: number } => b !== null);
+  }
+
+  // Day view: a single teacher's availability windows for the anchor day's weekday.
+  function teacherAvailabilityBands(teacherId: string | null): { top: number; height: number }[] {
+    if (!teacherId) return [];
+    const key = WEEKDAY_KEYS[(anchorDate.getDay() + 6) % 7];
+    return availability
+      .filter(a => a.staffId === teacherId && a.weekday === key)
+      .map(a => bandBox(hhmmToMin(a.startTime), hhmmToMin(a.endTime)))
+      .filter((b): b is { top: number; height: number } => b !== null);
   }
 
   const weekLabel = `${weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – ${new Date(weekStart.getTime() + 6 * 86400000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
@@ -890,6 +946,10 @@ export default function CalendarPage() {
           <span className="w-3 h-3 rounded-sm border-l-2 border-blue-400 bg-blue-50 inline-block" />
           Group (G)
         </span>
+        <span className="flex items-center gap-1 text-[11px] font-semibold" style={{ color: 'var(--sage-dk)' }}>
+          <span className="w-3 h-3 rounded-sm inline-block" style={{ background: hexToRgba('#3D7A55', 0.14), borderLeft: '2px solid rgba(61,122,85,0.4)' }} />
+          Available
+        </span>
         <span className="w-px h-4 bg-[var(--bd2)] mx-1" />
         <span className="text-[11px] text-[var(--txt4)] font-semibold uppercase tracking-wide">Teacher:</span>
         {staff.map(s => (
@@ -960,6 +1020,12 @@ export default function CalendarPage() {
                   {HOURS.map(h => (
                     <div key={h} className="absolute inset-x-0 border-t border-[var(--bd)]"
                       style={{ top: (h - DAY_START) * PX_PER_HOUR }} />
+                  ))}
+
+                  {/* Availability bands — shaded hours a teacher is free to teach */}
+                  {weekAvailabilityBands(di).map((b, bi) => (
+                    <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
+                      style={{ top: b.top, height: b.height, background: hexToRgba('#3D7A55', 0.09), borderLeft: '2px solid rgba(61,122,85,0.35)' }} />
                   ))}
 
                   {/* Half-hour guide lines (lighter) */}
@@ -1059,6 +1125,15 @@ export default function CalendarPage() {
                         <div key={`h${h}`} className="absolute inset-x-0 border-t border-dashed"
                           style={{ top: (h - DAY_START) * PX_PER_HOUR + PX_PER_HOUR / 2, borderColor: '#E2E8F0' }} />
                       ))}
+                      {/* Availability bands — this teacher's free-to-teach hours, in their colour */}
+                      {teacherAvailabilityBands(col.id).map((b, bi) => (
+                        <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
+                          style={{ top: b.top, height: b.height, background: hexToRgba(teacherColor(col.id), 0.1), borderLeft: `2px solid ${hexToRgba(teacherColor(col.id), 0.4)}` }}>
+                          <span className="absolute left-1.5 top-1 text-[8px] font-bold uppercase tracking-wide pointer-events-none"
+                            style={{ color: teacherColor(col.id), opacity: 0.55 }}>Available</span>
+                        </div>
+                      ))}
+
                       {HOURS.map(h => (
                         <div key={`slot${h}`}
                           className="absolute inset-x-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"

@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
+import { PaidDot } from '@/components/paid-dot';
 import { Modal } from '@/components/modal';
 import { SearchableSelect } from '@/components/searchable-select';
 import { Plus, PoundSterling, Trash2 } from 'lucide-react';
@@ -375,7 +376,14 @@ export default function BillingPage() {
                 <td className="text-xs capitalize" style={{ color: 'var(--txt3)' }}>{i.mode.replace(/_/g, ' ')}</td>
                 <td style={{ color: 'var(--txt3)' }}>{i.issuedOn}</td>
                 <td style={{ color: 'var(--txt3)' }}>{i.dueDate}</td>
-                <td className="font-semibold" style={{ textAlign: 'right' }}>£{(i.total / 100).toFixed(2)}</td>
+                <td className="font-semibold" style={{ textAlign: 'right' }}>
+                  <span className="inline-flex items-center gap-2 justify-end">
+                    £{(i.total / 100).toFixed(2)}
+                    {i.status !== 'void' && i.status !== 'draft' && (
+                      <PaidDot paid={i.status === 'paid'} title={i.status === 'paid' ? 'Paid' : 'Awaiting payment'} />
+                    )}
+                  </span>
+                </td>
                 <td><Badge variant={STATUS_COLORS[i.status]}>{i.status}</Badge></td>
               </tr>
             ))}

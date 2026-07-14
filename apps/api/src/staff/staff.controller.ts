@@ -45,6 +45,13 @@ export class StaffController {
     return this.staff.getMyAvailability(user.orgId, user.userId);
   }
 
+  // All teachers' windows (manager+) — powers the admin calendar availability overlay.
+  @Get('availability/all')
+  @Roles('manager')
+  getAllAvailability(@CurrentUser() user: RequestUser) {
+    return this.staff.getAllAvailability(user.orgId);
+  }
+
   @Post('me/availability')
   @Roles('teacher')
   addMyAvailability(@CurrentUser() user: RequestUser, @Body() dto: AddAvailabilityDto) {
