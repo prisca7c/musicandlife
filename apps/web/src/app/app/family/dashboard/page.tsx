@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { fmtTime, fmtDate } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
+import { PaidDot } from '@/components/paid-dot';
 import { Modal } from '@/components/modal';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { linkify } from '@/lib/linkify';
@@ -169,7 +170,10 @@ export default function FamilyDashboardPage() {
         {/* ── Balance / invoice ── */}
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
-            <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--txt3)' }}>Account balance</p>
+            <p className="text-xs font-bold uppercase tracking-widest mb-2 flex items-center gap-2" style={{ color: 'var(--txt3)' }}>
+              Account balance
+              <PaidDot paid={balance >= 0} title={balance >= 0 ? 'Paid up' : 'You have an outstanding balance'} />
+            </p>
             <p className={`text-2xl font-black ${balance >= 0 ? 'text-[var(--sage-dk)]' : 'text-[var(--coral)]'}`}>
               {balance >= 0 ? '+' : ''}£{Math.abs(balance / 100).toFixed(2)}
             </p>

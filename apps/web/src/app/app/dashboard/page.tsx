@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { fmtTime } from '@/lib/datetime';
 import { Badge } from '@/components/badge';
+import { PaidDot } from '@/components/paid-dot';
 import { linkify } from '@/lib/linkify';
 import { useRouter } from 'next/navigation';
 import {
@@ -162,7 +163,12 @@ function AdminDashboard() {
               value={kpis ? `£${(kpis.revenue.thisMonth / 100).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'} />
             <StatCard label="Outstanding" href="/app/billing" icon={<PoundSterling size={20} />}
               warn={(kpis?.invoices.outstandingTotal ?? 0) > 0}
-              value={kpis ? `£${(kpis.invoices.outstandingTotal / 100).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'}
+              value={
+                <span className="inline-flex items-center gap-2">
+                  {kpis ? `£${(kpis.invoices.outstandingTotal / 100).toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : '—'}
+                  {kpis && <PaidDot paid={kpis.invoices.outstandingTotal === 0} title={kpis.invoices.outstandingTotal === 0 ? 'All invoices paid' : 'Money outstanding across the studio'} />}
+                </span>
+              }
               sub={kpis?.invoices.outstandingCount ? `${kpis.invoices.outstandingCount} unpaid invoice${kpis.invoices.outstandingCount !== 1 ? 's' : ''}` : undefined} />
           </>
         )}
