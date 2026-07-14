@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and, gte, lte, ne, isNull, sql } from 'drizzle-orm';
-import { lessons, rescheduleRequests, lessonCredits, availability, blockedTime, students, staffMembers, rooms, organizations } from '@music-life/db';
+import { lessons, rescheduleRequests, lessonCredits, availability, blockedTime, students, staffMembers, rooms, organizations, enrollments } from '@music-life/db';
 import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateLessonDto } from './dto/create-lesson.dto';
@@ -14,6 +14,56 @@ import { parseZonedDateTime } from '../common/timezone';
 // Resolves to the caller's own staffId when their role is exactly 'teacher' (so service
 // methods can scope/ownership-check); higher roles (receptionist+) act unrestricted.
 export interface Actor { role: BaseRole; userId: string }
+
+// How many weeks ahead recurring weekly lessons are materialised as real rows.
+export const RECURRENCE_WINDOW_WEEKS = 12;
+
+const WEEKDAY_INDEX: Record<string, number> = {
+  sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
+};
+
+/**
+ * Naive wall-clock datetime strings ("YYYY-MM-DDThh:mm:00") for every weekly
+ * occurrence of `weekday`/`startTime` in the studio's timezone, from `from`
+ * (exclusive of times already past today) through `weeks` weeks ahead.
+ *
+ * Occurrences are stepped on the studio-local calendar and returned as *naive*
+ * strings so the caller can hand them straight to createLesson, which interprets
+ * them in the studio zone — this keeps recurring lessons on the same wall-clock
+ * time across DST changes (16:00 stays 16:00, not drifting to 15:00/17:00).
+ */
+export function weeklyOccurrenceStrings(
+  from: Date, weeks: number, weekday: string, startTime: string, timeZone: string,
+): string[] {
+  const targetDow = WEEKDAY_INDEX[weekday.toLowerCase()];
+  if (targetDow === undefined) return [];
+  if (!/^\d{1,2}:\d{2}$/.test(startTime)) return [];
+
+  // Studio-local "today" as YYYY-MM-DD (en-CA renders ISO order).
+  const todayStr = new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(from);
+  const [y, mo, d] = todayStr.split('-').map(Number);
+
+  // Anchor at UTC noon so weekday + date stepping are DST-proof (the calendar
+  // date of a noon-UTC instant matches the studio-local date for all real zones).
+  const cursor = new Date(Date.UTC(y!, mo! - 1, d!, 12));
+  while (cursor.getUTCDay() !== targetDow) cursor.setUTCDate(cursor.getUTCDate() + 1);
+
+  const windowEnd = new Date(from.getTime() + weeks * 7 * 86400000);
+  const out: string[] = [];
+  for (let i = 0; i <= weeks; i++) {
+    const yy = cursor.getUTCFullYear();
+    const mm = String(cursor.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(cursor.getUTCDate()).padStart(2, '0');
+    const [hh, min] = startTime.split(':');
+    const naive = `${yy}-${mm}-${dd}T${hh!.padStart(2, '0')}:${min}:00`;
+    const instant = parseZonedDateTime(naive, timeZone);
+    if (instant >= from && instant <= windowEnd) out.push(naive);
+    cursor.setUTCDate(cursor.getUTCDate() + 7);
+  }
+  return out;
+}
 
 // The executor passed to conflict-checking helpers — either the pooled db or an
 // open transaction. Booking writes always run on a transaction so the conflict
@@ -120,6 +170,101 @@ export class SchedulingService {
         .returning();
       return lesson!;
     });
+  }
+
+  // ─── Recurring weekly lessons ──────────────────────────────────────────────
+  /**
+   * Materialise real lesson rows for one enrollment's weekly schedule, from now
+   * through `weeks` weeks ahead. Idempotent: occurrences that already have a
+   * lesson (same enrollment + instant) are skipped, so it's safe to call
+   * repeatedly (on schedule-rule change, and from the daily top-up worker).
+   * Conflicts (teacher/room already booked) are skipped and counted, not thrown,
+   * so one clash never aborts the whole series.
+   */
+  async materializeEnrollment(
+    orgId: string,
+    enrollmentId: string,
+    opts?: { weeks?: number; fromDate?: string },
+  ): Promise<{ created: number; skippedExisting: number; skippedConflicts: number; through: string; weeks: number }> {
+    const weeks = Math.min(Math.max(opts?.weeks ?? RECURRENCE_WINDOW_WEEKS, 1), 52);
+
+    const enrollment = await this.db.db.query.enrollments.findFirst({
+      where: and(eq(enrollments.id, enrollmentId), eq(enrollments.organizationId, orgId)),
+    });
+    if (!enrollment) throw new NotFoundException('Enrollment not found');
+
+    const rule = enrollment.scheduleRule as { weekday?: string; startTime?: string } | null;
+    if (!rule?.weekday || !rule?.startTime) {
+      throw new BadRequestException('This enrollment has no weekly schedule (weekday + time) set');
+    }
+
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    // A supplied start date is a studio-local wall-clock date; interpret it in the
+    // studio zone. Never generate lessons in the past: clamp to now so back-dated
+    // enrollments don't create historical rows.
+    const now = new Date();
+    const fromArg = opts?.fromDate
+      ? parseZonedDateTime(opts.fromDate.includes('T') ? opts.fromDate : `${opts.fromDate}T00:00:00`, tz)
+      : now;
+    const from = fromArg > now ? fromArg : now;
+    const windowEnd = new Date(from.getTime() + weeks * 7 * 86400000);
+    const occurrences = weeklyOccurrenceStrings(from, weeks, rule.weekday, rule.startTime, tz);
+
+    const existing = await this.db.db.query.lessons.findMany({
+      where: and(
+        eq(lessons.enrollmentId, enrollment.id),
+        gte(lessons.startsAt, from),
+        lte(lessons.startsAt, windowEnd),
+      ),
+      columns: { startsAt: true },
+    });
+    const existingTimes = new Set(existing.map((l) => l.startsAt.getTime()));
+
+    let created = 0, skippedExisting = 0, skippedConflicts = 0;
+    for (const naive of occurrences) {
+      const instant = parseZonedDateTime(naive, tz);
+      if (existingTimes.has(instant.getTime())) { skippedExisting++; continue; }
+      try {
+        await this.createLesson(orgId, {
+          studentId: enrollment.studentId,
+          startsAt: naive,
+          duration: enrollment.defaultDuration,
+          teacherId: enrollment.teacherId ?? undefined,
+          enrollmentId: enrollment.id,
+          termId: enrollment.termId ?? undefined,
+        });
+        created++;
+      } catch (err) {
+        skippedConflicts++;
+        this.logger.warn(
+          `Skipped recurring lesson for enrollment ${enrollment.id} at ${naive}: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    }
+    return { created, skippedExisting, skippedConflicts, through: windowEnd.toISOString(), weeks };
+  }
+
+  /**
+   * Top up recurring lessons for every active enrollment that has a weekly
+   * schedule. Used by the daily RecurrenceWorker. `orgId` scopes the scan (tests
+   * pass a throwaway org); omitted = all orgs.
+   */
+  async materializeAllRecurring(orgId?: string): Promise<{ created: number; skippedExisting: number; skippedConflicts: number }> {
+    const active = await this.db.db.query.enrollments.findMany({
+      where: orgId
+        ? and(eq(enrollments.status, 'active'), eq(enrollments.organizationId, orgId))
+        : eq(enrollments.status, 'active'),
+      columns: { id: true, organizationId: true, scheduleRule: true },
+    });
+
+    let created = 0, skippedExisting = 0, skippedConflicts = 0;
+    for (const e of active) {
+      const rule = e.scheduleRule as { weekday?: string; startTime?: string } | null;
+      if (!rule?.weekday || !rule?.startTime) continue;
+      const r = await this.materializeEnrollment(e.organizationId, e.id);
+      created += r.created; skippedExisting += r.skippedExisting; skippedConflicts += r.skippedConflicts;
+    }
+    return { created, skippedExisting, skippedConflicts };
   }
 
   async updateLesson(orgId: string, id: string, dto: UpdateLessonDto) {
