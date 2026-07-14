@@ -260,6 +260,9 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   const [instrument, setInstrument] = useState('');
   const [groupName, setGroupName] = useState('');
   const [duration, setDuration] = useState('60');
+  const [repeat, setRepeat] = useState(false);
+  const [repeatWeeks, setRepeatWeeks] = useState('12');
+  const [result, setResult] = useState<{ created: number; through: string } | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [isTeacher, setIsTeacher] = useState(false);
@@ -269,6 +272,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
     if (!open) return;
     setStudentId(''); setTeacherId(''); setRoomId(''); setDuration('60');
     setLessonType('private'); setInstrument(''); setGroupName('');
+    setRepeat(false); setRepeatWeeks('12'); setResult(null);
     const t = tok();
     const role = getRoleFromToken(t);
     const teacherSelf = role === 'teacher';
@@ -318,15 +322,34 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
         enrollmentId = created.id;
       }
 
-      await apiFetch('/lessons', { method: 'POST', token: t, body: JSON.stringify({
-        studentId, teacherId: teacherId || undefined,
-        roomId: roomId || undefined,
-        enrollmentId,
-        startsAt: `${f.get('date')}T${f.get('time')}:00`,
-        duration: parseInt(duration) || 60,
-        notes: f.get('notes') || undefined,
-      })});
-      onCreated(); onClose();
+      const date = f.get('date') as string;
+      const time = f.get('time') as string;
+
+      if (repeat) {
+        // Set the enrollment's weekly schedule (weekday derived from the picked
+        // date), then materialise the series from that date so every week appears
+        // on the calendar at once.
+        const weekday = WEEKDAY_KEYS[(new Date(`${date}T12:00:00`).getDay() + 6) % 7];
+        await apiFetch(`/enrollments/${enrollmentId}`, {
+          method: 'PATCH', token: t, body: JSON.stringify({ scheduleRule: { weekday, startTime: time } }),
+        });
+        const r = await apiFetch<{ created: number; through: string }>('/lessons/recurring', {
+          method: 'POST', token: t,
+          body: JSON.stringify({ enrollmentId, weeks: parseInt(repeatWeeks) || 12, startFrom: date }),
+        });
+        onCreated();
+        setResult({ created: r.created, through: r.through });
+      } else {
+        await apiFetch('/lessons', { method: 'POST', token: t, body: JSON.stringify({
+          studentId, teacherId: teacherId || undefined,
+          roomId: roomId || undefined,
+          enrollmentId,
+          startsAt: `${date}T${time}:00`,
+          duration: parseInt(duration) || 60,
+          notes: f.get('notes') || undefined,
+        })});
+        onCreated(); onClose();
+      }
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
     finally { setSaving(false); }
   }
@@ -339,6 +362,23 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
           {error}
         </div>
       )}
+      {result ? (
+        <div className="space-y-4">
+          <div className="rounded-xl px-4 py-4 text-sm"
+            style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)', border: '1px solid var(--sage)' }}>
+            <p className="font-bold text-base mb-1">Weekly lessons booked ✓</p>
+            {result.created > 0 ? (
+              <p>Added <strong>{result.created}</strong> weekly lesson{result.created !== 1 ? 's' : ''} through{' '}
+                {new Date(result.through).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.</p>
+            ) : (
+              <p>No new lessons were booked — they may already exist for this weekly slot.</p>
+            )}
+          </div>
+          <div className="flex gap-3">
+            <button type="button" onClick={onClose} className="ui-btn-primary">Done</button>
+          </div>
+        </div>
+      ) : (
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="ui-label">Student <span style={{ color: 'var(--coral)' }}>*</span></label>
@@ -418,17 +458,41 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
             />
           </div>
         </div>
-        <div>
-          <label className="ui-label">Notes</label>
-          <textarea name="notes" rows={2} className="ui-input" style={{ resize: 'vertical' }} />
+        {!repeat && (
+          <div>
+            <label className="ui-label">Notes</label>
+            <textarea name="notes" rows={2} className="ui-input" style={{ resize: 'vertical' }} />
+          </div>
+        )}
+
+        {/* Repeat weekly — turns this into a recurring weekly booking */}
+        <div className="rounded-xl border p-3" style={{ borderColor: repeat ? 'var(--sage)' : 'var(--bd)', background: repeat ? 'var(--sage-lt)' : 'transparent' }}>
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)}
+              className="h-4 w-4 rounded" style={{ accentColor: 'var(--sage)' }} />
+            <span className="text-sm font-semibold" style={{ color: 'var(--txt)' }}>Repeat weekly</span>
+          </label>
+          {repeat && (
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-sm" style={{ color: 'var(--txt3)' }}>Book the same slot for the next</span>
+              <div className="w-24">
+                <SearchableSelect
+                  options={[4, 8, 12, 16, 24, 36, 52].map(w => ({ value: String(w), label: `${w} weeks` }))}
+                  value={repeatWeeks} onChange={setRepeatWeeks}
+                />
+              </div>
+            </div>
+          )}
         </div>
+
         <div className="flex gap-3 pt-1">
           <button type="submit" disabled={saving} className="ui-btn-primary">
-            {saving ? 'Saving…' : 'Add lesson'}
+            {saving ? 'Saving…' : repeat ? 'Book weekly lessons' : 'Add lesson'}
           </button>
           <button type="button" onClick={onClose} className="ui-btn-ghost">Cancel</button>
         </div>
       </form>
+      )}
     </Modal>
   );
 }

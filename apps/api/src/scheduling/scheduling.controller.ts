@@ -3,6 +3,7 @@ import { SchedulingService } from './scheduling.service';
 import { CreateLessonDto } from './dto/create-lesson.dto';
 import { UpdateLessonDto } from './dto/update-lesson.dto';
 import { CancelLessonDto } from './dto/cancel-lesson.dto';
+import { GenerateRecurringDto } from './dto/generate-recurring.dto';
 import { CreateRescheduleRequestDto, DecideRescheduleDto } from './dto/reschedule-request.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -31,6 +32,18 @@ export class SchedulingController {
   @Roles('receptionist')
   createLesson(@CurrentUser() user: RequestUser, @Body() dto: CreateLessonDto) {
     return this.scheduling.createLesson(user.orgId, dto);
+  }
+
+  // Materialise an enrollment's weekly schedule into real lessons now, rather than
+  // waiting for the daily recurrence worker (so booking a weekly lesson shows up
+  // on the calendar immediately).
+  @Post('lessons/recurring')
+  @Roles('receptionist')
+  generateRecurring(@CurrentUser() user: RequestUser, @Body() dto: GenerateRecurringDto) {
+    return this.scheduling.materializeEnrollment(user.orgId, dto.enrollmentId, {
+      weeks: dto.weeks,
+      fromDate: dto.startFrom,
+    });
   }
 
   @Get('lessons/:id')
