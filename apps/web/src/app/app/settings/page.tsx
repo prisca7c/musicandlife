@@ -5,6 +5,7 @@ import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { Building2, Receipt, Calendar, Plus, Check, Bell, Mail } from 'lucide-react';
 
 interface NotificationRule {
@@ -40,7 +41,7 @@ interface Term { id: string; name: string; startsOn: string; endsOn: string; wee
 const inputCls = 'w-full border-[1.5px] border-[var(--bd2)] rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[var(--sage)] focus:shadow-[0_0_0_3px_var(--sage-lt)] transition-all';
 const labelCls = 'block text-xs font-semibold text-[var(--txt2)] mb-1.5 tracking-wide';
 
-function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
+function Section({ title, icon, children }: { title: React.ReactNode; icon: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="bg-white rounded-2xl border border-[var(--bd)] overflow-hidden">
       <div className="flex items-center gap-2.5 px-6 py-4 border-b border-[var(--bd)]"
@@ -254,7 +255,15 @@ export default function SettingsPage() {
       </Section>
 
       {/* Notification rules */}
-      <Section title="Notification rules" icon={<Bell size={18} />}>
+      <Section
+        title={
+          <span className="inline-flex items-center gap-2">
+            Notification rules
+            <InfoTooltip text="Each rule links a studio event (a booking, a cancellation, a reschedule) to the channels — email and/or SMS — used to tell families about it. Toggle a rule off to silence that event for everyone; the message only sends if the rule is on. Rules are seeded automatically the first time they're needed." />
+          </span>
+        }
+        icon={<Bell size={18} />}
+      >
         <div className="overflow-hidden rounded-xl border border-[var(--bd)]">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b">

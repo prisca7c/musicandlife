@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
 import { Check, X, AlertTriangle, Calendar, RefreshCw } from 'lucide-react';
 
@@ -89,7 +90,15 @@ export default function AttendancePage() {
 
   return (
     <div>
-      <PageHeader title="Attendance" subtitle="Quick-mark today's lessons" />
+      <PageHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            Attendance
+            <InfoTooltip text="Mark whether each student attended. This updates the family's records and feeds teacher payroll, so try to mark today's lessons before you leave. Marking a lesson absent may issue the family a makeup credit." />
+          </span>
+        }
+        subtitle="Quick-mark today's lessons"
+      />
 
       <div className="flex items-center gap-3 mb-6 flex-wrap">
         <div className="flex items-center gap-2">

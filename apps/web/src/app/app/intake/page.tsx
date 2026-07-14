@@ -3,6 +3,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { ALL_INSTRUMENTS } from '@music-life/types';
@@ -372,7 +373,12 @@ export default function IntakePage() {
       <AddLeadModal open={showAddLead} onClose={() => setShowAddLead(false)} onCreated={loadLeads} />
 
       <PageHeader
-        title="Intake"
+        title={
+          <span className="inline-flex items-center gap-2">
+            Intake
+            <InfoTooltip text="Intake is your pipeline of new interest: 'Leads' are enquiries you're following up, and 'Registrations' are families who signed up and are waiting for you to review and approve them into full student accounts." />
+          </span>
+        }
         subtitle={
           tab === 'registrations' && regFilter === 'pending' && pending > 0 ? `${pending} pending review` :
           tab === 'leads' ? `${leads.length} lead${leads.length !== 1 ? 's' : ''}` : undefined

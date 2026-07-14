@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { PageHeader } from '@/components/page-header';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
 import { SearchableSelect } from '@/components/searchable-select';
 import { linkify } from '@/lib/linkify';
@@ -88,7 +89,15 @@ export default function NotesPage() {
 
   return (
     <div>
-      <PageHeader title="Lesson Notes" subtitle={isTeacher ? 'Notes for your students' : 'Notes across the studio'} />
+      <PageHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            Lesson Notes
+            <InfoTooltip text="Notes are visible to studio staff and the student's teachers — not to families. Use them to track progress and next steps, and keep them professional, as they form part of the student's record." />
+          </span>
+        }
+        subtitle={isTeacher ? 'Notes for your students' : 'Notes across the studio'}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
         <div>
