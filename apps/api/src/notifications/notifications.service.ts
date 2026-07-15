@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { notificationRules, notificationLog, organizations, emailTemplates } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
+import { brandedEmail, loginDetailsBlock, BRAND } from '../email/branding';
 
 export type TriggerEvent =
   | 'registration.received'
@@ -15,6 +16,7 @@ export type TriggerEvent =
   | 'lesson.rescheduled'
   | 'invoice.sent'
   | 'invoice.preview_summary'
+  | 'newsletter.event'
   | 'payroll.approved';
 
 export interface TriggerContext {
@@ -27,43 +29,109 @@ export interface TriggerContext {
   data?: Record<string, unknown>;
 }
 
-// Built-in templates keyed by templateId
-const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: string; html: string }> = {
+// Built-in templates keyed by templateId. Each returns a subject plus fully
+// branded HTML (see email/branding.ts). `ctx.body` carries the event-specific
+// detail line(s); `ctx.email` is the recipient.
+export const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: string; html: string }> = {
   'registration.received.admin': (ctx) => ({
     subject: 'New registration received',
-    html: `<p>A new student registration has been submitted and is pending your review.</p><p>${ctx.body}</p>`,
+    html: brandedEmail({
+      previewText: 'A new student registration is pending review.',
+      heading: 'New registration received',
+      bodyHtml: `<p style="margin:0 0 12px">A new student registration has been submitted and is pending your review.</p><p style="margin:0">${ctx.body}</p>`,
+      cta: { label: 'Review in the admin portal', url: BRAND.portalUrl },
+    }),
   }),
   'registration.submitted.family': (ctx) => ({
-    subject: 'We received your registration — Music & Life',
-    html: `<p>Thank you for registering with Music &amp; Life!</p><p>${ctx.body}</p><p>Our team will review your registration within 2–3 business days. Once it's approved, you'll receive a welcome email with your portal login details.</p><p>If you have any questions in the meantime, just reply to this email.</p>`,
+    subject: 'We received your registration - Music & Life',
+    html: brandedEmail({
+      previewText: "Thanks for registering - we'll be in touch within 2-3 business days.",
+      heading: 'Thanks for registering!',
+      bodyHtml:
+        `<p style="margin:0 0 12px">Thank you for registering with Music &amp; Life - we're delighted to have you.</p>` +
+        `<p style="margin:0 0 12px">${ctx.body}</p>` +
+        `<p style="margin:0">Our team will review your registration within <strong>2-3 business days</strong>. Once it's approved you'll receive a welcome email with your portal login details.</p>`,
+      footnote: 'Have a question in the meantime? Just reply to this email.',
+    }),
   }),
   'registration.approved.family': (ctx) => ({
     subject: 'Welcome to Music & Life!',
-    html: `<p>Your registration has been approved. You can now log in to your portal.</p><p>${ctx.body}</p>`,
+    html: brandedEmail({
+      previewText: 'Your registration is approved - here are your portal login details.',
+      heading: 'Welcome to Music & Life!',
+      bodyHtml:
+        `<p style="margin:0 0 12px">Great news - your registration has been approved and your portal is ready.</p>` +
+        (ctx.body ? `<p style="margin:0 0 4px">${ctx.body}</p>` : '') +
+        loginDetailsBlock(ctx.email ?? 'the email you registered with') +
+        `<p style="margin:14px 0 0">Sign in to book lessons, view your schedule, and manage billing. If it's your first time, use "Forgot password" to set a password.</p>`,
+      cta: { label: 'Log in to your portal', url: BRAND.portalUrl },
+      footnote: 'Keep this email for your records. Need help? Just reply.',
+    }),
   }),
   'registration.denied.family': (ctx) => ({
     subject: 'Registration update',
-    html: `<p>Unfortunately your registration could not be approved at this time.</p><p>${ctx.body}</p>`,
+    html: brandedEmail({
+      previewText: 'An update on your Music & Life registration.',
+      heading: 'Registration update',
+      bodyHtml: `<p style="margin:0 0 12px">Thank you for your interest in Music &amp; Life. Unfortunately we're unable to approve your registration at this time.</p><p style="margin:0">${ctx.body}</p>`,
+      footnote: "If you think this was a mistake, reply and we'll take another look.",
+    }),
   }),
   'lesson.reminder_24h': (ctx) => ({
-    subject: `Lesson reminder — tomorrow`,
-    html: `<p>This is a reminder that you have a lesson tomorrow.</p><p>${ctx.body}</p>`,
+    subject: 'Lesson reminder - tomorrow',
+    html: brandedEmail({
+      previewText: 'A friendly reminder about your lesson tomorrow.',
+      heading: 'See you tomorrow &#127925;',
+      bodyHtml: `<p style="margin:0 0 12px">This is a friendly reminder that you have a lesson <strong>tomorrow</strong>.</p><p style="margin:0">${ctx.body}</p>`,
+      cta: { label: 'View your schedule', url: BRAND.portalUrl },
+      footnote: "Can't make it? Please let us know as soon as possible so we can offer the slot to someone else.",
+    }),
   }),
   'lesson.cancelled': (ctx) => ({
     subject: 'Lesson cancelled',
-    html: `<p>A lesson has been cancelled.</p><p>${ctx.body}</p>`,
+    html: brandedEmail({
+      previewText: 'One of your lessons has been cancelled.',
+      heading: 'Lesson cancelled',
+      bodyHtml: `<p style="margin:0 0 12px">A lesson has been cancelled.</p><p style="margin:0">${ctx.body}</p>`,
+      cta: { label: 'View your schedule', url: BRAND.portalUrl },
+    }),
   }),
   'lesson.rescheduled': (ctx) => ({
     subject: 'Your lesson has been rescheduled',
-    html: `<p>A lesson has been rescheduled to a new time.</p><p>${ctx.body}</p><p>If this new time doesn't work for you, please get in touch and we'll sort it out.</p>`,
+    html: brandedEmail({
+      previewText: 'Your lesson has a new time.',
+      heading: 'Your lesson has been rescheduled',
+      bodyHtml: `<p style="margin:0 0 12px">A lesson has been moved to a new time.</p><p style="margin:0">${ctx.body}</p>`,
+      cta: { label: 'View your schedule', url: BRAND.portalUrl },
+      footnote: "If this new time doesn't work for you, get in touch and we'll sort it out.",
+    }),
   }),
   'invoice.sent': (ctx) => ({
     subject: ctx.subject ?? 'New invoice from Music & Life',
-    html: `<p>An invoice has been issued to your account.</p><p>${ctx.body}</p>`,
+    html: brandedEmail({
+      previewText: 'A new invoice has been issued to your account.',
+      heading: 'New invoice',
+      bodyHtml: `<p style="margin:0 0 12px">An invoice has been issued to your account.</p><p style="margin:0">${ctx.body}</p>`,
+      cta: { label: 'View & pay in your portal', url: BRAND.portalUrl },
+    }),
   }),
   'invoice.preview_summary': (ctx) => ({
     subject: ctx.subject ?? 'Upcoming auto-invoices',
-    html: `<p>The following auto-invoices are scheduled to go out soon.</p><p>${ctx.body}</p>`,
+    html: brandedEmail({
+      previewText: 'A summary of auto-invoices scheduled to go out soon.',
+      heading: 'Upcoming auto-invoices',
+      bodyHtml: `<p style="margin:0 0 12px">The following auto-invoices are scheduled to go out soon.</p><p style="margin:0">${ctx.body}</p>`,
+    }),
+  }),
+  'newsletter.event': (ctx) => ({
+    subject: ctx.subject ?? "What's on at Music & Life",
+    html: brandedEmail({
+      previewText: 'News and upcoming events from Music & Life.',
+      heading: ctx.subject ?? "What's on at Music & Life",
+      bodyHtml: ctx.body,
+      cta: { label: 'Visit our website', url: BRAND.website },
+      footnote: "You're receiving this because you're part of the Music & Life community.",
+    }),
   }),
 };
 
@@ -82,6 +150,7 @@ export const DEFAULT_RULES: Array<{
   { triggerEvent: 'lesson.rescheduled', templateId: 'lesson.rescheduled', channels: ['email'] },
   { triggerEvent: 'invoice.sent', templateId: 'invoice.sent', channels: ['email'] },
   { triggerEvent: 'invoice.preview_summary', templateId: 'invoice.preview_summary', channels: ['email'] },
+  { triggerEvent: 'newsletter.event', templateId: 'newsletter.event', channels: ['email'] },
 ];
 
 @Injectable()
