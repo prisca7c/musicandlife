@@ -72,16 +72,22 @@ export default function AttendancePage() {
 
   async function confirmAll() {
     setSaving('all');
-    for (const lesson of lessons) {
-      if (lesson.attendance) continue;
-      const status = pending[lesson.id] ?? 'present';
-      try {
-        await apiFetch(`/lessons/${lesson.id}/attendance`, {
-          method: 'POST', token: tok(),
-          body: JSON.stringify({ status }),
+    // Lessons the user left on the default "present" (anything they changed to a
+    // different status is marked individually, honouring their choice).
+    const presentIds = lessons.filter(l => !l.attendance && (pending[l.id] ?? 'present') === 'present').map(l => l.id);
+    const others = lessons.filter(l => !l.attendance && (pending[l.id] ?? 'present') !== 'present');
+    try {
+      if (presentIds.length > 0) {
+        await apiFetch('/lessons/attendance/mark-present', {
+          method: 'POST', token: tok(), body: JSON.stringify({ lessonIds: presentIds }),
         });
-      } catch (e) { console.error(e); }
-    }
+      }
+      for (const lesson of others) {
+        await apiFetch(`/lessons/${lesson.id}/attendance`, {
+          method: 'POST', token: tok(), body: JSON.stringify({ status: pending[lesson.id] }),
+        });
+      }
+    } catch (e) { console.error(e); }
     setSaving(null);
     load();
   }

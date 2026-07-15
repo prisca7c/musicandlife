@@ -36,6 +36,29 @@ export class AttendanceService {
     return staff?.id ?? null;
   }
 
+  // Bulk "mark present" for a set of lessons in one call — backs the attendance
+  // page's "Confirm all as present". Only touches lessons that are still
+  // scheduled and have NO attendance yet, so a re-run can never double-charge a
+  // family. Reuses markAttendance per lesson for identical credit/charge logic.
+  async markManyPresent(orgId: string, lessonIds: string[], markedBy: string, actor?: Actor) {
+    let marked = 0;
+    let skipped = 0;
+    let failed = 0;
+    for (const id of [...new Set(lessonIds)]) {
+      const lesson = await this.db.db.query.lessons.findFirst({
+        where: and(eq(lessons.id, id), eq(lessons.organizationId, orgId)),
+        columns: { id: true, status: true },
+        with: { attendance: { columns: { status: true } } },
+      });
+      if (!lesson || lesson.status !== 'scheduled' || lesson.attendance) { skipped++; continue; }
+      try {
+        await this.markAttendance(orgId, id, { status: 'present' } as MarkAttendanceDto, markedBy, actor);
+        marked++;
+      } catch { failed++; }
+    }
+    return { marked, skipped, failed };
+  }
+
   async markAttendance(orgId: string, lessonId: string, dto: MarkAttendanceDto, markedBy: string, actor?: Actor) {
     const lesson = await this.db.db.query.lessons.findFirst({
       where: and(eq(lessons.id, lessonId), eq(lessons.organizationId, orgId)),
