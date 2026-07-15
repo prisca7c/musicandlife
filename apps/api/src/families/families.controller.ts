@@ -1,8 +1,14 @@
 import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { IsUUID } from 'class-validator';
 import { FamiliesService } from './families.service';
 import { CreateFamilyDto } from './dto/create-family.dto';
 import { UpdateFamilyDto } from './dto/update-family.dto';
 import { BulkInvoicingSettingsDto } from './dto/bulk-invoicing-settings.dto';
+
+class MergeFamilyDto {
+  // The duplicate family to absorb into the one named in the URL.
+  @IsUUID() sourceFamilyId!: string;
+}
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -49,5 +55,13 @@ export class FamiliesController {
   @Roles('receptionist')
   getLedger(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.families.getLedger(user.orgId, id);
+  }
+
+  // Merge a duplicate family into this one (`:id` is the family that survives).
+  // Destructive — gated to managers and above.
+  @Post(':id/merge')
+  @Roles('manager')
+  merge(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: MergeFamilyDto) {
+    return this.families.mergeFamilies(user.orgId, id, dto.sourceFamilyId);
   }
 }

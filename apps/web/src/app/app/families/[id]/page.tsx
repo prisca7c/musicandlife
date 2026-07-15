@@ -271,6 +271,79 @@ interface FamilyInvoice { id: string; number: string; status: string; total: num
 
 const INVOICE_STATUS_COLORS: Record<string, string> = { draft: 'default', sent: 'trial', paid: 'active', void: 'withdrawn' };
 
+// Absorb a duplicate family into this one. The picked family is the SOURCE
+// (deleted); the family on the page is the target that survives.
+function MergeFamilyModal({ open, onClose, targetId, targetName, onMerged }: {
+  open: boolean; onClose: () => void; targetId: string; targetName: string; onMerged: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [results, setResults] = useState<{ id: string; name: string }[]>([]);
+  const [picked, setPicked] = useState<{ id: string; name: string } | null>(null);
+  const [merging, setMerging] = useState(false);
+  const [error, setError] = useState('');
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  useEffect(() => {
+    if (!open || !search.trim()) { setResults([]); return; }
+    const q = search;
+    apiFetch<{ id: string; name: string }[]>(`/families?search=${encodeURIComponent(q)}`, { token: tok() })
+      .then(rows => setResults(rows.filter(r => r.id !== targetId).slice(0, 8)))
+      .catch(() => setResults([]));
+  }, [search, open, targetId]);
+
+  async function doMerge() {
+    if (!picked) return;
+    setMerging(true); setError('');
+    try {
+      await apiFetch(`/families/${targetId}/merge`, {
+        method: 'POST', token: tok(), body: JSON.stringify({ sourceFamilyId: picked.id }),
+      });
+      onMerged(); onClose(); setPicked(null); setSearch('');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not merge families'); }
+    finally { setMerging(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Merge a duplicate family">
+      {!picked ? (
+        <div className="space-y-3">
+          <p className="text-sm" style={{ color: 'var(--txt3)' }}>
+            Find the duplicate to merge <strong>into {targetName}</strong>. The one you pick will be absorbed and removed.
+          </p>
+          <input autoFocus value={search} onChange={e => setSearch(e.target.value)} placeholder="Search families by name…" className="ui-input" />
+          <div className="space-y-1.5 max-h-64 overflow-y-auto">
+            {results.map(r => (
+              <button key={r.id} onClick={() => setPicked(r)}
+                className="w-full text-left text-sm px-3 py-2 rounded-lg border hover:bg-[var(--surf)]"
+                style={{ borderColor: 'var(--bd2)', color: 'var(--txt)' }}>
+                {r.name}
+              </button>
+            ))}
+            {search.trim() && results.length === 0 && (
+              <p className="text-sm px-1 py-2" style={{ color: 'var(--txt4)' }}>No other families match.</p>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <p className="text-sm" style={{ color: 'var(--txt)' }}>
+            Merge <strong>{picked.name}</strong> into <strong>{targetName}</strong>? All of {picked.name}&apos;s students,
+            guardians, invoices and balance move to {targetName}, and {picked.name} is deleted.
+          </p>
+          <p className="text-xs" style={{ color: 'var(--coral)' }}>This can&apos;t be undone.</p>
+          {error && <p className="text-sm text-[var(--coral)]">{error}</p>}
+          <div className="flex gap-2">
+            <button onClick={doMerge} disabled={merging} className="ui-btn-primary disabled:opacity-60">
+              {merging ? 'Merging…' : `Merge into ${targetName}`}
+            </button>
+            <button onClick={() => setPicked(null)} disabled={merging} className="ui-btn-ghost">Back</button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export default function FamilyDetailPage() {
   const params = useParams<{ id: string }>();
   const [family, setFamily] = useState<FamilyDetail | null>(null);
@@ -278,7 +351,17 @@ export default function FamilyDetailPage() {
   const [showAddStudent, setShowAddStudent] = useState(false);
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
   const [showInvoicingSettings, setShowInvoicingSettings] = useState(false);
+  const [showMerge, setShowMerge] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  // Merge is destructive → managers and above only (mirrors the API's @Roles).
+  const [canMerge, setCanMerge] = useState(false);
+  useEffect(() => {
+    try {
+      const role = JSON.parse(atob((tok() ?? '').split('.')[1] || ''))?.role;
+      setCanMerge(['system_admin', 'admin', 'manager'].includes(role));
+    } catch { setCanMerge(false); }
+  }, []);
 
   function load() {
     apiFetch<FamilyDetail>(`/families/${params.id}`, { token: tok() }).then(setFamily).catch(() => {});
@@ -296,6 +379,8 @@ export default function FamilyDetailPage() {
         familyId={family.id} familyName={family.name} invoiceMode={family.invoiceMode} onCreated={load} />}
       {family && <AutoInvoicingSettingsModal open={showInvoicingSettings} onClose={() => setShowInvoicingSettings(false)}
         family={family} onSaved={load} />}
+      {family && <MergeFamilyModal open={showMerge} onClose={() => setShowMerge(false)}
+        targetId={family.id} targetName={family.name} onMerged={load} />}
 
       <div className="mb-5">
         <BackButton label="Families" fallbackHref="/app/families" />
@@ -311,6 +396,11 @@ export default function FamilyDetailPage() {
             <button onClick={() => setShowCreateInvoice(true)} className="ui-btn-ghost text-sm">
               Create invoice
             </button>
+            {canMerge && (
+              <button onClick={() => setShowMerge(true)} className="ui-btn-ghost text-sm" title="Absorb a duplicate family into this one">
+                Merge duplicate
+              </button>
+            )}
           </div>
         }
       />

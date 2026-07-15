@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { eq, and, ilike, or, inArray } from 'drizzle-orm';
-import { families, guardians, students } from '@music-life/db';
+import { families, guardians, students, invoices, ledgerEntries, payments } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateFamilyDto } from './dto/create-family.dto';
 import type { UpdateFamilyDto } from './dto/update-family.dto';
@@ -71,5 +71,71 @@ export class FamiliesService {
       .set({ ...settings, updatedAt: new Date() })
       .where(and(eq(families.organizationId, orgId), inArray(families.id, familyIds)));
     return { updated: familyIds.length };
+  }
+
+  // Merge a duplicate family (`sourceId`) INTO the one to keep (`targetId`).
+  // Everything family-scoped — students, guardians, invoices, ledger entries and
+  // payments — is reassigned to the target, the two cached balances are summed,
+  // and the now-empty source family is deleted. All in one transaction so a
+  // failure leaves both families untouched. Students carry their own lessons,
+  // enrollments and lesson credits (those key off studentId, not familyId).
+  async mergeFamilies(orgId: string, targetId: string, sourceId: string) {
+    if (targetId === sourceId) throw new BadRequestException('Choose two different families to merge.');
+
+    return this.db.db.transaction(async (tx) => {
+      const [target, source] = await Promise.all([
+        tx.query.families.findFirst({ where: and(eq(families.id, targetId), eq(families.organizationId, orgId)) }),
+        tx.query.families.findFirst({ where: and(eq(families.id, sourceId), eq(families.organizationId, orgId)) }),
+      ]);
+      if (!target || !source) throw new NotFoundException('Family not found');
+
+      const movedStudents = await tx.update(students)
+        .set({ familyId: targetId, updatedAt: new Date() })
+        .where(and(eq(students.organizationId, orgId), eq(students.familyId, sourceId)))
+        .returning({ id: students.id });
+
+      // Guardians: the (familyId,userId) pair is unique, so if the same person
+      // already guards the target we drop the duplicate link instead of moving it.
+      const [srcGuardians, tgtGuardians] = await Promise.all([
+        tx.query.guardians.findMany({ where: and(eq(guardians.organizationId, orgId), eq(guardians.familyId, sourceId)) }),
+        tx.query.guardians.findMany({ where: and(eq(guardians.organizationId, orgId), eq(guardians.familyId, targetId)), columns: { userId: true } }),
+      ]);
+      const tgtUserIds = new Set(tgtGuardians.map((g) => g.userId));
+      let movedGuardians = 0;
+      for (const g of srcGuardians) {
+        if (tgtUserIds.has(g.userId)) {
+          await tx.delete(guardians).where(eq(guardians.id, g.id));
+        } else {
+          await tx.update(guardians).set({ familyId: targetId }).where(eq(guardians.id, g.id));
+          movedGuardians++;
+        }
+      }
+
+      const movedInvoices = await tx.update(invoices)
+        .set({ familyId: targetId, updatedAt: new Date() })
+        .where(and(eq(invoices.organizationId, orgId), eq(invoices.familyId, sourceId)))
+        .returning({ id: invoices.id });
+      await tx.update(ledgerEntries).set({ familyId: targetId })
+        .where(and(eq(ledgerEntries.organizationId, orgId), eq(ledgerEntries.familyId, sourceId)));
+      await tx.update(payments).set({ familyId: targetId })
+        .where(and(eq(payments.organizationId, orgId), eq(payments.familyId, sourceId)));
+
+      // Combine balances and keep the later resource-access expiry, if any.
+      const dates = [target.resourceAccessPaidUntil, source.resourceAccessPaidUntil].filter(Boolean) as string[];
+      const resourceAccessPaidUntil = dates.length ? dates.sort().at(-1)! : null;
+      await tx.update(families)
+        .set({ balanceCached: target.balanceCached + source.balanceCached, resourceAccessPaidUntil, updatedAt: new Date() })
+        .where(eq(families.id, targetId));
+
+      await tx.delete(families).where(eq(families.id, sourceId));
+
+      return {
+        targetId, sourceId,
+        movedStudents: movedStudents.length,
+        movedGuardians,
+        movedInvoices: movedInvoices.length,
+        newBalance: target.balanceCached + source.balanceCached,
+      };
+    });
   }
 }
