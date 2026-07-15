@@ -18,6 +18,13 @@ export class AttendanceController {
     return this.attendance.markAttendance(user.orgId, id, dto, user.userId, { role: user.role, userId: user.userId });
   }
 
+  // Mark many lessons present at once (attendance page "Confirm all as present").
+  @Post('attendance/mark-present')
+  @Roles('teacher')
+  markPresentBulk(@CurrentUser() user: RequestUser, @Body() body: { lessonIds?: string[] }) {
+    return this.attendance.markManyPresent(user.orgId, body.lessonIds ?? [], user.userId, { role: user.role, userId: user.userId });
+  }
+
   @Get(':id/attendance')
   @Roles('teacher')
   get(@CurrentUser() user: RequestUser, @Param('id') id: string) {
