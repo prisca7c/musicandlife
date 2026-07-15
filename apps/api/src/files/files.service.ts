@@ -60,4 +60,17 @@ export class FilesService {
   async markClean(fileId: string) {
     await this.db.db.update(files).set({ virusScanStatus: 'clean' }).where(eq(files.id, fileId));
   }
+
+  // Sign a download for any file in the given org, WITHOUT the per-file owner
+  // check. The CALLER is responsible for authorising access first (e.g. the
+  // family portal, which verifies the file is an attachment on a family-visible
+  // note belonging to one of the caller's own students). Never expose this
+  // directly on a controller — always gate it behind a domain check.
+  async signDownloadForOrg(fileId: string, orgId: string) {
+    const file = await this.db.db.query.files.findFirst({
+      where: and(eq(files.id, fileId), eq(files.organizationId, orgId)),
+    });
+    if (!file) throw new NotFoundException('File not found');
+    return { ...(await this.storage.signDownload({ fileKey: file.key })), mime: file.mime, originalName: file.originalName };
+  }
 }

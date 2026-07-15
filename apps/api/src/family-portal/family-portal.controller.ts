@@ -16,8 +16,12 @@ import {
 } from '@music-life/db';
 import { AttendanceService } from '../attendance/attendance.service';
 import { BillingService } from '../billing/billing.service';
+import { FilesService } from '../files/files.service';
 import { invoices } from '@music-life/db';
 import type { RequestUser } from '@music-life/types';
+
+// Shape of the entries stored in notes.attachments (see NotesController).
+interface NoteAttachment { fileId: string; name: string; mime: string; size?: number }
 import { IsBoolean, IsDateString, IsInt, IsOptional, IsUUID, Min, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -48,6 +52,7 @@ export class FamilyPortalController {
     private readonly email: EmailPort,
     private readonly attendance: AttendanceService,
     private readonly billing: BillingService,
+    private readonly files: FilesService,
   ) {}
 
   // ─── Resolve the guardian's family ───────────────────────────────────────
@@ -209,6 +214,70 @@ export class FamilyPortalController {
     });
 
     return { status: 'paid', paymentId: payment.id };
+  }
+
+  // ─── Lesson notes & media (teacher → family) ────────────────────────────────
+  // Family-visible notes the student's teacher has written, newest first, each
+  // with any media the teacher attached. Internal ('internal') notes are never
+  // returned here.
+  @Get('notes')
+  @Roles('guardian')
+  async getNotes(@CurrentUser() user: RequestUser) {
+    const family = await this.requireFamily(user.userId, user.orgId);
+    const studentIds = family.students.map(s => s.id);
+    if (studentIds.length === 0) return [];
+
+    const rows = await this.db.db.query.notes.findMany({
+      where: and(
+        eq(notes.organizationId, user.orgId),
+        eq(notes.visibility, 'family'),
+        inArray(notes.studentId, studentIds),
+      ),
+      with: {
+        student: { columns: { id: true, firstName: true, lastName: true } },
+        author: { columns: { id: true, email: true } },
+      },
+      orderBy: (n, { desc }) => [desc(n.createdAt)],
+      limit: 100,
+    });
+
+    return rows.map(n => ({
+      id: n.id,
+      body: n.body,
+      lessonId: n.lessonId,
+      createdAt: n.createdAt,
+      student: n.student,
+      attachments: ((n.attachments as NoteAttachment[] | null) ?? []).map(a => ({
+        fileId: a.fileId, name: a.name, mime: a.mime, size: a.size,
+      })),
+    }));
+  }
+
+  // Sign a short-lived download URL for a single attachment. Access is gated on
+  // the note: it must be family-visible AND belong to one of the caller's own
+  // students, and the fileId must actually be listed on that note. Only then do
+  // we sign — never trusting the fileId alone (that would be an IDOR).
+  @Get('notes/:noteId/attachments/:fileId/sign-download')
+  @Roles('guardian')
+  async signNoteAttachment(
+    @CurrentUser() user: RequestUser,
+    @Param('noteId') noteId: string,
+    @Param('fileId') fileId: string,
+  ) {
+    const family = await this.requireFamily(user.userId, user.orgId);
+    const studentIds = family.students.map(s => s.id);
+
+    const note = await this.db.db.query.notes.findFirst({
+      where: and(eq(notes.id, noteId), eq(notes.organizationId, user.orgId)),
+    });
+    // 404 (not 403) so a guardian can't probe which notes/files exist in the org.
+    if (!note || note.visibility !== 'family' || !studentIds.includes(note.studentId)) {
+      throw new NotFoundException('Note not found');
+    }
+    const attached = ((note.attachments as NoteAttachment[] | null) ?? []).some(a => a.fileId === fileId);
+    if (!attached) throw new NotFoundException('Attachment not found');
+
+    return this.files.signDownloadForOrg(fileId, user.orgId);
   }
 
   // ─── Available booking slots ───────────────────────────────────────────────

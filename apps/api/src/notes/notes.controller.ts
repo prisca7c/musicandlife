@@ -8,6 +8,25 @@ import { notes, staffMembers, teacherAssignments, enrollments } from '@music-lif
 import { eq, and, inArray } from 'drizzle-orm';
 import type { RequestUser } from '@music-life/types';
 
+// A media/file attached to a lesson note. `fileId` points at a pre-registered
+// row in `files` (uploaded by the teacher via POST /files/sign-upload); the
+// family downloads it through a signed URL gated by note ownership.
+export interface NoteAttachment { fileId: string; name: string; mime: string; size?: number }
+
+// Keep only well-formed attachment entries so a malformed client body can't
+// poison the jsonb column (and later 500 the family portal that reads it).
+function cleanAttachments(input: unknown): NoteAttachment[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((a): a is NoteAttachment =>
+      !!a && typeof a === 'object'
+      && typeof (a as NoteAttachment).fileId === 'string'
+      && typeof (a as NoteAttachment).name === 'string'
+      && typeof (a as NoteAttachment).mime === 'string')
+    .slice(0, 10)
+    .map((a) => ({ fileId: a.fileId, name: a.name.slice(0, 255), mime: a.mime.slice(0, 255), size: typeof a.size === 'number' ? a.size : undefined }));
+}
+
 @Controller('notes')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class NotesController {
@@ -70,7 +89,7 @@ export class NotesController {
   @Roles('teacher')
   async create(
     @CurrentUser() user: RequestUser,
-    @Body() body: { studentId: string; lessonId?: string; body: string; visibility?: 'internal' | 'family' },
+    @Body() body: { studentId: string; lessonId?: string; body: string; visibility?: 'internal' | 'family'; attachments?: NoteAttachment[] },
   ) {
     if (user.role === 'teacher') {
       const staffId = await this.resolveStaffId(user.orgId, user.userId);
@@ -85,6 +104,7 @@ export class NotesController {
       authorId: user.userId,
       body: body.body,
       visibility: body.visibility ?? 'family',
+      attachments: cleanAttachments(body.attachments),
     }).returning();
     return note!;
   }
@@ -94,7 +114,7 @@ export class NotesController {
   async update(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
-    @Body() body: { body?: string; visibility?: 'internal' | 'family' },
+    @Body() body: { body?: string; visibility?: 'internal' | 'family'; attachments?: NoteAttachment[] },
   ) {
     if (user.role === 'teacher') {
       const existing = await this.db.db.query.notes.findFirst({
@@ -106,8 +126,14 @@ export class NotesController {
       if (!existing || !assignedIds.includes(existing.studentId)) throw new ForbiddenException('Not your student');
     }
 
+    const { body: text, visibility, attachments } = body;
     const [updated] = await this.db.db.update(notes)
-      .set({ ...body, updatedAt: new Date() })
+      .set({
+        ...(text !== undefined ? { body: text } : {}),
+        ...(visibility !== undefined ? { visibility } : {}),
+        ...(attachments !== undefined ? { attachments: cleanAttachments(attachments) } : {}),
+        updatedAt: new Date(),
+      })
       .where(and(eq(notes.id, id), eq(notes.organizationId, user.orgId)))
       .returning();
     return updated!;
