@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, Logger, BadRequestException } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
-import { registrations, organizations, families, students, enrollments, users, memberships, passwordResetTokens } from '@music-life/db';
+import { registrations, organizations, families, students, enrollments, users, memberships, passwordResetTokens, guardians } from '@music-life/db';
 import type { Db } from '@music-life/db';
 import { randomBytes, createHash } from 'crypto';
 import { DbService } from '../db/db.service';
@@ -133,24 +133,30 @@ export class RegistrationService {
     // family (the contact already has a login) it points them at the portal.
     let welcome: { to: string; contactName: string; link: string; isNewAccount: boolean } | undefined;
 
-    // If contact email provided, create portal account (only if new)
+    // If contact email provided, wire up the portal account + guardian link.
     if (payload.contactEmail) {
       const existing = await tx.query.users.findFirst({
         where: eq(users.email, payload.contactEmail.toLowerCase()),
       });
+
+      // The user whose account this family hangs off — a fresh invite, or the
+      // returning family's existing login.
+      let guardianUserId: string;
+
       if (!existing) {
         const [newUser] = await tx.insert(users).values({
           email: payload.contactEmail.toLowerCase(),
           passwordHash: 'INVITE_PENDING',
           emailVerifiedAt: new Date(),
         }).returning();
+        guardianUserId = newUser!.id;
         await tx.insert(memberships).values({
-          userId: newUser!.id, organizationId: orgId, baseRole: 'guardian',
+          userId: guardianUserId, organizationId: orgId, baseRole: 'guardian',
         });
         const rawToken = randomBytes(32).toString('hex');
         const tokenHash = createHash('sha256').update(rawToken).digest('hex');
         await tx.insert(passwordResetTokens).values({
-          userId: newUser!.id, tokenHash,
+          userId: guardianUserId, tokenHash,
           expiresAt: new Date(Date.now() + 7 * 86400000),
         });
         welcome = {
@@ -160,6 +166,18 @@ export class RegistrationService {
           isNewAccount: true,
         };
       } else {
+        guardianUserId = existing.id;
+        // A returning contact might not yet be a member of THIS org (e.g. they
+        // only guard a family in another studio) — give them a guardian
+        // membership here so they can actually log in to this org's portal.
+        const membership = await tx.query.memberships.findFirst({
+          where: and(eq(memberships.userId, guardianUserId), eq(memberships.organizationId, orgId)),
+        });
+        if (!membership) {
+          await tx.insert(memberships).values({
+            userId: guardianUserId, organizationId: orgId, baseRole: 'guardian',
+          });
+        }
         // Returning family — no new account, but still send a welcome so the
         // approval is never silent. Point them at the login page.
         welcome = {
@@ -169,6 +187,14 @@ export class RegistrationService {
           isNewAccount: false,
         };
       }
+
+      // Link the contact as a guardian of the newly-created family. This row is
+      // what the parent portal resolves a login to a family through — it was
+      // never created before, so approved families were invisible in the portal
+      // (login worked, but every /family/* route 404'd "no family found").
+      await tx.insert(guardians).values({
+        organizationId: orgId, familyId: family!.id, userId: guardianUserId,
+      });
     }
 
     // Auto-add to the Sender mailing list (best-effort, non-blocking): the
