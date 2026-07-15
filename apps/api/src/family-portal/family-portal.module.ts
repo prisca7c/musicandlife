@@ -3,9 +3,10 @@ import { FamilyPortalController } from './family-portal.controller';
 import { AuthModule } from '../auth/auth.module';
 import { EmailModule } from '../email/email.module';
 import { AttendanceModule } from '../attendance/attendance.module';
+import { BillingModule } from '../billing/billing.module';
 
 @Module({
-  imports: [AuthModule, EmailModule, AttendanceModule],
+  imports: [AuthModule, EmailModule, AttendanceModule, BillingModule],
   controllers: [FamilyPortalController],
 })
 export class FamilyPortalModule {}

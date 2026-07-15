@@ -44,6 +44,9 @@ export default function FamilyDashboardPage() {
   const [reschedErr, setReschedErr] = useState('');
   const [reschedSaving, setReschedSaving] = useState(false);
   const [reschedDone, setReschedDone] = useState(false);
+  const [confirmPay, setConfirmPay] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [payErr, setPayErr] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   function openReschedule(lessonId: string) {
@@ -83,6 +86,19 @@ export default function FamilyDashboardPage() {
     apiFetch<NewsPost[]>('/news', { token: tok() })
       .then(rows => setNews(rows.slice(0, 3))).catch(() => {});
   }, []);
+
+  async function markInvoicePaid() {
+    if (!data?.outstandingInvoice) return;
+    setPaying(true); setPayErr('');
+    try {
+      await apiFetch(`/family/invoices/${data.outstandingInvoice.id}/mark-paid`, {
+        method: 'POST', token: tok(),
+      });
+      setConfirmPay(false);
+      apiFetch<DashboardData>('/family/dashboard', { token: tok() }).then(setData).catch(() => {});
+    } catch (e) { setPayErr(e instanceof Error ? e.message : 'Could not record payment'); }
+    finally { setPaying(false); }
+  }
 
   async function cancelLesson(choice: 'absent_makeup' | 'absent_no_pay') {
     if (!cancelModal) return;
@@ -197,6 +213,39 @@ export default function FamilyDashboardPage() {
                   </p>
                 </div>
               </div>
+
+              {!confirmPay ? (
+                <button
+                  onClick={() => { setPayErr(''); setConfirmPay(true); }}
+                  className="mt-3 w-full rounded-xl bg-[var(--amber)] text-white text-sm font-semibold py-2 hover:opacity-90 transition"
+                >
+                  I&apos;ve paid this
+                </button>
+              ) : (
+                <div className="mt-3">
+                  <p className="text-xs mb-2" style={{ color: 'var(--txt3)' }}>
+                    Confirm you&apos;ve sent £{(outstandingInvoice.total / 100).toFixed(2)} by bank transfer. We&apos;ll mark {outstandingInvoice.number} as paid.
+                  </p>
+                  {payErr && <p className="text-xs text-[var(--coral)] mb-2">{payErr}</p>}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={markInvoicePaid}
+                      disabled={paying}
+                      className="flex-1 rounded-xl bg-[var(--amber)] text-white text-sm font-semibold py-2 hover:opacity-90 transition disabled:opacity-60"
+                    >
+                      {paying ? 'Recording…' : 'Confirm payment'}
+                    </button>
+                    <button
+                      onClick={() => setConfirmPay(false)}
+                      disabled={paying}
+                      className="rounded-xl border text-sm font-semibold py-2 px-3"
+                      style={{ borderColor: 'var(--bd)', color: 'var(--txt3)' }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

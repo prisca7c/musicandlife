@@ -15,6 +15,8 @@ import {
   teacherAssignments, attendance,
 } from '@music-life/db';
 import { AttendanceService } from '../attendance/attendance.service';
+import { BillingService } from '../billing/billing.service';
+import { invoices } from '@music-life/db';
 import type { RequestUser } from '@music-life/types';
 import { IsBoolean, IsDateString, IsInt, IsOptional, IsUUID, Min, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -45,6 +47,7 @@ export class FamilyPortalController {
     private readonly db: DbService,
     private readonly email: EmailPort,
     private readonly attendance: AttendanceService,
+    private readonly billing: BillingService,
   ) {}
 
   // ─── Resolve the guardian's family ───────────────────────────────────────
@@ -144,7 +147,6 @@ export class FamilyPortalController {
     }
 
     // Outstanding invoice
-    const { invoices } = await import('@music-life/db');
     const outstandingInvoice = await this.db.db.query.invoices.findFirst({
       where: and(
         eq(invoices.familyId, family.id),
@@ -174,6 +176,39 @@ export class FamilyPortalController {
       students: studentsWithCredits,
       lastNote,
     };
+  }
+
+  // ─── Self-service payment ───────────────────────────────────────────────────
+  // A parent marks their own invoice as paid (e.g. after making the bank
+  // transfer shown on the invoice). We record a self-reported bank-transfer
+  // payment for the full invoice total, which moves the family balance and marks
+  // the invoice paid. Idempotent per invoice, so a double-tap pays exactly once.
+  // The payment note flags it as self-reported so staff can reconcile it against
+  // the actual bank statement.
+  @Post('invoices/:id/mark-paid')
+  @Roles('guardian')
+  async markInvoicePaid(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    const family = await this.requireFamily(user.userId, user.orgId);
+
+    const inv = await this.db.db.query.invoices.findFirst({
+      where: and(eq(invoices.id, id), eq(invoices.organizationId, user.orgId)),
+    });
+    if (!inv || inv.familyId !== family.id) throw new NotFoundException('Invoice not found');
+    if (inv.status === 'void') throw new BadRequestException('This invoice has been cancelled.');
+    if (inv.status === 'paid') return { status: 'paid', alreadyPaid: true };
+    if (inv.total <= 0) throw new BadRequestException('This invoice has nothing to pay.');
+
+    const payment = await this.billing.recordPayment(user.orgId, {
+      familyId: family.id,
+      invoiceId: inv.id,
+      method: 'bank_transfer',
+      amount: inv.total,
+      notes: 'Self-reported as paid by the family via the parent portal.',
+      // Stable per-invoice key → repeat taps return the same payment, never double-charge.
+      idempotencyKey: `self-pay-${inv.id}`,
+    });
+
+    return { status: 'paid', paymentId: payment.id };
   }
 
   // ─── Available booking slots ───────────────────────────────────────────────
