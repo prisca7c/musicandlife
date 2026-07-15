@@ -61,11 +61,18 @@ export class StudentsService {
       whereClause = and(eq(students.organizationId, orgId), searchClause);
     }
 
+    // Instruments shown in the list come from the student's non-withdrawn
+    // enrollments (deduped client-side). `status` lets us drop withdrawn ones.
+    const withRelations = {
+      family: { columns: { id: true, name: true } },
+      enrollments: { columns: { instrument: true, status: true } },
+    } as const;
+
     // Back-compat: no pagination params → return the full array as before.
     if (!page) {
       return this.db.db.query.students.findMany({
         where: whereClause,
-        with: { family: { columns: { id: true, name: true } } },
+        with: withRelations,
         orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
       });
     }
@@ -73,7 +80,7 @@ export class StudentsService {
     const [rows, countRows] = await Promise.all([
       this.db.db.query.students.findMany({
         where: whereClause,
-        with: { family: { columns: { id: true, name: true } } },
+        with: withRelations,
         orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
         limit: page.limit,
         offset: page.offset,

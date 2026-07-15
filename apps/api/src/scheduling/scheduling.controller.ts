@@ -64,6 +64,12 @@ export class SchedulingController {
     return this.scheduling.cancelLesson(user.orgId, id, dto, user.userId, { role: user.role, userId: user.userId });
   }
 
+  @Post('lessons/:id/reinstate')
+  @Roles('teacher')
+  reinstateLesson(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.scheduling.reinstateLesson(user.orgId, id, { role: user.role, userId: user.userId });
+  }
+
   @Post('lessons/:id/reschedule')
   @Roles('teacher')
   reschedule(
