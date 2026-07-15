@@ -677,6 +677,16 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
     } finally { setSaving(false); }
   }
 
+  async function reinstateLesson() {
+    setSaving(true); setActionError('');
+    try {
+      await apiFetch(`/lessons/${lesson!.id}/reinstate`, { method: 'POST', token: tok() });
+      onUpdated(); onClose();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not reinstate lesson');
+    } finally { setSaving(false); }
+  }
+
   async function rescheduleLesson() {
     if (!newDate || !newTime) return;
     setSaving(true); setActionError('');
@@ -808,6 +818,19 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {lesson.status.startsWith('cancelled_') && !lesson.attendance && (
+          <div>
+            <button onClick={reinstateLesson} disabled={saving}
+              className="text-sm w-full rounded-[9px] px-3 py-2 font-semibold transition-colors disabled:opacity-50"
+              style={{ border: '1.5px solid var(--sage-md)', color: 'var(--sage-dk)', background: 'var(--sage-lt)' }}>
+              {saving ? 'Reinstating…' : 'Reinstate lesson'}
+            </button>
+            <p className="text-[11px] mt-1.5 text-center" style={{ color: 'var(--txt4)' }}>
+              Puts this cancelled lesson back on the calendar (we&apos;ll re-check the slot is free).
+            </p>
           </div>
         )}
 

@@ -316,6 +316,39 @@ export class SchedulingService {
     return { id, status: dto.reason };
   }
 
+  // Undo a cancellation — put a cancelled lesson back to 'scheduled'. Only for
+  // lessons cancelled via cancelLesson (which just flips status). If attendance
+  // was recorded, credits/charges were applied, so we refuse and send the user
+  // to Attendance to reverse it there rather than silently leaving the books
+  // inconsistent. Re-checks conflicts in case the slot was re-booked meanwhile.
+  private static readonly REINSTATABLE = new Set([
+    'cancelled_makeup', 'cancelled_no_makeup', 'cancelled_no_pay', 'cancelled_teacher',
+  ]);
+
+  async reinstateLesson(orgId: string, id: string, actor?: Actor) {
+    const lesson = await this.getLesson(orgId, id);
+    await this.assertOwnsLesson(orgId, lesson.teacherId, actor);
+    if (!SchedulingService.REINSTATABLE.has(lesson.status)) {
+      throw new BadRequestException('Only a cancelled lesson can be reinstated');
+    }
+    if (lesson.attendance) {
+      throw new BadRequestException('This lesson has attendance recorded — reverse it from Attendance instead.');
+    }
+
+    return this.db.db.transaction(async (tx) => {
+      const teacherId = lesson.teacherId ?? undefined;
+      const roomId = lesson.roomId ?? undefined;
+      await this.lockResources(tx, orgId, teacherId, roomId);
+      await this.checkConflicts(tx, orgId, lesson.startsAt.toISOString(), lesson.duration, teacherId, roomId, id);
+
+      const [updated] = await tx.update(lessons)
+        .set({ status: 'scheduled', cancelledAt: null, updatedAt: new Date() })
+        .where(eq(lessons.id, id))
+        .returning();
+      return updated!;
+    });
+  }
+
   async directReschedule(orgId: string, id: string, newStartsAt: string, newRoomId?: string, actor?: Actor) {
     const lesson = await this.getLesson(orgId, id);
     await this.assertOwnsLesson(orgId, lesson.teacherId, actor);

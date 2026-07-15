@@ -8,7 +8,13 @@ import { Badge } from '@/components/badge';
 import { UserPlus, Search } from 'lucide-react';
 import { AddStudentModal } from '@/components/add-student-modal';
 
-interface Student { id: string; firstName: string; lastName: string; status: string; family: { id: string; name: string } | null; enrollments?: { instrument: string }[]; }
+interface Student { id: string; firstName: string; lastName: string; status: string; family: { id: string; name: string } | null; enrollments?: { instrument: string; status: string }[]; }
+
+// Distinct instruments across a student's non-withdrawn enrollments.
+function instrumentsOf(s: Student): string {
+  const active = (s.enrollments ?? []).filter(e => e.status !== 'withdrawn' && e.instrument);
+  return [...new Set(active.map(e => e.instrument))].join(', ') || '—';
+}
 
 const PAGE_SIZE = 50;
 
@@ -18,7 +24,19 @@ export default function StudentsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
+  const [converting, setConverting] = useState<string | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  // Trial students never auto-promote — approval creates them as "trial" and
+  // nothing flips them. This lets staff convert a trial to a full active student.
+  async function convertToActive(id: string) {
+    setConverting(id);
+    try {
+      await apiFetch(`/students/${id}`, { method: 'PATCH', token: tok(), body: JSON.stringify({ status: 'active' }) });
+      setStudents(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s));
+    } catch { /* leave as-is on failure */ }
+    finally { setConverting(null); }
+  }
 
   function load(q = search, off = offset) {
     const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(off) });
@@ -86,8 +104,23 @@ export default function StudentsPage() {
                     ? <Link href={`/app/families/${s.family.id}`} className="hover:underline" style={{ color: 'var(--txt2)' }}>{s.family.name}</Link>
                     : '—'}
                 </td>
-                <td><Badge variant={s.status}>{s.status}</Badge></td>
-                <td style={{ color: 'var(--txt3)' }}>{s.enrollments?.map(e => e.instrument).join(', ') || '—'}</td>
+                <td>
+                  <span className="inline-flex items-center gap-2">
+                    <Badge variant={s.status}>{s.status}</Badge>
+                    {s.status === 'trial' && (
+                      <button
+                        onClick={() => convertToActive(s.id)}
+                        disabled={converting === s.id}
+                        className="text-xs font-medium px-2 py-0.5 rounded-md border hover:bg-[var(--sage-lt)] disabled:opacity-60"
+                        style={{ borderColor: 'var(--sage-md)', color: 'var(--sage-dk)' }}
+                        title="Promote this trial student to a full active student"
+                      >
+                        {converting === s.id ? 'Converting…' : 'Convert to active'}
+                      </button>
+                    )}
+                  </span>
+                </td>
+                <td style={{ color: 'var(--txt3)' }}>{instrumentsOf(s)}</td>
               </tr>
             ))}
           </tbody>
