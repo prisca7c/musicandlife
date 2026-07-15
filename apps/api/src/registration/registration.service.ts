@@ -6,6 +6,7 @@ import { randomBytes, createHash } from 'crypto';
 import { DbService } from '../db/db.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EmailPort } from '../email/ports/email.port';
+import { brandedEmail, loginDetailsBlock } from '../email/branding';
 import { parseCsv } from '../common/csv';
 import type { SubmitRegistrationDto } from './dto/submit-registration.dto';
 
@@ -127,9 +128,12 @@ export class RegistrationService {
       });
     }
 
-    let pendingInvite: { to: string; contactName: string; link: string } | undefined;
+    // Welcome email details, always populated when we have a contact email —
+    // for a brand-new account it carries a set-password link, for a returning
+    // family (the contact already has a login) it points them at the portal.
+    let welcome: { to: string; contactName: string; link: string; isNewAccount: boolean } | undefined;
 
-    // If contact email provided, create portal account
+    // If contact email provided, create portal account (only if new)
     if (payload.contactEmail) {
       const existing = await tx.query.users.findFirst({
         where: eq(users.email, payload.contactEmail.toLowerCase()),
@@ -149,10 +153,20 @@ export class RegistrationService {
           userId: newUser!.id, tokenHash,
           expiresAt: new Date(Date.now() + 7 * 86400000),
         });
-        pendingInvite = {
+        welcome = {
           to: payload.contactEmail,
           contactName: payload.contactName,
           link: `${process.env.WEB_URL}/reset-password?token=${rawToken}`,
+          isNewAccount: true,
+        };
+      } else {
+        // Returning family — no new account, but still send a welcome so the
+        // approval is never silent. Point them at the login page.
+        welcome = {
+          to: payload.contactEmail,
+          contactName: payload.contactName,
+          link: `${process.env.WEB_URL}/login`,
+          isNewAccount: false,
         };
       }
     }
@@ -176,22 +190,38 @@ export class RegistrationService {
         .catch((e) => this.logger.warn('Add student contact failed', e));
     }
 
-    return { familyId: family!.id, studentId: student!.id, pendingInvite };
+    return { familyId: family!.id, studentId: student!.id, welcome };
   }
 
-  /** Best-effort welcome email, fired after the creating transaction commits. */
-  private sendWelcomeInvite(invite: { to: string; contactName: string; link: string }) {
+  /**
+   * Branded welcome email, fired after the creating transaction commits. Sent on
+   * every approval that has a contact email — a brand-new family gets a
+   * "set your password" call to action, a returning family gets "log in".
+   */
+  private sendWelcome(w: { to: string; contactName: string; link: string; isNewAccount: boolean }) {
+    const esc = (s: string) => s.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!));
+    const name = esc(w.contactName || 'there');
+    const body = w.isNewAccount
+      ? `<p>Hi ${name},</p><p>Your registration has been approved &mdash; welcome to Music &amp; Life! Set your portal password to get started, then you can view lessons, book sessions, and see the notes and materials your teacher shares.</p>`
+      : `<p>Hi ${name},</p><p>Good news &mdash; your new registration has been approved and added to your existing Music &amp; Life account. Just log in to see everything in one place.</p>`;
+    const html = brandedEmail({
+      previewText: w.isNewAccount ? 'Set your portal password to get started.' : 'Your new registration has been approved.',
+      heading: w.isNewAccount ? 'Welcome to Music & Life!' : "You're all set at Music & Life",
+      bodyHtml: body + loginDetailsBlock(w.to),
+      cta: { label: w.isNewAccount ? 'Set your password' : 'Log in to your portal', url: w.link },
+      footnote: 'Questions? Just reply to this email and our team will be happy to help.',
+    });
     this.email.send({
-      to: invite.to,
-      subject: 'Welcome to Music & Life — set your password',
-      html: `<p>Hi ${invite.contactName},</p><p>Your registration has been approved! Set your portal password here:</p><p><a href="${invite.link}">Set password</a></p>`,
-    }).catch(e => this.logger.warn('Welcome email failed', e));
+      to: w.to,
+      subject: w.isNewAccount ? 'Welcome to Music & Life — set your password' : 'Your Music & Life registration is approved',
+      html,
+    }).catch((e) => this.logger.warn('Welcome email failed', e));
   }
 
   /** Shared by registration approval and CSV import: atomically creates family + student + enrollments (+ portal account). */
   async createFamilyStudentEnrollments(orgId: string, payload: CreationPayload) {
     const result = await this.db.db.transaction(tx => this.createFamilyStudentEnrollmentsTx(tx, orgId, payload));
-    if (result.pendingInvite) this.sendWelcomeInvite(result.pendingInvite);
+    if (result.welcome) this.sendWelcome(result.welcome);
     return { familyId: result.familyId, studentId: result.studentId };
   }
 
@@ -222,7 +252,7 @@ export class RegistrationService {
       return this.createFamilyStudentEnrollmentsTx(tx, orgId, payload);
     });
 
-    if (result.pendingInvite) this.sendWelcomeInvite(result.pendingInvite);
+    if (result.welcome) this.sendWelcome(result.welcome);
     return { id: regId, status: 'approved', familyId: result.familyId, studentId: result.studentId };
   }
 
