@@ -7,15 +7,20 @@ import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
 import { SearchableSelect } from '@/components/searchable-select';
 import { linkify } from '@/lib/linkify';
-import { Lock, Users } from 'lucide-react';
+import { uploadFile } from '@/lib/upload';
+import { Lock, Users, Paperclip, X as XIcon, FileText, Download, Check } from 'lucide-react';
 
 interface Student { id: string; firstName: string; lastName: string; }
 interface Lesson { id: string; startsAt: string; duration: number; enrollment: { instrument: string } | null; }
+interface NoteAttachment { fileId: string; name: string; mime: string; size?: number }
 interface Note {
   id: string; body: string; visibility: 'internal' | 'family'; createdAt: string; lessonId: string | null;
+  attachments?: NoteAttachment[] | null;
   student: { id: string; firstName: string; lastName: string } | null;
   author: { id: string; email: string } | null;
 }
+// A file the teacher has picked to attach: tracks upload progress until it has a fileId.
+interface PendingAttachment { localId: string; name: string; mime: string; size: number; fileId?: string; error?: string }
 
 function getRoleFromToken(token?: string): string {
   try {
@@ -33,6 +38,7 @@ export default function NotesPage() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [familyNote, setFamilyNote] = useState('');
   const [internalNote, setInternalNote] = useState('');
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [isTeacher, setIsTeacher] = useState(false);
@@ -49,8 +55,31 @@ export default function NotesPage() {
       .catch(() => setNotes([]));
   }
 
+  async function addFiles(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+    const picked = Array.from(fileList);
+    const staged: PendingAttachment[] = picked.map(f => ({
+      localId: `${f.name}-${f.size}-${Math.random().toString(36).slice(2)}`,
+      name: f.name, mime: f.type || 'application/octet-stream', size: f.size,
+    }));
+    setAttachments(prev => [...prev, ...staged]);
+    await Promise.all(picked.map(async (f, i) => {
+      const localId = staged[i]!.localId;
+      try {
+        const up = await uploadFile(f, tok());
+        setAttachments(prev => prev.map(a => a.localId === localId ? { ...a, fileId: up.fileId } : a));
+      } catch (e) {
+        setAttachments(prev => prev.map(a => a.localId === localId ? { ...a, error: e instanceof Error ? e.message : 'Upload failed' } : a));
+      }
+    }));
+  }
+
+  function removeAttachment(localId: string) {
+    setAttachments(prev => prev.filter(a => a.localId !== localId));
+  }
+
   useEffect(() => {
-    setLessonId(''); setFamilyNote(''); setInternalNote(''); setError('');
+    setLessonId(''); setFamilyNote(''); setInternalNote(''); setAttachments([]); setError('');
     if (!studentId) { setLessons([]); setNotes([]); return; }
     loadNotes(studentId);
     apiFetch<Lesson[]>(`/lessons?studentId=${studentId}`, { token: tok() })
@@ -62,14 +91,25 @@ export default function NotesPage() {
       .catch(() => setLessons([]));
   }, [studentId]);
 
+  const readyAttachments = attachments.filter(a => a.fileId).map(a => ({ fileId: a.fileId!, name: a.name, mime: a.mime, size: a.size }));
+  const uploadsPending = attachments.some(a => !a.fileId && !a.error);
+  const canSave = !!studentId && (!!familyNote.trim() || !!internalNote.trim() || readyAttachments.length > 0) && !uploadsPending;
+
   async function saveNotes() {
-    if (!studentId || (!familyNote.trim() && !internalNote.trim())) return;
+    if (!canSave) return;
     setSaving(true); setError('');
     try {
-      if (familyNote.trim()) {
+      // The family note carries any media; if the teacher attached files without
+      // typing anything, give the note a sensible default body.
+      if (familyNote.trim() || readyAttachments.length > 0) {
         await apiFetch('/notes', {
           method: 'POST', token: tok(),
-          body: JSON.stringify({ studentId, lessonId: lessonId || undefined, body: familyNote.trim(), visibility: 'family' }),
+          body: JSON.stringify({
+            studentId, lessonId: lessonId || undefined,
+            body: familyNote.trim() || 'Shared some materials with you.',
+            visibility: 'family',
+            attachments: readyAttachments,
+          }),
         });
       }
       if (internalNote.trim()) {
@@ -78,7 +118,7 @@ export default function NotesPage() {
           body: JSON.stringify({ studentId, lessonId: lessonId || undefined, body: internalNote.trim(), visibility: 'internal' }),
         });
       }
-      setFamilyNote(''); setInternalNote('');
+      setFamilyNote(''); setInternalNote(''); setAttachments([]);
       loadNotes(studentId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save note');
@@ -87,13 +127,21 @@ export default function NotesPage() {
     }
   }
 
+  // Teachers own the files they uploaded, so the owner-scoped download route works.
+  async function downloadAttachment(fileId: string) {
+    try {
+      const { downloadUrl } = await apiFetch<{ downloadUrl: string }>(`/files/${fileId}/sign-download`, { token: tok() });
+      window.open(downloadUrl, '_blank', 'noopener');
+    } catch { /* ignore — link simply won't open */ }
+  }
+
   return (
     <div>
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">
             Lesson Notes
-            <InfoTooltip text="Notes are visible to studio staff and the student's teachers — not to families. Use them to track progress and next steps, and keep them professional, as they form part of the student's record." />
+            <InfoTooltip text="“Notes for family” (and any media you attach) appear on the family's portal. “Notes for staff” stay internal — visible only to studio staff and the student's teachers. Both form part of the student's record, so keep them professional." />
           </span>
         }
         subtitle={isTeacher ? 'Notes for your students' : 'Notes across the studio'}
@@ -140,6 +188,33 @@ export default function NotesPage() {
                   <textarea value={familyNote} onChange={e => setFamilyNote(e.target.value)} rows={4}
                     placeholder="e.g. Great progress on scales this week — keep practicing the left hand."
                     className="ui-input" style={{ resize: 'vertical' }} />
+
+                  {/* Attach media for the family (recordings, sheet music, photos) */}
+                  <div className="mt-2">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium cursor-pointer px-2.5 py-1.5 rounded-lg border hover:bg-[var(--surf)]"
+                      style={{ borderColor: 'var(--bd2)', color: 'var(--txt3)' }}>
+                      <Paperclip size={13} /> Attach media
+                      <input type="file" multiple className="hidden"
+                        onChange={e => { addFiles(e.target.files); e.target.value = ''; }} />
+                    </label>
+                    {attachments.length > 0 && (
+                      <div className="mt-2 space-y-1.5">
+                        {attachments.map(a => (
+                          <div key={a.localId} className="flex items-center gap-2 text-xs rounded-lg px-2.5 py-1.5"
+                            style={{ background: 'var(--surf)', color: 'var(--txt3)' }}>
+                            <FileText size={13} className="shrink-0" />
+                            <span className="truncate flex-1">{a.name}</span>
+                            {a.error ? <span className="text-[var(--coral)] shrink-0">{a.error}</span>
+                              : !a.fileId ? <span className="text-[var(--txt4)] shrink-0">Uploading…</span>
+                              : <Check size={13} className="text-[var(--sage-dk)] shrink-0" />}
+                            <button type="button" onClick={() => removeAttachment(a.localId)} className="shrink-0 hover:text-[var(--coral)]">
+                              <XIcon size={13} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="ui-label flex items-center gap-1.5">
@@ -153,9 +228,9 @@ export default function NotesPage() {
               </div>
 
               <div className="mt-4">
-                <button onClick={saveNotes} disabled={saving || (!familyNote.trim() && !internalNote.trim())}
+                <button onClick={saveNotes} disabled={saving || !canSave}
                   className="ui-btn-primary">
-                  {saving ? 'Saving…' : 'Save note(s)'}
+                  {saving ? 'Saving…' : uploadsPending ? 'Uploading…' : 'Save note(s)'}
                 </button>
               </div>
             </div>
@@ -178,6 +253,17 @@ export default function NotesPage() {
                         </span>
                       </div>
                       <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--txt)' }}>{linkify(n.body)}</p>
+                      {n.attachments && n.attachments.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {n.attachments.map(a => (
+                            <button key={a.fileId} onClick={() => downloadAttachment(a.fileId)}
+                              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border hover:bg-[var(--surf)]"
+                              style={{ borderColor: 'var(--bd2)', color: 'var(--txt3)' }}>
+                              <Download size={12} /> <span className="truncate max-w-[160px]">{a.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
