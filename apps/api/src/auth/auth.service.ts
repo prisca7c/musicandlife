@@ -26,7 +26,9 @@ import type { JwtPayload, BaseRole } from '@music-life/types';
 import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
 
-const ACCESS_TTL = parseInt(process.env.JWT_ACCESS_TTL ?? '900', 10);
+// 30 days — keeps people signed in until they log out. See auth.module.ts for
+// why a long-lived access token (rather than short token + refresh) is used.
+const ACCESS_TTL = parseInt(process.env.JWT_ACCESS_TTL ?? '2592000', 10);
 const REFRESH_TTL = parseInt(process.env.JWT_REFRESH_TTL ?? '2592000', 10);
 
 @Injectable()
