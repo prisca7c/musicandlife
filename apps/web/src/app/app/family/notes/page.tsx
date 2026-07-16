@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { fmtDate } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { linkify } from '@/lib/linkify';
@@ -15,14 +16,12 @@ interface FamilyNote {
 }
 
 export default function FamilyNotesPage() {
-  const [notes, setNotes] = useState<FamilyNote[] | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  useEffect(() => {
-    apiFetch<FamilyNote[]>('/family/notes', { token: tok() })
-      .then(setNotes).catch(() => setNotes([]));
-  }, []);
+  // Cached read — instant on revisit. `notes === null` still means "loading".
+  const { data, error } = useApi<FamilyNote[]>('/family/notes');
+  const notes = error ? [] : (data ?? null);
 
   async function download(noteId: string, fileId: string) {
     setDownloading(fileId);

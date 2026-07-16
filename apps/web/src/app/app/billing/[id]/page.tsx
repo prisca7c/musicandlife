@@ -5,6 +5,7 @@ import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
@@ -101,42 +102,30 @@ const STATUS_COLORS: Record<string, string> = { draft: 'default', sent: 'trial',
 
 export default function InvoiceDetailPage() {
   const params                                 = useParams<{ id: string }>();
-  const [invoice, setInvoice]                  = useState<InvoiceDetail | null>(null);
-  const [org, setOrg]                          = useState<OrgPDFData | null>(null);
-  const [familyAddress, setFamilyAddress]      = useState<string | null>(null);
   const [logoSrc, setLogoSrc]                  = useState('');
   const [showAddItem, setShowAddItem]          = useState(false);
   const [actioning, setActioning]              = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  function load() {
-    const t = tok();
-    apiFetch<InvoiceDetail>(`/invoices/${params.id}`, { token: t }).then(inv => {
-      setInvoice(inv);
-      if (inv.family?.id) {
-        apiFetch<FamilyDetail>(`/families/${inv.family.id}`, { token: t })
-          .then(f => setFamilyAddress(f.address ?? null))
-          .catch(() => {});
-      }
-    }).catch(() => {});
-  }
+  // Cached reads — instant on revisit. mutate() refreshes after an action.
+  const { data: invoice = null, mutate } = useApi<InvoiceDetail>(`/invoices/${params.id}`);
+  const load = () => mutate();
+  // Family address is only needed once the invoice resolves (dependent read).
+  const { data: familyDetail } = useApi<FamilyDetail>(invoice?.family?.id ? `/families/${invoice.family.id}` : null);
+  const familyAddress = familyDetail?.address ?? null;
+  // Org settings for the PDF, reshaped to the template's expected fields.
+  const { data: orgSettings } = useApi<OrgSettings>('/organizations/me');
+  const org: OrgPDFData | null = orgSettings ? {
+    name:               orgSettings.name,
+    address:            orgSettings.settings.address,
+    bankSortCode:       orgSettings.settings.bankSortCode,
+    bankAccountNumber:  orgSettings.settings.bankAccountNumber,
+    bankAccountName:    orgSettings.settings.bankAccountName,
+    invoiceNotes:       orgSettings.settings.invoiceNotes,
+  } : null;
 
-  useEffect(() => {
-    load();
-    // Fetch org settings for PDF
-    apiFetch<OrgSettings>('/organizations/me', { token: tok() })
-      .then(o => setOrg({
-        name:               o.name,
-        address:            o.settings.address,
-        bankSortCode:       o.settings.bankSortCode,
-        bankAccountNumber:  o.settings.bankAccountNumber,
-        bankAccountName:    o.settings.bankAccountName,
-        invoiceNotes:       o.settings.invoiceNotes,
-      }))
-      .catch(() => {});
-    // Pre-fetch logo as base64 for PDF embedding
-    toBase64('/logo-full.png').then(setLogoSrc).catch(() => {});
-  }, [params.id]);
+  // Pre-fetch the logo as base64 for PDF embedding (local asset, not an API call).
+  useEffect(() => { toBase64('/logo-full.png').then(setLogoSrc).catch(() => {}); }, []);
 
   async function action(path: string) {
     setActioning(true);

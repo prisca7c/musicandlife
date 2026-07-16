@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Modal } from '@/components/modal';
 import { InvoicingSettingsFields, readInvoicingSettingsForm } from '@/components/invoicing-settings-fields';
@@ -121,19 +122,16 @@ function BulkInvoicingSettingsModal({ open, onClose, familyIds, onApplied }: {
 }
 
 export default function FamiliesPage() {
-  const [families, setFamilies] = useState<Family[]>([]);
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showBulkSettings, setShowBulkSettings] = useState(false);
-  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  function load(q = search) {
-    const qs = q ? `?search=${encodeURIComponent(q)}` : '';
-    apiFetch<Family[]>(`/families${qs}`, { token: tok() }).then(setFamilies).catch(() => {});
-  }
-
-  useEffect(() => { load(); }, []);
+  // The API path is the cache key — revisiting this page renders instantly from
+  // cache, then revalidates. Changing the search re-keys and refetches.
+  const key = search ? `/families?search=${encodeURIComponent(search)}` : '/families';
+  const { data: families = [], mutate } = useApi<Family[]>(key);
+  const load = () => mutate();
 
   function toggleSelected(id: string) {
     setSelected(prev => {
@@ -178,7 +176,7 @@ export default function FamiliesPage() {
         </span>
         <input
           value={search}
-          onChange={e => { setSearch(e.target.value); load(e.target.value); }}
+          onChange={e => setSearch(e.target.value)}
           placeholder="Search by name or email…"
           className="ui-search pl-9"
         />

@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { apiFetch } from '@/lib/api';
+import { useState } from 'react';
+import { useApi } from '@/lib/swr';
 import { fmtTime, fmtDate } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
@@ -37,19 +37,16 @@ const STATUS_VARIANT: Record<string, string> = {
 };
 
 export default function FamilyHistoryPage() {
-  const [lessons, setLessons] = useState<Lesson[]>([]);
   const [from, setFrom] = useState(() => {
     const d = new Date(); d.setMonth(d.getMonth() - 3);
     return d.toISOString().split('T')[0]!;
   });
   const [to, setTo] = useState(() => new Date().toISOString().split('T')[0]!);
-  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  useEffect(() => {
-    apiFetch<Lesson[]>(`/family/lessons?from=${from}&to=${to}`, { token: tok() })
-      .then(data => setLessons(data.sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime())))
-      .catch(() => {});
-  }, [from, to]);
+  // Cached read keyed on the date range — instant on revisit, revalidates in
+  // the background. Newest lessons first.
+  const { data: lessonsRaw = [] } = useApi<Lesson[]>(`/family/lessons?from=${from}&to=${to}`);
+  const lessons = [...lessonsRaw].sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime());
 
   const attended = lessons.filter(l => l.status === 'completed').length;
   const total = lessons.filter(l => l.status !== 'scheduled').length;

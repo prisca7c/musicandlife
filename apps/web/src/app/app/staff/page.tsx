@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
@@ -103,13 +104,11 @@ function AddStaffModal({ open, onClose, onCreated }: { open: boolean; onClose: (
 }
 
 export default function StaffPage() {
-  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [showAdd, setShowAdd] = useState(false);
-  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  function load() { apiFetch<StaffMember[]>('/staff', { token: tok() }).then(setStaff).catch(() => {}); }
-
-  useEffect(() => { load(); }, []);
+  // Cached read — instant on revisit, revalidates in the background.
+  const { data: staff = [], mutate } = useApi<StaffMember[]>('/staff');
+  const load = () => mutate();
 
   return (
     <div>

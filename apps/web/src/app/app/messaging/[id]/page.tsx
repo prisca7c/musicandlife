@@ -4,13 +4,13 @@ import { useState, useEffect, useRef, FormEvent } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 
 interface Message { id: string; body: string; createdAt: string; sender: { id: string; email: string } | null; }
 interface Thread { id: string; subject: string; messages: Message[]; participants: { user: { id: string; email: string } }[]; }
 
 export default function ThreadPage() {
   const params = useParams<{ id: string }>();
-  const [thread, setThread] = useState<Thread | null>(null);
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -19,8 +19,13 @@ export default function ThreadPage() {
     ? (() => { try { return JSON.parse(atob((document.cookie.match(/access_token=([^;]+)/)?.[1]??'').split('.')[1]??''))?.email; } catch { return ''; } })()
     : '';
 
-  function load() { apiFetch<Thread>(`/threads/${params.id}`, { token: tok() }).then(t => { setThread(t); setTimeout(() => bottomRef.current?.scrollIntoView(), 50); }).catch(() => {}); }
-  useEffect(() => { load(); }, [params.id]);
+  // Cached read of the thread — instant on revisit. mutate() refreshes after a
+  // reply; the effect below scrolls to the newest message whenever it changes.
+  const { data: thread = null, mutate } = useApi<Thread>(`/threads/${params.id}`);
+  const load = () => mutate();
+  useEffect(() => {
+    if (thread) setTimeout(() => bottomRef.current?.scrollIntoView(), 50);
+  }, [thread]);
 
   async function handleReply(e: FormEvent) {
     e.preventDefault();

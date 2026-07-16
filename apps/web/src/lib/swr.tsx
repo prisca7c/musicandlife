@@ -51,6 +51,15 @@ export function SWRProvider({ children }: { children: React.ReactNode }) {
 // Extend this map as pages are migrated to useApi.
 const ROUTE_DATA: Record<string, string> = {
   '/app/students': '/students?limit=50&offset=0',
+  '/app/families': '/families',
+  '/app/staff': '/staff',
+  '/app/billing': '/invoices',
+  '/app/news': '/news',
+  '/app/messaging': '/threads',
+  '/app/resources': '/resources',
+  '/app/reschedule-requests': '/reschedule-requests?status=pending',
+  '/app/family/dashboard': '/family/dashboard',
+  '/app/family/notes': '/family/notes',
 };
 
 export function prefetchRoute(href: string) {

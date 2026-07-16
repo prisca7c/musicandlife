@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { STUDIO_TZ } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
@@ -30,21 +31,14 @@ function fmt(iso: string) {
 }
 
 export default function RescheduleRequestsPage() {
-  const [requests, setRequests] = useState<Req[]>([]);
-  const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  const load = useCallback(() => {
-    setLoading(true);
-    apiFetch<Req[]>('/reschedule-requests?status=pending', { token: tok() })
-      .then((r) => setRequests(r))
-      .catch((e) => setError(e instanceof Error ? e.message : 'Could not load requests'))
-      .finally(() => setLoading(false));
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+  // Cached read: revisiting renders instantly, then revalidates. mutate()
+  // refreshes after an approve/deny.
+  const { data: requests = [], isLoading: loading, mutate } = useApi<Req[]>('/reschedule-requests?status=pending');
+  const load = () => mutate();
 
   async function approve(id: string, chosenStartsAt: string) {
     setBusyId(id); setError('');

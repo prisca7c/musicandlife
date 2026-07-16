@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { pdf } from '@react-pdf/renderer';
 import { apiFetch, apiFetchBlob } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { InvoicePDF, type OrgPDFData } from '@/components/invoice-pdf';
 import { PayrollPDF, type PayrollPDFData } from '@/components/payroll-pdf';
@@ -34,13 +35,10 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export default function ReportsPage() {
-  const [attendance, setAttendance] = useState<AttendanceReport | null>(null);
-  const [revenue, setRevenue] = useState<RevenueReport | null>(null);
-  const [enrollments, setEnrollments] = useState<EnrollmentReport | null>(null);
-  const [retention, setRetention] = useState<RetentionReport | null>(null);
-  const [students, setStudents] = useState<StudentOption[]>([]);
-  const [staff, setStaff] = useState<StaffOption[]>([]);
-  const [org, setOrg] = useState<OrgPDFData | null>(null);
+  // Dropdown / PDF options — cached, so they populate instantly on revisit.
+  const { data: students = [] } = useApi<StudentOption[]>('/students');
+  const { data: staff = [] } = useApi<StaffOption[]>('/staff');
+  const { data: org = null } = useApi<OrgPDFData>('/organizations/me');
 
   const [from, setFrom] = useState(monthStart);
   const [to, setTo] = useState(today);
@@ -50,24 +48,12 @@ export default function ReportsPage() {
 
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  useEffect(() => {
-    const t = tok();
-    Promise.all([
-      apiFetch<StudentOption[]>('/students', { token: t }).catch(() => []),
-      apiFetch<StaffOption[]>('/staff', { token: t }).catch(() => []),
-      apiFetch<OrgPDFData>('/organizations/me', { token: t }).catch(() => null),
-    ]).then(([s, st, o]) => { setStudents(s); setStaff(st); setOrg(o); });
-  }, []);
-
-  useEffect(() => {
-    const t = tok();
-    Promise.all([
-      apiFetch<AttendanceReport>(`/reports/attendance?from=${from}&to=${to}`, { token: t }).catch(() => null),
-      apiFetch<RevenueReport>(`/reports/revenue?from=${from}&to=${to}`, { token: t }).catch(() => null),
-      apiFetch<EnrollmentReport>('/reports/enrollments', { token: t }).catch(() => null),
-      apiFetch<RetentionReport>('/reports/retention', { token: t }).catch(() => null),
-    ]).then(([a, r, e, ret]) => { setAttendance(a); setRevenue(r); setEnrollments(e); setRetention(ret); });
-  }, [from, to]);
+  // Report data — attendance/revenue re-key on the date range; all cached so
+  // flipping back to a range you've already viewed is instant.
+  const { data: attendance = null } = useApi<AttendanceReport>(`/reports/attendance?from=${from}&to=${to}`);
+  const { data: revenue = null } = useApi<RevenueReport>(`/reports/revenue?from=${from}&to=${to}`);
+  const { data: enrollments = null } = useApi<EnrollmentReport>('/reports/enrollments');
+  const { data: retention = null } = useApi<RetentionReport>('/reports/retention');
 
   async function downloadCsv(path: string, filename: string) {
     setGenerating(filename);

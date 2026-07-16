@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { useParams, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
@@ -30,8 +31,6 @@ interface LessonNote {
 }
 
 function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boolean; onClose: () => void; studentId: string; onCreated: () => void }) {
-  const [staff, setStaff] = useState<StaffMember[]>([]);
-  const [terms, setTerms] = useState<Term[]>([]);
   const [lessonType, setLessonType] = useState<'private' | 'group'>('private');
   const [duration, setDuration] = useState(60);
   const [instrument, setInstrument] = useState('');
@@ -45,19 +44,24 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
   const [result, setResult] = useState<{ created: number; through: string } | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
+  // Cached picker options — only fetched once the modal is open.
+  const { data: staff = [] } = useApi<StaffMember[]>(open ? '/staff' : null);
+  const { data: terms = [] } = useApi<Term[]>(open ? '/terms' : null);
+
+  // Reset the form each time the modal opens.
   useEffect(() => {
     if (!open) return;
     setInstrument(''); setTeacherId(''); setWeekday(''); setEnrollStatus('active'); setError(''); setResult(null);
-    const t = tok();
-    Promise.all([
-      apiFetch<StaffMember[]>('/staff', { token: t }).catch(() => []),
-      apiFetch<Term[]>('/terms', { token: t }).catch(() => []),
-    ]).then(([s, te]) => {
-      setStaff(s); setTerms(te);
-      const active = te.find((t: Term) => t.status === 'active');
-      setTermId(active?.id ?? '');
-    });
   }, [open]);
+
+  // Default to the active term once terms load (don't clobber a manual choice).
+  useEffect(() => {
+    if (!termId) {
+      const active = terms.find((t: Term) => t.status === 'active');
+      if (active) setTermId(active.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [terms]);
 
   const instruments = lessonType === 'private' ? PRIVATE_INSTRUMENTS : GROUP_INSTRUMENTS;
 
@@ -214,18 +218,16 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
 }
 
 function LessonNotes({ studentId }: { studentId: string }) {
-  const [notes, setNotes] = useState<LessonNote[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [familyNote, setFamilyNote] = useState('');
   const [privateNote, setPrivateNote] = useState('');
   const [saving, setSaving] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  function load() {
-    apiFetch<LessonNote[]>(`/notes?studentId=${studentId}`, { token: tok() }).then(setNotes).catch(() => {});
-  }
-
-  useEffect(() => { load(); }, [studentId]);
+  // Cached read keyed on the student — instant on revisit. load() refreshes
+  // after adding a note.
+  const { data: notes = [], mutate } = useApi<LessonNote[]>(`/notes?studentId=${studentId}`);
+  const load = () => mutate();
 
   async function handleSave() {
     if (!familyNote.trim() && !privateNote.trim()) return;
@@ -296,15 +298,12 @@ function LessonNotes({ studentId }: { studentId: string }) {
 export default function StudentDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
-  const [student, setStudent] = useState<StudentDetail | null>(null);
   const [showEnroll, setShowEnroll] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  function load() {
-    apiFetch<StudentDetail>(`/students/${id}`, { token: tok() }).then(setStudent).catch(() => setStudent(null));
-  }
-
-  useEffect(() => { load(); }, [id]);
+  // Cached read — instant on revisit. load() refreshes after an edit/enrollment.
+  const { data: student = null, mutate } = useApi<StudentDetail>(`/students/${id}`);
+  const load = () => mutate();
 
   if (!student) return <div className="p-8 text-center text-sm" style={{ color: 'var(--txt4)' }}>Loading…</div>;
 

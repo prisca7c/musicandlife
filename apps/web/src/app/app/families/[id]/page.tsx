@@ -4,6 +4,7 @@ import { useState, useEffect, FormEvent } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
@@ -346,8 +347,6 @@ function MergeFamilyModal({ open, onClose, targetId, targetName, onMerged }: {
 
 export default function FamilyDetailPage() {
   const params = useParams<{ id: string }>();
-  const [family, setFamily] = useState<FamilyDetail | null>(null);
-  const [invoices, setInvoices] = useState<FamilyInvoice[]>([]);
   const [showAddStudent, setShowAddStudent] = useState(false);
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
   const [showInvoicingSettings, setShowInvoicingSettings] = useState(false);
@@ -363,11 +362,10 @@ export default function FamilyDetailPage() {
     } catch { setCanMerge(false); }
   }, []);
 
-  function load() {
-    apiFetch<FamilyDetail>(`/families/${params.id}`, { token: tok() }).then(setFamily).catch(() => {});
-    apiFetch<FamilyInvoice[]>(`/invoices?familyId=${params.id}`, { token: tok() }).then(setInvoices).catch(() => {});
-  }
-  useEffect(() => { load(); }, [params.id]);
+  // Cached reads — instant on revisit. load() refreshes both after a mutation.
+  const { data: family = null, mutate: mFamily } = useApi<FamilyDetail>(`/families/${params.id}`);
+  const { data: invoices = [], mutate: mInvoices } = useApi<FamilyInvoice[]>(`/invoices?familyId=${params.id}`);
+  const load = () => { mFamily(); mInvoices(); };
 
   if (!family) return <div className="p-8 text-center text-sm" style={{ color: 'var(--txt4)' }}>Loading…</div>;
 

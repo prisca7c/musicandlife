@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { fmtTime, fmtTimeEnd, fmtDate, studioMinutesFromMidnight, studioDayString } from '@/lib/datetime';
 import { Modal } from '@/components/modal';
 import { Badge } from '@/components/badge';
@@ -851,45 +852,35 @@ export default function CalendarPage() {
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const [anchorDate, setAnchorDate] = useState(() => new Date());
-  const [lessons, setLessons] = useState<Lesson[]>([]);
-  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showAddStudent, setShowAddStudent] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
-  const [role, setRole] = useState('');
   const [slotDate, setSlotDate] = useState<string | undefined>();
   const [slotTime, setSlotTime] = useState<string | undefined>();
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
-  const [availability, setAvailability] = useState<Availability[]>([]);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   const weekStart = getWeekStart(anchorDate);
+  const role = getRoleFromToken(tok());
 
-  function load() {
-    apiFetch<Lesson[]>(`/lessons?weekStart=${formatDate(weekStart)}`, { token: tok() })
-      .then(setLessons).catch(() => {});
-  }
-  useEffect(() => { load(); }, [weekStart.getTime()]);
+  // Cached reads — the week's lessons re-key on weekStart (paging weeks you've
+  // already seen is instant), and staff/availability are cached too. load()
+  // refreshes the week after a create/reschedule/cancel.
+  const { data: lessons = [], mutate } = useApi<Lesson[]>(`/lessons?weekStart=${formatDate(weekStart)}`);
+  const load = () => mutate();
+
+  // A teacher sees only themselves + their own windows; admins see everyone.
+  const { data: staffRaw } = useApi<StaffMember | StaffMember[] | null>(role === 'teacher' ? '/staff/me' : '/staff');
+  const staff = Array.isArray(staffRaw) ? staffRaw : staffRaw ? [staffRaw] : [];
+  const { data: availability = [] } = useApi<Availability[]>(role === 'teacher' ? '/staff/me/availability' : '/staff/availability/all');
+
+  // Recompute the per-teacher colour map whenever the staff set changes.
+  const staffIdsKey = staff.map(s => s.id).join(',');
   useEffect(() => {
-    const t = tok();
-    const role = getRoleFromToken(t);
-    setRole(role);
-    if (role === 'teacher') {
-      apiFetch<StaffMember | null>('/staff/me', { token: t }).then(me => {
-        const list = me ? [me] : [];
-        setStaff(list); setTeacherColorMap(list);
-      }).catch(() => {});
-      // A teacher sees only their own availability windows.
-      apiFetch<Availability[]>('/staff/me/availability', { token: t }).then(setAvailability).catch(() => {});
-    } else {
-      apiFetch<StaffMember[]>('/staff', { token: t }).then(list => {
-        setStaff(list); setTeacherColorMap(list);
-      }).catch(() => {});
-      // Admin/manager see every teacher's availability, coloured per teacher.
-      apiFetch<Availability[]>('/staff/availability/all', { token: t }).then(setAvailability).catch(() => {});
-    }
-  }, []);
+    setTeacherColorMap(staff);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staffIdsKey]);
 
   useEffect(() => {
     function onDown(e: MouseEvent) {

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
@@ -31,29 +32,28 @@ function getRoleFromToken(token?: string): string {
 }
 
 export default function NotesPage() {
-  const [students, setStudents] = useState<Student[]>([]);
   const [studentId, setStudentId] = useState('');
-  const [lessons, setLessons] = useState<Lesson[]>([]);
   const [lessonId, setLessonId] = useState('');
-  const [notes, setNotes] = useState<Note[]>([]);
   const [familyNote, setFamilyNote] = useState('');
   const [internalNote, setInternalNote] = useState('');
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [isTeacher, setIsTeacher] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  const isTeacher = getRoleFromToken(tok()) === 'teacher';
 
-  useEffect(() => {
-    setIsTeacher(getRoleFromToken(tok()) === 'teacher');
-    apiFetch<Student[]>('/students', { token: tok() }).then(setStudents).catch(() => {});
-  }, []);
-
-  function loadNotes(forStudentId: string) {
-    apiFetch<Note[]>(`/notes?studentId=${forStudentId}`, { token: tok() })
-      .then(rows => setNotes(rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt))))
-      .catch(() => setNotes([]));
-  }
+  // Cached reads. The student list loads once; lessons and notes are keyed on
+  // the selected student (null key = don't fetch until one is picked).
+  const { data: students = [] } = useApi<Student[]>('/students');
+  const notesKey = studentId ? `/notes?studentId=${studentId}` : null;
+  const { data: notesRaw = [], mutate: mutateNotes } = useApi<Note[]>(notesKey);
+  const notes = [...notesRaw].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const lessonsKey = studentId ? `/lessons?studentId=${studentId}` : null;
+  const { data: lessonsRaw = [] } = useApi<Lesson[]>(lessonsKey);
+  const lessons = lessonsRaw
+    .filter(l => new Date(l.startsAt) <= new Date())
+    .sort((a, b) => b.startsAt.localeCompare(a.startsAt))
+    .slice(0, 8);
 
   async function addFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
@@ -78,17 +78,9 @@ export default function NotesPage() {
     setAttachments(prev => prev.filter(a => a.localId !== localId));
   }
 
+  // Reset the composer when switching students.
   useEffect(() => {
     setLessonId(''); setFamilyNote(''); setInternalNote(''); setAttachments([]); setError('');
-    if (!studentId) { setLessons([]); setNotes([]); return; }
-    loadNotes(studentId);
-    apiFetch<Lesson[]>(`/lessons?studentId=${studentId}`, { token: tok() })
-      .then(rows => setLessons(
-        rows.filter(l => new Date(l.startsAt) <= new Date())
-          .sort((a, b) => b.startsAt.localeCompare(a.startsAt))
-          .slice(0, 8),
-      ))
-      .catch(() => setLessons([]));
   }, [studentId]);
 
   const readyAttachments = attachments.filter(a => a.fileId).map(a => ({ fileId: a.fileId!, name: a.name, mime: a.mime, size: a.size }));
@@ -119,7 +111,7 @@ export default function NotesPage() {
         });
       }
       setFamilyNote(''); setInternalNote(''); setAttachments([]);
-      loadNotes(studentId);
+      mutateNotes();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save note');
     } finally {
