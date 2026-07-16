@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Modal } from '@/components/modal';
 import { Search } from 'lucide-react';
@@ -48,13 +49,13 @@ function NewThreadModal({ open, onClose, onCreated }: { open: boolean; onClose: 
 }
 
 export default function MessagingPage() {
-  const [threads, setThreads] = useState<Thread[]>([]);
   const [search, setSearch] = useState('');
   const [showNew, setShowNew] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  function load() { apiFetch<Thread[]>('/threads', { token: tok() }).then(setThreads).catch(() => {}); }
-  useEffect(() => { load(); }, []);
+  // Cached read — instant on revisit, revalidates in the background.
+  const { data: threads = [], mutate } = useApi<Thread[]>('/threads');
+  const load = () => mutate();
 
   const q = search.trim().toLowerCase();
   const filtered = q ? threads.filter(t =>

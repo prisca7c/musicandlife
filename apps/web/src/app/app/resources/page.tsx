@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
@@ -116,12 +117,6 @@ function AddResourceModal({ open, onClose, onCreated, role, staff, students }: {
 }
 
 export default function ResourcesPage() {
-  const [resources, setResources] = useState<Resource[]>([]);
-  const [allResources, setAllResources] = useState<Resource[]>([]);
-  const [staff, setStaff] = useState<Staff[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [role, setRole] = useState('');
-  const [locked, setLocked] = useState(false);
   const [search, setSearch] = useState('');
   const [instrument, setInstrument] = useState('');
   const [teacherId, setTeacherId] = useState('');
@@ -129,36 +124,34 @@ export default function ResourcesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [deleting, setDeleting] = useState<string|null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  const role = getRoleFromToken(tok());
 
-  function load(filters: { search?: string; instrument?: string; teacherId?: string; studentId?: string } = {}) {
-    const params = new URLSearchParams();
-    if (filters.search) params.set('search', filters.search);
-    if (filters.instrument) params.set('instrument', filters.instrument);
-    if (filters.teacherId) params.set('teacherId', filters.teacherId);
-    if (filters.studentId) params.set('studentId', filters.studentId);
-    const qs = params.toString() ? `?${params.toString()}` : '';
-    apiFetch<Resource[]>(`/resources${qs}`, { token: tok() })
-      .then(rows => { setResources(rows); setLocked(false); })
-      .catch(() => setLocked(true));
-  }
+  // The filter set is the cache key — changing a filter re-keys and refetches;
+  // revisiting with the same filters renders instantly. A rejected read (403)
+  // surfaces as `locked`. mutate() refreshes after add/delete.
+  const params = new URLSearchParams();
+  if (search) params.set('search', search);
+  if (instrument) params.set('instrument', instrument);
+  if (teacherId) params.set('teacherId', teacherId);
+  if (studentId) params.set('studentId', studentId);
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  const { data: resources = [], error: resourcesError, mutate } = useApi<Resource[]>(`/resources${qs}`);
+  const locked = !!resourcesError;
+  const load = () => mutate();
 
-  useEffect(() => {
-    setRole(getRoleFromToken(tok()));
-    load();
-    apiFetch<Resource[]>('/resources', { token: tok() }).then(setAllResources).catch(() => {});
-    apiFetch<Staff[]>('/staff', { token: tok() }).then(setStaff).catch(() => setStaff([]));
-    apiFetch<Student[]>('/students', { token: tok() }).then(setStudents).catch(() => setStudents([]));
-  }, []);
+  // Unfiltered lists for the filter dropdowns / add modal.
+  const { data: allResources = [] } = useApi<Resource[]>('/resources');
+  const { data: staff = [] } = useApi<Staff[]>('/staff');
+  const { data: students = [] } = useApi<Student[]>('/students');
 
   function applyFilters(next: Partial<{ search: string; instrument: string; teacherId: string; studentId: string }>) {
     const merged = { search, instrument, teacherId, studentId, ...next };
     setSearch(merged.search); setInstrument(merged.instrument); setTeacherId(merged.teacherId); setStudentId(merged.studentId);
-    load(merged);
   }
 
   async function remove(id: string) {
     setDeleting(id);
-    try { await apiFetch(`/resources/${id}`, { method: 'DELETE', token: tok() }); load({ search, instrument, teacherId, studentId }); }
+    try { await apiFetch(`/resources/${id}`, { method: 'DELETE', token: tok() }); load(); }
     catch(e) { console.error(e); } finally { setDeleting(null); }
   }
 
@@ -183,7 +176,7 @@ export default function ResourcesPage() {
 
   return (
     <div>
-      <AddResourceModal open={showAdd} onClose={()=>setShowAdd(false)} onCreated={() => load({ search, instrument, teacherId, studentId })} role={role} staff={staff} students={students} />
+      <AddResourceModal open={showAdd} onClose={()=>setShowAdd(false)} onCreated={() => load()} role={role} staff={staff} students={students} />
       <PageHeader title="Resources" subtitle={`${resources.length} item${resources.length!==1?'s':''}`}
         action={<button onClick={()=>setShowAdd(true)} className="bg-[var(--sage)] text-white rounded px-4 py-2 text-sm font-medium hover:bg-[var(--sage-dk)]">+ Add resource</button>} />
 

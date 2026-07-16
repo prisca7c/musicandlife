@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
@@ -340,24 +341,18 @@ function ImportCsvPanel() {
 
 export default function IntakePage() {
   const [tab, setTab] = useState<'registrations' | 'leads' | 'import'>('registrations');
-  const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [regFilter, setRegFilter] = useState('pending');
   const [selectedReg, setSelectedReg] = useState<Registration | null>(null);
-  const [leads, setLeads] = useState<Lead[]>([]);
   const [showAddLead, setShowAddLead] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  function loadRegistrations() {
-    apiFetch<Registration[]>(`/registrations?status=${regFilter}`, { token: tok() })
-      .then(setRegistrations).catch(() => {});
-  }
-  function loadLeads() {
-    apiFetch<Lead[]>('/leads', { token: tok() }).then(setLeads).catch(() => {});
-  }
-
-  useEffect(() => { loadRegistrations(); }, [regFilter]);
-  useEffect(() => { loadLeads(); }, []);
+  // Cached reads. Registrations re-key on the status filter; both refresh via
+  // their mutate() after a decision or lead update.
+  const { data: registrations = [], mutate: mutateRegs } = useApi<Registration[]>(`/registrations?status=${regFilter}`);
+  const { data: leads = [], mutate: mutateLeads } = useApi<Lead[]>('/leads');
+  const loadRegistrations = () => mutateRegs();
+  const loadLeads = () => mutateLeads();
 
   async function updateLeadStatus(id: string, status: 'new' | 'contacted' | 'converted' | 'lost') {
     setUpdatingId(id);

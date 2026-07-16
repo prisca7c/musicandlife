@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Modal } from '@/components/modal';
 import { linkify } from '@/lib/linkify';
@@ -63,14 +64,14 @@ function PostModal({ open, onClose, onSaved, post }: {
 }
 
 export default function NewsPage() {
-  const [posts, setPosts] = useState<NewsPost[]>([]);
   const [editing, setEditing] = useState<NewsPost | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  function load() { apiFetch<NewsPost[]>('/news', { token: tok() }).then(setPosts).catch(() => {}); }
-  useEffect(() => { load(); }, []);
+  // Cached read — instant on revisit, revalidates in the background.
+  const { data: posts = [], mutate } = useApi<NewsPost[]>('/news');
+  const load = () => mutate();
 
   async function remove(id: string) {
     setDeleting(id);

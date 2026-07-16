@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { fmtTime, fmtDate } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
@@ -34,9 +35,12 @@ interface DashboardData {
 }
 
 export default function FamilyDashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [teacherAvail, setTeacherAvail] = useState<AvailWindow[]>([]);
-  const [news, setNews] = useState<NewsPost[]>([]);
+  // Cached reads — the portal renders instantly on revisit, then revalidates.
+  // mutateData() refreshes the dashboard after a payment or cancellation.
+  const { data, mutate: mutateData } = useApi<DashboardData>('/family/dashboard');
+  const { data: teacherAvail = [] } = useApi<AvailWindow[]>('/family/teacher-availability');
+  const { data: newsRaw = [] } = useApi<NewsPost[]>('/news');
+  const news = newsRaw.slice(0, 3);
   const [cancelModal, setCancelModal] = useState<{ lessonId: string; hoursUntil: number } | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [reschedModal, setReschedModal] = useState<{ lessonId: string } | null>(null);
@@ -78,15 +82,6 @@ export default function FamilyDashboardPage() {
     finally { setReschedSaving(false); }
   }
 
-  useEffect(() => {
-    apiFetch<DashboardData>('/family/dashboard', { token: tok() })
-      .then(setData).catch(() => {});
-    apiFetch<AvailWindow[]>('/family/teacher-availability', { token: tok() })
-      .then(setTeacherAvail).catch(() => {});
-    apiFetch<NewsPost[]>('/news', { token: tok() })
-      .then(rows => setNews(rows.slice(0, 3))).catch(() => {});
-  }, []);
-
   async function markInvoicePaid() {
     if (!data?.outstandingInvoice) return;
     setPaying(true); setPayErr('');
@@ -95,7 +90,7 @@ export default function FamilyDashboardPage() {
         method: 'POST', token: tok(),
       });
       setConfirmPay(false);
-      apiFetch<DashboardData>('/family/dashboard', { token: tok() }).then(setData).catch(() => {});
+      mutateData();
     } catch (e) { setPayErr(e instanceof Error ? e.message : 'Could not record payment'); }
     finally { setPaying(false); }
   }
@@ -109,7 +104,7 @@ export default function FamilyDashboardPage() {
         body: JSON.stringify({ choice }),
       });
       setCancelModal(null);
-      apiFetch<DashboardData>('/family/dashboard', { token: tok() }).then(setData).catch(() => {});
+      mutateData();
     } catch (e) { console.error(e); }
     finally { setCancelling(false); }
   }

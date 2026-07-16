@@ -3,6 +3,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
@@ -304,15 +305,12 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function BillingPage() {
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
-  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  function load() {
-    apiFetch<Invoice[]>('/invoices', { token: tok() }).then(setInvoices).catch(() => {});
-  }
-  useEffect(() => { load(); }, []);
+  // Cached read — instant on revisit, revalidates in the background.
+  const { data: invoices = [], mutate } = useApi<Invoice[]>('/invoices');
+  const load = () => mutate();
 
   const outstanding = invoices.filter(i => i.status === 'sent').reduce((s, i) => s + i.total, 0);
 

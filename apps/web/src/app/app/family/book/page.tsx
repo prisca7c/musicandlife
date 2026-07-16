@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { fmtTime, fmtDate } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
@@ -25,39 +26,35 @@ export default function BookLessonPage() {
   const router = useRouter();
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
   const [selectedTeacher, setSelectedTeacher] = useState('');
   const [selectedStudent, setSelectedStudent] = useState('');
   const [selectedEnrollment, setSelectedEnrollment] = useState('');
   const [isTrial, setIsTrial] = useState(false);
   const [weekStart, setWeekStart] = useState(() => weekMonday(new Date()));
-  const [slots, setSlots] = useState<Slot[]>([]);
-  const [loadingSlots, setLoadingSlots] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState('');
   const [booking, setBooking] = useState(false);
   const [done, setDone] = useState(false);
 
-  useEffect(() => {
-    apiFetch<Teacher[]>('/family/teachers', { token: tok() }).then(setTeachers).catch(() => {});
-    apiFetch<DashboardData>('/family/dashboard', { token: tok() })
-      .then(d => setStudents(d.students as unknown as Student[]))
-      .catch(() => {});
-  }, []);
+  // Cached reads — the teacher/student pickers populate instantly on revisit.
+  const { data: teachers = [] } = useApi<Teacher[]>('/family/teachers');
+  const { data: dashData } = useApi<DashboardData>('/family/dashboard');
+  const students = (dashData?.students as unknown as Student[]) ?? [];
 
   const teacher = teachers.find(t => t.id === selectedTeacher);
   const student = students.find(s => s.id === selectedStudent);
   const enrollment = student?.enrollments?.find(e => e.id === selectedEnrollment);
   const duration = teacher?.defaultDuration ?? 60;
 
-  useEffect(() => {
-    if (!selectedTeacher) { setSlots([]); return; }
-    setLoadingSlots(true);
-    setSelectedSlot('');
-    const ws = weekStart.toISOString().split('T')[0];
-    apiFetch<Slot[]>(`/family/availability?teacherId=${selectedTeacher}&weekStart=${ws}&duration=${duration}`, { token: tok() })
-      .then(setSlots).catch(() => setSlots([])).finally(() => setLoadingSlots(false));
-  }, [selectedTeacher, weekStart, duration]);
+  // Availability is cached per teacher+week+duration; picking a teacher (or
+  // paging weeks) re-keys and loads the slots. Null key = don't fetch yet.
+  const ws = weekStart.toISOString().split('T')[0];
+  const slotsKey = selectedTeacher
+    ? `/family/availability?teacherId=${selectedTeacher}&weekStart=${ws}&duration=${duration}`
+    : null;
+  const { data: slots = [], isLoading: loadingSlots } = useApi<Slot[]>(slotsKey);
+
+  // Clear any picked slot when the teacher/week/duration changes.
+  useEffect(() => { setSelectedSlot(''); }, [selectedTeacher, weekStart, duration]);
 
   const slotsByDay = slots.reduce<Record<string, Slot[]>>((acc, s) => {
     const day = fmtDate(s.startsAt, { weekday: 'long', day: 'numeric', month: 'short' });

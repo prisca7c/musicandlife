@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { fmtTime } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
@@ -34,7 +35,6 @@ const GROUP_ACTIONS: { status: AttendanceStatus; label: string; color: string; b
 ];
 
 export default function AttendancePage() {
-  const [lessons, setLessons] = useState<Lesson[]>([]);
   const [pending, setPending] = useState<Record<string, AttendanceStatus>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]!);
@@ -42,20 +42,24 @@ export default function AttendancePage() {
 
   const mon = new Date(date);
   mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
+  const weekStart = mon.toISOString().split('T')[0];
 
-  function load() {
-    apiFetch<Lesson[]>(`/lessons?weekStart=${mon.toISOString().split('T')[0]}`, { token: tok() })
-      .then(all => {
-        const today = all.filter(l => l.startsAt.startsWith(date) && l.status === 'scheduled');
-        setLessons(today);
-        const defaults: Record<string, AttendanceStatus> = {};
-        today.forEach(l => { if (!l.attendance) defaults[l.id] = 'present'; });
-        setPending(defaults);
-      })
-      .catch(() => {});
-  }
+  // Cached read of the week's lessons; the day's scheduled lessons are derived.
+  // load() refreshes after saving attendance.
+  const { data: allLessons = [], mutate } = useApi<Lesson[]>(`/lessons?weekStart=${weekStart}`);
+  const load = () => mutate();
+  const lessons = allLessons.filter(l => l.startsAt.startsWith(date) && l.status === 'scheduled');
 
-  useEffect(() => { load(); }, [date]);
+  // Seed the per-lesson "present" defaults when the set of lessons for the day
+  // changes (date switch or new data) — keyed on the id signature so background
+  // revalidations with the same lessons don't clobber in-progress selections.
+  const lessonIdsKey = lessons.map(l => l.id).join(',');
+  useEffect(() => {
+    const defaults: Record<string, AttendanceStatus> = {};
+    lessons.forEach(l => { if (!l.attendance) defaults[l.id] = 'present'; });
+    setPending(defaults);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lessonIdsKey]);
 
   async function markOne(lessonId: string, status: AttendanceStatus) {
     setPending(p => ({ ...p, [lessonId]: status }));

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, FormEvent } from 'react';
+import { useState, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
@@ -99,32 +100,26 @@ function AddTermModal({ open, onClose, onCreated }: { open: boolean; onClose: ()
 }
 
 export default function SettingsPage() {
-  const [org, setOrg] = useState<OrgSettings | null>(null);
-  const [terms, setTerms] = useState<Term[]>([]);
   const [showAddTerm, setShowAddTerm] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
-  const [rules, setRules] = useState<NotificationRule[]>([]);
   const [toggling, setToggling] = useState<string | null>(null);
-  const [emailTemplates, setEmailTemplates] = useState<EmailTemplate[]>([]);
   const [editingTemplate, setEditingTemplate] = useState<string | null>(null);
   const [templateSaving, setTemplateSaving] = useState<string | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  useEffect(() => {
-    const t = tok();
-    apiFetch<OrgSettings>('/organizations/me', { token: t }).then(setOrg).catch(() => {});
-    apiFetch<Term[]>('/terms', { token: t }).then(setTerms).catch(() => {});
-    apiFetch<NotificationRule[]>('/notification-rules', { token: t }).then(setRules).catch(() => {});
-    apiFetch<EmailTemplate[]>('/email-templates', { token: t }).then(setEmailTemplates).catch(() => {});
-  }, []);
+  // Cached reads — settings render instantly on revisit. Each mutate() refreshes
+  // its own section after a save.
+  const { data: org = null, mutate: mutateOrg } = useApi<OrgSettings>('/organizations/me');
+  const { data: terms = [], mutate: mutateTerms } = useApi<Term[]>('/terms');
+  const { data: rules = [], mutate: mutateRules } = useApi<NotificationRule[]>('/notification-rules');
+  const { data: emailTemplates = [], mutate: mutateTemplates } = useApi<EmailTemplate[]>('/email-templates');
 
   async function saveTemplate(templateId: string, subject: string, html: string) {
     setTemplateSaving(templateId);
     try {
       await apiFetch(`/email-templates/${templateId}`, { method: 'PUT', token: tok(), body: JSON.stringify({ subject, html }) });
-      const updated = await apiFetch<EmailTemplate[]>('/email-templates', { token: tok() });
-      setEmailTemplates(updated);
+      mutateTemplates();
       setEditingTemplate(null);
     } catch (e) { console.error(e); }
     finally { setTemplateSaving(null); }
@@ -134,8 +129,7 @@ export default function SettingsPage() {
     setTemplateSaving(templateId);
     try {
       await apiFetch(`/email-templates/${templateId}`, { method: 'DELETE', token: tok() });
-      const updated = await apiFetch<EmailTemplate[]>('/email-templates', { token: tok() });
-      setEmailTemplates(updated);
+      mutateTemplates();
     } catch (e) { console.error(e); }
     finally { setTemplateSaving(null); }
   }
@@ -146,8 +140,7 @@ export default function SettingsPage() {
       await apiFetch('/organizations/me', { method: 'PATCH', token: tok(), body: JSON.stringify(data) });
       setSaved(section);
       setTimeout(() => setSaved(null), 2500);
-      const updated = await apiFetch<OrgSettings>('/organizations/me', { token: tok() });
-      setOrg(updated);
+      mutateOrg();
     } catch (e) { console.error(e); }
     finally { setSaving(null); }
   }
@@ -156,15 +149,14 @@ export default function SettingsPage() {
     setToggling(id);
     try {
       await apiFetch(`/notification-rules/${id}`, { method: 'PATCH', token: tok(), body: JSON.stringify({ enabled }) });
-      setRules(r => r.map(rule => rule.id === id ? { ...rule, enabled } : rule));
+      mutateRules(r => r?.map(rule => rule.id === id ? { ...rule, enabled } : rule), { revalidate: false });
     } catch (e) { console.error(e); }
     finally { setToggling(null); }
   }
 
   async function setTermStatus(id: string, status: 'planned'|'active'|'closed') {
     await apiFetch(`/terms/${id}/status`, { method: 'PATCH', token: tok(), body: JSON.stringify({ status }) }).catch(() => {});
-    const updated = await apiFetch<Term[]>('/terms', { token: tok() });
-    setTerms(updated);
+    mutateTerms();
   }
 
   if (!org) return <div className="p-8 text-center" style={{ color: 'var(--txt4)' }}>Loading…</div>;
@@ -172,9 +164,7 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <AddTermModal open={showAddTerm} onClose={() => setShowAddTerm(false)} onCreated={async () => {
-        const t = await apiFetch<Term[]>('/terms', { token: tok() }); setTerms(t);
-      }} />
+      <AddTermModal open={showAddTerm} onClose={() => setShowAddTerm(false)} onCreated={() => mutateTerms()} />
       <PageHeader title="Settings" subtitle="Studio configuration" />
 
       {/* Studio details */}

@@ -3,6 +3,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
@@ -23,17 +24,15 @@ interface Expense {
 interface StaffMember { id: string; firstName: string; lastName: string; }
 
 function CreateRunModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
-  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [staffId, setStaffId] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
+  // Staff options — only fetched while the modal is open; cached across opens.
+  const { data: staff = [] } = useApi<StaffMember[]>(open ? '/staff' : null);
   useEffect(() => {
-    if (open) {
-      apiFetch<StaffMember[]>('/staff', { token: tok() }).then(setStaff).catch(() => {});
-      setStaffId(''); setError('');
-    }
+    if (open) { setStaffId(''); setError(''); }
   }, [open]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -93,7 +92,6 @@ function CreateRunModal({ open, onClose, onCreated }: { open: boolean; onClose: 
 }
 
 function AddExpenseModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
-  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [expStaffId, setExpStaffId] = useState('');
   const [category, setCategory] = useState('materials');
   const [receipt, setReceipt] = useState<File | null>(null);
@@ -101,11 +99,10 @@ function AddExpenseModal({ open, onClose, onCreated }: { open: boolean; onClose:
   const [saving, setSaving] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
+  // Staff options — only fetched while the modal is open; cached across opens.
+  const { data: staff = [] } = useApi<StaffMember[]>(open ? '/staff' : null);
   useEffect(() => {
-    if (open) {
-      apiFetch<StaffMember[]>('/staff', { token: tok() }).then(setStaff).catch(() => {});
-      setExpStaffId(''); setCategory('materials'); setReceipt(null); setError('');
-    }
+    if (open) { setExpStaffId(''); setCategory('materials'); setReceipt(null); setError(''); }
   }, [open]);
 
   async function uploadReceipt(file: File): Promise<string> {
@@ -196,19 +193,16 @@ function AddExpenseModal({ open, onClose, onCreated }: { open: boolean; onClose:
 }
 
 export default function PayrollPage() {
-  const [runs, setRuns] = useState<PayrollRun[]>([]);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
   const [tab, setTab] = useState<'runs' | 'expenses'>('runs');
   const [showRun, setShowRun] = useState(false);
   const [showExpense, setShowExpense] = useState(false);
   const [actioning, setActioning] = useState<string | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  function load() {
-    apiFetch<PayrollRun[]>('/staff/payroll', { token: tok() }).then(setRuns).catch(() => {});
-    apiFetch<Expense[]>('/expenses', { token: tok() }).then(setExpenses).catch(() => {});
-  }
-  useEffect(() => { load(); }, []);
+  // Cached reads — instant on revisit. load() refreshes both after an action.
+  const { data: runs = [], mutate: mutateRuns } = useApi<PayrollRun[]>('/staff/payroll');
+  const { data: expenses = [], mutate: mutateExpenses } = useApi<Expense[]>('/expenses');
+  const load = () => { mutateRuns(); mutateExpenses(); };
 
   async function approveRun(id: string) {
     setActioning(id);

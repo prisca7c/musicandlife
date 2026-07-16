@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { fmtTime } from '@/lib/datetime';
 import { Badge } from '@/components/badge';
 import { PaidDot } from '@/components/paid-dot';
@@ -88,33 +88,25 @@ function StatCard({ label, value, sub, href, icon, warn = false, muted = false }
 
 // ─── Admin dashboard ──────────────────────────────────────────────────────────
 function AdminDashboard() {
-  const [kpis, setKpis] = useState<KpiData | null>(null);
-  const [todayLessons, setTodayLessons] = useState<Lesson[]>([]);
-  const [myAvailability, setMyAvailability] = useState<AvailWindow[]>([]);
-  const [news, setNews] = useState<NewsPost[]>([]);
-  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  // Monday of the current week (studio weeks start Monday).
+  const mon = new Date();
+  mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
+  mon.setHours(0, 0, 0, 0);
+  const weekStart = mon.toISOString().split('T')[0];
 
-  useEffect(() => {
-    const t = tok();
-    const mon = new Date();
-    mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
-    mon.setHours(0, 0, 0, 0);
-    apiFetch<NewsPost[]>('/news', { token: t }).then(rows => setNews(rows.slice(0, 3))).catch(() => {});
-    // Teachers get their own availability grid; non-teachers (no staff record) get an empty list.
-    apiFetch<AvailWindow[]>('/staff/me/availability', { token: t }).then(setMyAvailability).catch(() => {});
-    Promise.all([
-      apiFetch<KpiData>('/reports/dashboard', { token: t }).catch(() => null),
-      apiFetch<Lesson[]>(`/lessons?weekStart=${mon.toISOString().split('T')[0]}`, { token: t }).catch(() => []),
-    ]).then(([k, lessons]) => {
-      setKpis(k);
-      const today = new Date().toISOString().split('T')[0];
-      setTodayLessons(
-        (lessons as Lesson[])
-          .filter(l => l.startsAt.startsWith(today!) && l.status === 'scheduled')
-          .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
-      );
-    });
-  }, []);
+  // Each read is cached on its API path — the whole dashboard renders instantly
+  // on revisit, then revalidates in the background.
+  const { data: newsRaw = [] } = useApi<NewsPost[]>('/news');
+  const news = newsRaw.slice(0, 3);
+  // Teachers get their own availability grid; non-teachers get an empty list.
+  const { data: myAvailability = [] } = useApi<AvailWindow[]>('/staff/me/availability');
+  const { data: kpis } = useApi<KpiData>('/reports/dashboard');
+  const { data: lessons = [] } = useApi<Lesson[]>(`/lessons?weekStart=${weekStart}`);
+
+  const today = new Date().toISOString().split('T')[0];
+  const todayLessons = lessons
+    .filter(l => l.startsAt.startsWith(today!) && l.status === 'scheduled')
+    .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
 
   const now = new Date();
   const monthLabel = now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
