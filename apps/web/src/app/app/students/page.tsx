@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, FormEvent } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { UserPlus, Search } from 'lucide-react';
@@ -19,13 +20,22 @@ function instrumentsOf(s: Student): string {
 const PAGE_SIZE = 50;
 
 export default function StudentsPage() {
-  const [students, setStudents] = useState<Student[]>([]);
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [offset, setOffset] = useState(0);
-  const [total, setTotal] = useState(0);
   const [converting, setConverting] = useState<string | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  // The API path IS the cache key: revisiting this page (or paging back to a
+  // page you already loaded) renders instantly from cache, then revalidates in
+  // the background. keepPreviousData keeps the current rows on screen while a
+  // new search/page loads instead of flashing empty.
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
+  if (search) params.set('search', search);
+  const key = `/students?${params.toString()}`;
+  const { data, mutate } = useApi<{ data: Student[]; total: number }>(key);
+  const students = data?.data ?? [];
+  const total = data?.total ?? 0;
 
   // Trial students never auto-promote — approval creates them as "trial" and
   // nothing flips them. This lets staff convert a trial to a full active student.
@@ -33,24 +43,18 @@ export default function StudentsPage() {
     setConverting(id);
     try {
       await apiFetch(`/students/${id}`, { method: 'PATCH', token: tok(), body: JSON.stringify({ status: 'active' }) });
-      setStudents(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s));
+      // Optimistically flip the row in the cached list without a refetch.
+      mutate(
+        prev => prev && { ...prev, data: prev.data.map(s => s.id === id ? { ...s, status: 'active' } : s) },
+        { revalidate: false },
+      );
     } catch { /* leave as-is on failure */ }
     finally { setConverting(null); }
   }
 
-  function load(q = search, off = offset) {
-    const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(off) });
-    if (q) params.set('search', q);
-    apiFetch<{ data: Student[]; total: number }>(`/students?${params.toString()}`, { token: tok() })
-      .then(r => { setStudents(r.data); setTotal(r.total); })
-      .catch(() => {});
-  }
-
-  useEffect(() => { load(search, offset); }, [offset]); // eslint-disable-line react-hooks/exhaustive-deps
-
   return (
     <div>
-      <AddStudentModal open={showAdd} onClose={() => setShowAdd(false)} onCreated={() => load()} />
+      <AddStudentModal open={showAdd} onClose={() => setShowAdd(false)} onCreated={() => mutate()} />
       <PageHeader
         title="Students"
         subtitle={`${total} student${total !== 1 ? 's' : ''}`}
@@ -68,7 +72,7 @@ export default function StudentsPage() {
         </span>
         <input
           value={search}
-          onChange={e => { setSearch(e.target.value); setOffset(0); load(e.target.value, 0); }}
+          onChange={e => { setSearch(e.target.value); setOffset(0); }}
           placeholder="Search by name…"
           className="ui-search pl-9"
         />

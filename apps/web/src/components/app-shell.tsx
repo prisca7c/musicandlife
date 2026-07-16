@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { BaseRole } from '@music-life/types';
 import { apiFetch } from '@/lib/api';
+import { prefetchRoute } from '@/lib/swr';
 
 interface NavItem { label: string; href: string; roles: BaseRole[]; icon: React.ReactNode; }
 
@@ -199,6 +200,7 @@ export function AppShell({ role, children }: { role: BaseRole; children: React.R
                     const active = pathname === item.href || (item.href !== '/app/dashboard' && pathname.startsWith(item.href));
                     return (
                       <Link key={item.href} href={item.href} title={collapsed ? item.label : undefined}
+                        onMouseEnter={() => prefetchRoute(item.href)}
                         className={`flex items-center gap-2.5 rounded-[9px] text-[13px] font-semibold transition-all
                           ${collapsed ? 'justify-center px-2 py-[9px]' : 'px-2.5 py-[7px]'}
                           ${active

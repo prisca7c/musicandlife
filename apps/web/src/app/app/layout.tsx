@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { jwtVerify, decodeJwt, errors } from 'jose';
 import type { JwtPayload } from '@music-life/types';
 import { AppShell } from '@/components/app-shell';
+import { SWRProvider } from '@/lib/swr';
 
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET ?? '');
 
@@ -26,5 +27,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await getUser();
   if (!user) redirect('/login');
 
-  return <AppShell role={user.role}>{children}</AppShell>;
+  return (
+    <SWRProvider>
+      <AppShell role={user.role}>{children}</AppShell>
+    </SWRProvider>
+  );
 }
