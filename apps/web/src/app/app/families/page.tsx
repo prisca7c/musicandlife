@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
+import { InfoTooltip } from '@/components/info-tooltip';
 import { Modal } from '@/components/modal';
 import { InvoicingSettingsFields, readInvoicingSettingsForm } from '@/components/invoicing-settings-fields';
 import { UsersRound, Search, Settings2 } from 'lucide-react';
@@ -153,7 +154,12 @@ export default function FamiliesPage() {
         familyIds={[...selected]} onApplied={() => { setSelected(new Set()); load(); }}
       />
       <PageHeader
-        title="Families"
+        title={
+          <span className="inline-flex items-center gap-2">
+            Families
+            <InfoTooltip text="Families are created automatically when you approve an online registration — you rarely need 'Add family'. Turn on auto-invoicing (the Invoicing settings button on a family) and the studio drafts and emails their invoice each month on its own." />
+          </span>
+        }
         subtitle={`${families.length} famil${families.length !== 1 ? 'ies' : 'y'}`}
         action={
           <div className="flex items-center gap-2">

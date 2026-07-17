@@ -334,6 +334,7 @@ export default function BillingPage() {
             <button onClick={() => setShowCreate(true)} className="ui-btn-primary">
               <Plus size={15} /> Create invoice
             </button>
+            <InfoTooltip text="You usually don't need to create invoices by hand. Switch on auto-invoicing for a family (Families → Invoicing settings) and the studio drafts and emails their invoice on schedule, itemised from their lessons. 'Create invoice' is just for one-off or manual bills." />
           </div>
         }
       />

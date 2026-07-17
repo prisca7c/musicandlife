@@ -1028,6 +1028,7 @@ export default function CalendarPage() {
             </>
           )}
           <button onClick={() => setShowAdd(true)} className="ui-btn-primary">+ Add lesson</button>
+          <InfoTooltip text="You don't have to add each week's lesson by hand — tick 'Repeat weekly' when booking and the studio creates the whole run of lessons for you. Families are also reminded 24 hours before every lesson automatically." />
         </div>
       </div>
 
