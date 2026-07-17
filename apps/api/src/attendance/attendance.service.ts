@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { attendance, lessons, enrollments, families, ledgerEntries, lessonCredits, staffMembers } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { MarkAttendanceDto } from './dto/mark-attendance.dto';
@@ -40,7 +40,7 @@ export class AttendanceService {
   // page's "Confirm all as present". Only touches lessons that are still
   // scheduled and have NO attendance yet, so a re-run can never double-charge a
   // family. Reuses markAttendance per lesson for identical credit/charge logic.
-  async markManyPresent(orgId: string, lessonIds: string[], markedBy: string, actor?: Actor) {
+  async markManyPresent(orgId: string, lessonIds: string[], markedBy: string | null, actor?: Actor) {
     let marked = 0;
     let skipped = 0;
     let failed = 0;
@@ -59,7 +59,37 @@ export class AttendanceService {
     return { marked, skipped, failed };
   }
 
-  async markAttendance(orgId: string, lessonId: string, dto: MarkAttendanceDto, markedBy: string, actor?: Actor) {
+  // Safety net for the attendance → billing/payroll gate: a lesson only produces
+  // teacher pay and family charges once it's marked, so any lesson that finished
+  // but was never marked is silent lost revenue. This finds lessons that ended more
+  // than `graceHours` ago, are still `scheduled`, and have no attendance row, then
+  // marks them present (across all orgs). The grace window leaves teachers time to
+  // instead record an absence/cancellation. Idempotent via markManyPresent's guard.
+  async autoCompleteOverdue(graceHours: number) {
+    const rows = (await this.db.db.execute(sql`
+      select l.id, l.organization_id as "orgId"
+      from lessons l
+      where l.status = 'scheduled'
+        and (l.starts_at + make_interval(mins => l.duration)) < now() - make_interval(hours => ${graceHours})
+        and not exists (select 1 from attendance a where a.lesson_id = l.id)
+    `)) as unknown as { id: string; orgId: string }[];
+
+    const byOrg = new Map<string, string[]>();
+    for (const r of rows) {
+      const list = byOrg.get(r.orgId) ?? [];
+      list.push(r.id);
+      byOrg.set(r.orgId, list);
+    }
+
+    let marked = 0, skipped = 0, failed = 0;
+    for (const [orgId, ids] of byOrg) {
+      const res = await this.markManyPresent(orgId, ids, null);
+      marked += res.marked; skipped += res.skipped; failed += res.failed;
+    }
+    return { orgs: byOrg.size, candidates: rows.length, marked, skipped, failed };
+  }
+
+  async markAttendance(orgId: string, lessonId: string, dto: MarkAttendanceDto, markedBy: string | null, actor?: Actor) {
     const lesson = await this.db.db.query.lessons.findFirst({
       where: and(eq(lessons.id, lessonId), eq(lessons.organizationId, orgId)),
       with: { enrollment: { columns: { id: true, rate: true, lessonType: true, studentId: true } } },
