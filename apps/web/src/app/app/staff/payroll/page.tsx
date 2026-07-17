@@ -91,6 +91,101 @@ function CreateRunModal({ open, onClose, onCreated }: { open: boolean; onClose: 
   );
 }
 
+interface RunAllResult {
+  staffConsidered: number;
+  created: { staffId: string; name: string; runId: string; gross: number; items: number }[];
+  skippedExisting: number;
+  skippedEmpty: number;
+}
+
+function RunAllModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<RunAllResult | null>(null);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  useEffect(() => {
+    if (open) { setError(''); setResult(null); }
+  }, [open]);
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setSaving(true); setError('');
+    const f = new FormData(e.currentTarget);
+    try {
+      const res = await apiFetch<RunAllResult>('/staff/payroll/run-all', { method: 'POST', token: tok(), body: JSON.stringify({
+        periodStart: f.get('periodStart'), periodEnd: f.get('periodEnd'),
+      })});
+      setResult(res); onCreated();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Run payroll for all staff">
+      {error && (
+        <div className="mb-4 text-sm rounded-xl px-4 py-3"
+          style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
+          {error}
+        </div>
+      )}
+      {result ? (
+        <div className="space-y-4">
+          <p className="text-sm" style={{ color: 'var(--txt2)' }}>
+            Drafted <strong>{result.created.length}</strong> payroll run{result.created.length !== 1 ? 's' : ''} across{' '}
+            {result.staffConsidered} active staff.
+            {result.skippedExisting > 0 && ` ${result.skippedExisting} already had a run for this period.`}
+            {result.skippedEmpty > 0 && ` ${result.skippedEmpty} had no payable lessons.`}
+          </p>
+          {result.created.length > 0 && (
+            <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--bd)' }}>
+              {result.created.map(c => (
+                <div key={c.runId} className="flex items-center justify-between px-3.5 py-2 text-sm border-b last:border-b-0"
+                  style={{ borderColor: 'var(--bd)' }}>
+                  <span className="font-medium">{c.name}</span>
+                  <span style={{ color: 'var(--txt3)' }}>{c.items} lesson{c.items !== 1 ? 's' : ''} · <strong style={{ color: 'var(--txt2)' }}>£{(c.gross/100).toFixed(2)}</strong></span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-xs" style={{ color: 'var(--txt4)' }}>
+            All drafts appear in the list below for review before you approve them.
+          </p>
+          <button type="button" onClick={onClose} className="ui-btn-primary">Done</button>
+        </div>
+      ) : (
+        <>
+          <p className="text-sm mb-5" style={{ color: 'var(--txt3)' }}>
+            Drafts one payroll run per active teacher from their completed lessons and late-cancellations in the period.
+            Teachers with no payable lessons, or who already have a run for this exact period, are skipped — so it&apos;s safe to re-run.
+          </p>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="ui-label">Period start <span style={{ color: 'var(--coral)' }}>*</span></label>
+                <input name="periodStart" type="date" required
+                  defaultValue={(() => { const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().split('T')[0]; })()}
+                  className="ui-input" />
+              </div>
+              <div>
+                <label className="ui-label">Period end <span style={{ color: 'var(--coral)' }}>*</span></label>
+                <input name="periodEnd" type="date" required
+                  defaultValue={(() => { const d=new Date(); d.setDate(0); return d.toISOString().split('T')[0]; })()}
+                  className="ui-input" />
+              </div>
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button type="submit" disabled={saving} className="ui-btn-primary">
+                {saving ? 'Running…' : 'Run all'}
+              </button>
+              <button type="button" onClick={onClose} className="ui-btn-ghost">Cancel</button>
+            </div>
+          </form>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function AddExpenseModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [expStaffId, setExpStaffId] = useState('');
   const [category, setCategory] = useState('materials');
@@ -195,6 +290,7 @@ function AddExpenseModal({ open, onClose, onCreated }: { open: boolean; onClose:
 export default function PayrollPage() {
   const [tab, setTab] = useState<'runs' | 'expenses'>('runs');
   const [showRun, setShowRun] = useState(false);
+  const [showRunAll, setShowRunAll] = useState(false);
   const [showExpense, setShowExpense] = useState(false);
   const [actioning, setActioning] = useState<string | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
@@ -228,6 +324,7 @@ export default function PayrollPage() {
   return (
     <div>
       <CreateRunModal open={showRun} onClose={() => setShowRun(false)} onCreated={load} />
+      <RunAllModal open={showRunAll} onClose={() => setShowRunAll(false)} onCreated={load} />
       <AddExpenseModal open={showExpense} onClose={() => setShowExpense(false)} onCreated={load} />
       <PageHeader
         title={
@@ -240,7 +337,8 @@ export default function PayrollPage() {
         action={
           <div className="flex gap-2">
             <button onClick={() => setShowExpense(true)} className="ui-btn-ghost">+ Add expense</button>
-            <button onClick={() => setShowRun(true)} className="ui-btn-primary">+ Generate payroll run</button>
+            <button onClick={() => setShowRun(true)} className="ui-btn-ghost">+ One teacher</button>
+            <button onClick={() => setShowRunAll(true)} className="ui-btn-primary">Run all staff</button>
           </div>
         }
       />

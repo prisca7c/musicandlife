@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { PayrollService } from './payroll.service';
 import { CreatePayrollRunDto } from './dto/create-payroll-run.dto';
+import { BatchPayrollRunDto } from './dto/batch-payroll-run.dto';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -23,6 +24,12 @@ export class PayrollController {
   @Roles('manager')
   createRun(@CurrentUser() u: RequestUser, @Body() dto: CreatePayrollRunDto) {
     return this.payroll.createPayrollRun(u.orgId, dto);
+  }
+
+  @Post('staff/payroll/run-all')
+  @Roles('manager')
+  runAll(@CurrentUser() u: RequestUser, @Body() dto: BatchPayrollRunDto) {
+    return this.payroll.createPayrollRunsForAll(u.orgId, dto.periodStart, dto.periodEnd);
   }
 
   @Get('staff/payroll/:id')

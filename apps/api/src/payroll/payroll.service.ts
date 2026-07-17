@@ -20,20 +20,13 @@ export class PayrollService {
     });
   }
 
-  async createPayrollRun(orgId: string, dto: CreatePayrollRunDto) {
-    const staff = await this.db.db.query.staffMembers.findFirst({
-      where: and(eq(staffMembers.id, dto.staffId), eq(staffMembers.organizationId, orgId)),
-    });
-    if (!staff) throw new NotFoundException('Staff member not found');
-
-    const start = new Date(dto.periodStart);
-    const end = new Date(dto.periodEnd);
-
-    // Find completed lessons and late-cancellations in period
+  // Compute payable items for one teacher over a period from their completed
+  // lessons and late-cancellations. Pure calculation — no writes.
+  private async computeRunItems(orgId: string, staffId: string, hourlyRate: number, start: Date, end: Date) {
     const periodLessons = await this.db.db.query.lessons.findMany({
       where: and(
         eq(lessons.organizationId, orgId),
-        eq(lessons.teacherId, dto.staffId),
+        eq(lessons.teacherId, staffId),
         gte(lessons.startsAt, start),
         lte(lessons.startsAt, end),
       ),
@@ -50,12 +43,12 @@ export class PayrollService {
         if (lesson.attendance?.actualStartedAt && lesson.attendance?.actualEndedAt) {
           minutes = Math.round((lesson.attendance.actualEndedAt.getTime() - lesson.attendance.actualStartedAt.getTime()) / 60000);
         }
-        const amount = Math.round((minutes / 60) * staff.hourlyRate);
+        const amount = Math.round((minutes / 60) * hourlyRate);
         items.push({ lessonId: lesson.id, type: 'lesson', minutes, amount });
         totalMinutes += minutes;
       } else if (lesson.status === 'cancelled_no_makeup') {
         // Student gave <24h notice — teacher still paid at scheduled duration
-        const amount = Math.round((lesson.duration / 60) * staff.hourlyRate);
+        const amount = Math.round((lesson.duration / 60) * hourlyRate);
         items.push({ lessonId: lesson.id, type: 'late_cancellation', minutes: lesson.duration, amount });
         totalMinutes += lesson.duration;
       }
@@ -63,19 +56,26 @@ export class PayrollService {
     }
 
     const gross = items.reduce((s, i) => s + i.amount, 0);
+    return { items, totalMinutes, gross };
+  }
 
+  // Persist a draft run + its items for one teacher/period.
+  private async persistRun(
+    orgId: string, staffId: string, periodStart: string, periodEnd: string, hourlyRate: number,
+    computed: { items: { lessonId: string; type: 'lesson' | 'late_cancellation'; minutes: number; amount: number }[]; totalMinutes: number; gross: number },
+  ) {
     const [run] = await this.db.db.insert(payrollRuns).values({
       organizationId: orgId,
-      staffId: dto.staffId,
-      periodStart: dto.periodStart,
-      periodEnd: dto.periodEnd,
-      hoursElapsed: Math.round(totalMinutes / 60 * 100) / 100,
-      hourlyRate: staff.hourlyRate,
-      gross,
+      staffId,
+      periodStart,
+      periodEnd,
+      hoursElapsed: Math.round(computed.totalMinutes / 60 * 100) / 100,
+      hourlyRate,
+      gross: computed.gross,
       status: 'draft',
     }).returning();
 
-    for (const item of items) {
+    for (const item of computed.items) {
       await this.db.db.insert(payrollItems).values({
         organizationId: orgId,
         payrollRunId: run!.id,
@@ -86,7 +86,54 @@ export class PayrollService {
       });
     }
 
-    return { ...run!, items };
+    return { ...run!, items: computed.items };
+  }
+
+  async createPayrollRun(orgId: string, dto: CreatePayrollRunDto) {
+    const staff = await this.db.db.query.staffMembers.findFirst({
+      where: and(eq(staffMembers.id, dto.staffId), eq(staffMembers.organizationId, orgId)),
+    });
+    if (!staff) throw new NotFoundException('Staff member not found');
+
+    const computed = await this.computeRunItems(orgId, dto.staffId, staff.hourlyRate, new Date(dto.periodStart), new Date(dto.periodEnd));
+    return this.persistRun(orgId, dto.staffId, dto.periodStart, dto.periodEnd, staff.hourlyRate, computed);
+  }
+
+  // Batch: draft a payroll run for every active teacher over one period, in a
+  // single click. Skips teachers who already have a run for the exact period (so
+  // it's safe to re-run) and teachers with no payable lessons (no empty runs).
+  async createPayrollRunsForAll(orgId: string, periodStart: string, periodEnd: string) {
+    const start = new Date(periodStart);
+    const end = new Date(periodEnd);
+
+    const staff = await this.db.db.query.staffMembers.findMany({
+      where: and(eq(staffMembers.organizationId, orgId), eq(staffMembers.status, 'active')),
+    });
+
+    const created: { staffId: string; name: string; runId: string; gross: number; items: number }[] = [];
+    let skippedExisting = 0;
+    let skippedEmpty = 0;
+
+    for (const s of staff) {
+      const existing = await this.db.db.query.payrollRuns.findFirst({
+        where: and(
+          eq(payrollRuns.organizationId, orgId),
+          eq(payrollRuns.staffId, s.id),
+          eq(payrollRuns.periodStart, periodStart),
+          eq(payrollRuns.periodEnd, periodEnd),
+        ),
+        columns: { id: true },
+      });
+      if (existing) { skippedExisting++; continue; }
+
+      const computed = await this.computeRunItems(orgId, s.id, s.hourlyRate, start, end);
+      if (computed.items.length === 0) { skippedEmpty++; continue; }
+
+      const run = await this.persistRun(orgId, s.id, periodStart, periodEnd, s.hourlyRate, computed);
+      created.push({ staffId: s.id, name: `${s.firstName} ${s.lastName}`, runId: run.id, gross: computed.gross, items: computed.items.length });
+    }
+
+    return { staffConsidered: staff.length, created, skippedExisting, skippedEmpty };
   }
 
   async approvePayrollRun(orgId: string, id: string, approvedBy: string) {
