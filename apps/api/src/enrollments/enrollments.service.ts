@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
-import { enrollments, students, staffMembers } from '@music-life/db';
+import { eq, and, gte } from 'drizzle-orm';
+import { enrollments, students, staffMembers, lessons } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateEnrollmentDto } from './dto/create-enrollment.dto';
 import type { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
@@ -47,5 +47,34 @@ export class EnrollmentsService {
       .where(and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)))
       .returning();
     return updated!;
+  }
+
+  // Stop an ongoing weekly series: clear the recurrence rule (so the worker stops
+  // generating new lessons) and cancel any already-generated future lessons for
+  // this enrollment at no charge. Past/completed lessons are untouched.
+  async stopRecurring(orgId: string, id: string) {
+    const existing = await this.db.db.query.enrollments.findFirst({
+      where: and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)),
+    });
+    if (!existing) throw new NotFoundException('Enrollment not found');
+
+    await this.db.db
+      .update(enrollments)
+      .set({ scheduleRule: null, updatedAt: new Date() })
+      .where(and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)));
+
+    const now = new Date();
+    const cancelled = await this.db.db
+      .update(lessons)
+      .set({ status: 'cancelled_no_pay', cancelledAt: now, updatedAt: now })
+      .where(and(
+        eq(lessons.organizationId, orgId),
+        eq(lessons.enrollmentId, id),
+        eq(lessons.status, 'scheduled'),
+        gte(lessons.startsAt, now),
+      ))
+      .returning({ id: lessons.id });
+
+    return { stopped: true, cancelledLessons: cancelled.length };
   }
 }

@@ -8,6 +8,23 @@ export type BaseRole =
   | 'guardian'
   | 'student';
 
+/**
+ * Privilege level for each role. Higher = more access. Used both by the
+ * RolesGuard (does the caller meet the required level?) and by login/refresh
+ * (when a user has several active memberships, the highest-privilege one wins
+ * so an admin is never handed a downgraded token role).
+ */
+export const ROLE_LEVEL: Record<BaseRole, number> = {
+  system_admin: 100,
+  admin: 90,
+  manager: 70,
+  receptionist: 50,
+  technician: 40,
+  teacher: 30,
+  guardian: 20,
+  student: 10,
+};
+
 export type MembershipStatus = 'active' | 'suspended' | 'removed';
 export type UserStatus = 'active' | 'suspended' | 'deleted';
 export type StudentStatus = 'trial' | 'active' | 'paused' | 'withdrawn';

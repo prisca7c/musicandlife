@@ -1,12 +1,13 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and, gte, lte, ne, isNull, sql } from 'drizzle-orm';
-import { lessons, rescheduleRequests, lessonCredits, availability, blockedTime, students, staffMembers, rooms, organizations, enrollments } from '@music-life/db';
+import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, rooms, organizations, enrollments } from '@music-life/db';
 import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateLessonDto } from './dto/create-lesson.dto';
 import type { UpdateLessonDto } from './dto/update-lesson.dto';
 import type { CancelLessonDto } from './dto/cancel-lesson.dto';
 import type { CreateRescheduleRequestDto } from './dto/reschedule-request.dto';
+import type { CreateLessonRequestDto } from './dto/lesson-request.dto';
 import type { BaseRole } from '@music-life/types';
 import { NotificationsService } from '../notifications/notifications.service';
 import { parseZonedDateTime } from '../common/timezone';
@@ -470,6 +471,209 @@ export class SchedulingService {
       return `That time is outside the teacher's hours (${hours}). Please pick a time within their availability.`;
     }
     return null;
+  }
+
+  /**
+   * Bookable start times for a teacher on a studio-local `date`, in 15-minute
+   * increments — a slot is offered only when the whole [start, start+duration]
+   * window fits inside one of the teacher's availability windows for that weekday
+   * AND is free of existing lessons and blocked time. This is what makes "add
+   * lesson" respect a teacher's working hours instead of accepting any time.
+   *
+   * If the teacher has set no availability windows, we don't lock booking out
+   * (mirrors teacherUnavailableReason): we return the full working-day grid and
+   * flag `noWindows` so the UI can nudge them to set hours.
+   */
+  async getAvailableSlots(
+    orgId: string, teacherId: string, date: string, duration = 60,
+  ): Promise<{ date: string; weekday: string; noWindows: boolean; slots: string[] }> {
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
+    const weekday = SchedulingService.WEEKDAYS[dow]!;
+    const toMin = (t: string) => { const [h, m] = t.split(':'); return parseInt(h!, 10) * 60 + parseInt(m ?? '0', 10); };
+
+    const windows = await this.db.db.query.availability.findMany({
+      where: and(eq(availability.organizationId, orgId), eq(availability.staffId, teacherId), eq(availability.weekday, weekday)),
+    });
+    const noWindows = (await this.db.db.query.availability.findMany({
+      where: and(eq(availability.organizationId, orgId), eq(availability.staffId, teacherId)),
+      columns: { id: true },
+    })).length === 0;
+
+    // Ranges (in minutes since midnight) to draw candidate starts from.
+    const ranges: [number, number][] = noWindows
+      ? [[8 * 60, 21 * 60]]                                    // fallback: full working day
+      : windows.map((w) => [toMin(w.startTime), toMin(w.endTime)] as [number, number]);
+    if (ranges.length === 0) return { date, weekday, noWindows, slots: [] };
+
+    // Pull the teacher's day once so overlap checks are in-memory, not per-slot queries.
+    const dayStart = parseZonedDateTime(`${date}T00:00:00`, tz);
+    const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
+    const [dayLessons, blocks] = await Promise.all([
+      this.db.db.query.lessons.findMany({
+        where: and(
+          eq(lessons.organizationId, orgId),
+          eq(lessons.teacherId, teacherId),
+          eq(lessons.status, 'scheduled'),
+          gte(lessons.startsAt, new Date(dayStart.getTime() - 4 * 3600 * 1000)),
+          lte(lessons.startsAt, dayEnd),
+        ),
+        columns: { startsAt: true, duration: true },
+      }),
+      this.db.db.query.blockedTime.findMany({
+        where: and(eq(blockedTime.organizationId, orgId), eq(blockedTime.staffId, teacherId)),
+        columns: { startsAt: true, endsAt: true },
+      }),
+    ]);
+
+    const slots: string[] = [];
+    const seen = new Set<string>();
+    for (const [rStart, rEnd] of ranges) {
+      for (let m = rStart; m + duration <= rEnd; m += 15) {
+        const hh = String(Math.floor(m / 60)).padStart(2, '0');
+        const mm = String(m % 60).padStart(2, '0');
+        const label = `${hh}:${mm}`;
+        if (seen.has(label)) continue;
+        const start = parseZonedDateTime(`${date}T${label}:00`, tz);
+        const end = new Date(start.getTime() + duration * 60000);
+        const clashesLesson = dayLessons.some((l) => {
+          const lEnd = new Date(l.startsAt.getTime() + l.duration * 60000);
+          return l.startsAt < end && lEnd > start;
+        });
+        const clashesBlock = blocks.some((b) => b.startsAt < end && b.endsAt > start);
+        if (!clashesLesson && !clashesBlock) { slots.push(label); seen.add(label); }
+      }
+    }
+    slots.sort();
+    return { date, weekday, noWindows, slots };
+  }
+
+  // ─── Lesson requests (front desk proposes ranked times, teacher confirms) ────
+  /**
+   * The front desk (receptionist+) proposes up to three ranked start times for a
+   * new lesson; the assigned teacher confirms whichever suits. No lesson exists
+   * until the teacher confirms — this is the "teacher ultimately chooses the time"
+   * flow, the new-booking sibling of reschedule requests.
+   */
+  async createLessonRequest(orgId: string, dto: CreateLessonRequestDto, requestedBy: string) {
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const [req] = await this.db.db.insert(lessonRequests).values({
+      organizationId: orgId,
+      studentId: dto.studentId,
+      teacherId: dto.teacherId,
+      enrollmentId: dto.enrollmentId,
+      roomId: dto.roomId,
+      duration: dto.duration ?? 60,
+      proposedStartsAt: parseZonedDateTime(dto.proposedStartsAt, tz),
+      proposedStartsAt2: dto.proposedStartsAt2 ? parseZonedDateTime(dto.proposedStartsAt2, tz) : undefined,
+      proposedStartsAt3: dto.proposedStartsAt3 ? parseZonedDateTime(dto.proposedStartsAt3, tz) : undefined,
+      notes: dto.notes,
+      requestedBy,
+      status: 'pending',
+    }).returning();
+    return req!;
+  }
+
+  async getLessonRequests(orgId: string, actor: Actor, status?: string) {
+    const teacherStaffId = actor.role === 'teacher' ? await this.resolveStaffId(orgId, actor.userId) : null;
+
+    const rows = await this.db.db.query.lessonRequests.findMany({
+      where: status
+        ? and(eq(lessonRequests.organizationId, orgId), eq(lessonRequests.status, status as 'pending' | 'confirmed' | 'declined'))
+        : eq(lessonRequests.organizationId, orgId),
+      with: {
+        student: { columns: { id: true, firstName: true, lastName: true } },
+        teacher: { columns: { id: true, firstName: true, lastName: true } },
+        room: { columns: { id: true, name: true } },
+        enrollment: { columns: { instrument: true, lessonType: true, groupName: true } },
+        requestedByUser: { columns: { id: true, email: true } },
+      },
+      orderBy: (r, { desc }) => [desc(r.createdAt)],
+    });
+
+    // Teachers only ever see (and can act on) requests addressed to them.
+    const scoped = actor.role === 'teacher' ? rows.filter((r) => r.teacherId === teacherStaffId) : rows;
+
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    return Promise.all(scoped.map(async (r) => {
+      const ranked = [r.proposedStartsAt, r.proposedStartsAt2, r.proposedStartsAt3].filter(Boolean) as Date[];
+      const options = await Promise.all(ranked.map(async (t, i) => {
+        const iso = t.toISOString();
+        const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, r.teacherId, iso, r.duration, tz);
+        const conflict = unavailable ? false : await this.hasConflict(this.db.db, orgId, iso, r.duration, r.teacherId, r.roomId ?? undefined);
+        return {
+          rank: i + 1,
+          startsAt: iso,
+          ok: !unavailable && !conflict,
+          reason: unavailable ?? (conflict ? 'Clashes with another lesson at that time.' : null),
+        };
+      }));
+      return { ...r, options };
+    }));
+  }
+
+  async decideLessonRequest(
+    orgId: string, id: string, decision: 'confirmed' | 'declined',
+    actor: Actor, chosenStartsAt?: string, reason?: string,
+  ) {
+    const req = await this.db.db.query.lessonRequests.findFirst({
+      where: and(eq(lessonRequests.id, id), eq(lessonRequests.organizationId, orgId)),
+    });
+    if (!req) throw new NotFoundException('Request not found');
+    if (req.status !== 'pending') throw new BadRequestException('Request already decided');
+
+    // A teacher may only decide their own requests; receptionist+ may decide any.
+    if (actor.role === 'teacher') {
+      const staffId = await this.resolveStaffId(orgId, actor.userId);
+      if (!staffId || req.teacherId !== staffId) throw new ForbiddenException('Not your request');
+    }
+
+    let target: string | undefined;
+    if (decision === 'confirmed') {
+      const ranked = [req.proposedStartsAt, req.proposedStartsAt2, req.proposedStartsAt3]
+        .filter(Boolean).map((d) => (d as Date).toISOString());
+      target = chosenStartsAt ? new Date(chosenStartsAt).toISOString() : ranked[0]!;
+      if (chosenStartsAt && !ranked.includes(target)) {
+        throw new BadRequestException('Chosen time is not one of the proposed options');
+      }
+      const tz = await this.getOrgTimezone(this.db.db, orgId);
+      const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, req.teacherId, target, req.duration, tz);
+      if (unavailable) throw new BadRequestException(unavailable);
+      if (await this.hasConflict(this.db.db, orgId, target, req.duration, req.teacherId, req.roomId ?? undefined)) {
+        throw new BadRequestException('That time clashes with another lesson.');
+      }
+    }
+
+    // Guarded claim: only the first decider transitions it out of 'pending'.
+    const claimed = await this.db.db.update(lessonRequests)
+      .set({ status: decision, decidedBy: actor.userId, decidedAt: new Date(), reason })
+      .where(and(
+        eq(lessonRequests.id, id),
+        eq(lessonRequests.organizationId, orgId),
+        eq(lessonRequests.status, 'pending'),
+      ))
+      .returning({ id: lessonRequests.id });
+    if (claimed.length === 0) throw new BadRequestException('Request already decided');
+
+    if (decision === 'confirmed' && target) {
+      // target is a zoned ISO instant; createLesson re-parses it (a Z-suffixed
+      // string round-trips) and re-checks conflicts under a lock.
+      const lesson = await this.createLesson(orgId, {
+        studentId: req.studentId,
+        teacherId: req.teacherId,
+        roomId: req.roomId ?? undefined,
+        enrollmentId: req.enrollmentId ?? undefined,
+        startsAt: target,
+        duration: req.duration,
+        notes: req.notes ?? undefined,
+      });
+      await this.db.db.update(lessonRequests)
+        .set({ createdLessonId: lesson.id })
+        .where(eq(lessonRequests.id, id));
+      return { id, status: decision, lessonId: lesson.id };
+    }
+
+    return { id, status: decision };
   }
 
   // ─── Reschedule requests ──────────────────────────────────────────────────

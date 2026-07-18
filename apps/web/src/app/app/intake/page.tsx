@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
+import { SearchableSelect } from '@/components/searchable-select';
 import { ALL_INSTRUMENTS } from '@music-life/types';
 import { Plus, CircleCheck, CircleX, Upload } from 'lucide-react';
 
@@ -181,10 +182,11 @@ function AddLeadModal({ open, onClose, onCreated }: { open: boolean; onClose: ()
         </div>
         <div>
           <label className="ui-label">Instrument interest</label>
-          <select name="instrumentInterest" className="ui-input">
-            <option value="">Not specified</option>
-            {ALL_INSTRUMENTS.map(i => <option key={i} value={i} className="capitalize">{i}</option>)}
-          </select>
+          <SearchableSelect
+            name="instrumentInterest"
+            options={ALL_INSTRUMENTS.map(i => ({ value: i, label: i.charAt(0).toUpperCase() + i.slice(1) }))}
+            emptyLabel="Not specified" placeholder="Not specified"
+          />
         </div>
         <div>
           <label className="ui-label">Source</label>

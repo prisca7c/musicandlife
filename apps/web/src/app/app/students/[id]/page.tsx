@@ -21,6 +21,7 @@ interface StudentDetail {
     id: string; instrument: string; lessonType: string; status: string; rate: number;
     teacher: { id: string; firstName: string; lastName: string } | null;
     term: { id: string; name: string; status: string } | null;
+    scheduleRule: { weekday: string; startTime: string } | null;
   }[];
 }
 interface StaffMember { id: string; firstName: string; lastName: string; }
@@ -305,6 +306,20 @@ export default function StudentDetailPage() {
   const { data: student = null, mutate } = useApi<StudentDetail>(`/students/${id}`);
   const load = () => mutate();
 
+  async function changeEnrollmentStatus(enrollmentId: string, status: string) {
+    try { await apiFetch(`/enrollments/${enrollmentId}`, { method: 'PATCH', token: tok(), body: JSON.stringify({ status }) }); load(); }
+    catch (e) { alert(e instanceof Error ? e.message : 'Could not update enrollment'); }
+  }
+
+  async function stopWeekly(enrollmentId: string) {
+    if (!confirm('Stop the weekly lessons for this enrollment? Future scheduled lessons will be cancelled at no charge. Past lessons are unaffected.')) return;
+    try {
+      const res = await apiFetch<{ cancelledLessons: number }>(`/enrollments/${enrollmentId}/stop-recurring`, { method: 'POST', token: tok() });
+      load();
+      alert(`Weekly lessons stopped. ${res.cancelledLessons} upcoming lesson${res.cancelledLessons !== 1 ? 's' : ''} cancelled.`);
+    } catch (e) { alert(e instanceof Error ? e.message : 'Could not stop the series'); }
+  }
+
   if (!student) return <div className="p-8 text-center text-sm" style={{ color: 'var(--txt4)' }}>Loading…</div>;
 
   return (
@@ -385,17 +400,26 @@ export default function StudentDetailPage() {
                   <th>Term</th>
                   <th>Rate</th>
                   <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {student.enrollments.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+                  <tr><td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                     No enrollments yet.
                   </td></tr>
                 )}
                 {student.enrollments.map(e => (
                   <tr key={e.id}>
-                    <td className="capitalize font-medium">{e.instrument}</td>
+                    <td className="capitalize font-medium">
+                      {e.instrument}
+                      {e.scheduleRule && (
+                        <span className="ml-2 text-[11px] font-semibold rounded-full px-2 py-0.5"
+                          style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)' }}>
+                          weekly {e.scheduleRule.weekday.slice(0, 3)} {e.scheduleRule.startTime}
+                        </span>
+                      )}
+                    </td>
                     <td className="capitalize" style={{ color: 'var(--txt3)' }}>{e.lessonType}</td>
                     <td>
                       {e.teacher
@@ -407,6 +431,24 @@ export default function StudentDetailPage() {
                     <td style={{ color: 'var(--txt3)' }}>{e.term?.name ?? '—'}</td>
                     <td className="font-medium">£{(e.rate / 100).toFixed(2)}</td>
                     <td><Badge variant={e.status}>{e.status}</Badge></td>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        <select value={e.status} onChange={ev => changeEnrollmentStatus(e.id, ev.target.value)}
+                          className="text-xs border rounded-lg px-2 py-1" style={{ borderColor: 'var(--bd2)' }}
+                          title="Change enrollment status">
+                          <option value="active">Active</option>
+                          <option value="trial">Trial</option>
+                          <option value="paused">Paused</option>
+                          <option value="withdrawn">Withdrawn</option>
+                        </select>
+                        {e.scheduleRule && (
+                          <button onClick={() => stopWeekly(e.id)}
+                            className="text-xs font-semibold hover:underline" style={{ color: 'var(--coral)' }}>
+                            Stop weekly
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

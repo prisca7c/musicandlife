@@ -25,7 +25,8 @@ interface InvoiceDetail {
   family: { id: string; name: string; email: string | null } | null;
   lineItems: {
     id: string; description: string; amount: number; lessonId: string | null;
-    date: string | null; teacher: string | null; instrument: string | null;
+    date: string | null; startsAt: string | null; duration: number | null;
+    teacher: string | null; student: string | null; instrument: string | null; lessonType: string | null;
   }[];
 }
 
@@ -236,7 +237,7 @@ export default function InvoiceDetailPage() {
       </div>
 
       {/* Line items table */}
-      <div className="data-table-wrap overflow-hidden">
+      <div className="data-table-wrap">
         <div className="px-5 py-3.5 border-b flex items-center justify-between"
           style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
           <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Line items</h2>
@@ -250,8 +251,10 @@ export default function InvoiceDetailPage() {
           <thead>
             <tr>
               <th>Date</th>
+              <th>Time</th>
+              <th>Student</th>
+              <th>Instruments/Classes</th>
               <th>Teacher</th>
-              <th>Instrument</th>
               <th></th>
               <th>Description</th>
               <th style={{ textAlign: 'right' }}>Amount</th>
@@ -260,22 +263,30 @@ export default function InvoiceDetailPage() {
           <tbody>
             {!!invoice.balanceForward && (
               <tr>
-                <td colSpan={4} style={{ color: 'var(--txt3)' }}>Balance forward</td>
+                <td colSpan={7} style={{ color: 'var(--txt3)' }}>Balance forward</td>
                 <td className="font-semibold" style={{ textAlign: 'right', color: 'var(--txt3)' }}>
                   {invoice.balanceForward < 0 ? '-' : ''}£{(Math.abs(invoice.balanceForward) / 100).toFixed(2)}
                 </td>
               </tr>
             )}
             {invoice.lineItems.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={8} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No line items yet.
               </td></tr>
             )}
             {invoice.lineItems.map(item => (
               <tr key={item.id}>
                 <td style={{ color: 'var(--txt3)' }}>{item.date ?? '—'}</td>
+                <td style={{ color: 'var(--txt3)' }}>
+                  {item.startsAt
+                    ? new Date(item.startsAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+                    : '—'}
+                </td>
+                <td style={{ color: 'var(--txt3)' }}>{item.student ?? '—'}</td>
+                <td className="capitalize" style={{ color: 'var(--txt3)' }}>
+                  {item.instrument ?? '—'}{item.lessonType === 'group' ? ' (group)' : ''}
+                </td>
                 <td style={{ color: 'var(--txt3)' }}>{item.teacher ?? '—'}</td>
-                <td className="capitalize" style={{ color: 'var(--txt3)' }}>{item.instrument ?? '—'}</td>
                 <td title={item.lessonId ? 'Generated from calendar lesson' : 'Added manually'} style={{ color: 'var(--txt4)' }}>
                   {item.lessonId ? <Calendar size={12} /> : <Pencil size={12} />}
                 </td>
@@ -287,7 +298,7 @@ export default function InvoiceDetailPage() {
             ))}
             {invoice.lineItems.length > 0 && (
               <tr style={{ background: 'var(--surf)', fontWeight: 700 }}>
-                <td colSpan={5}>Total</td>
+                <td colSpan={7}>Total</td>
                 <td style={{ textAlign: 'right' }}>£{(invoice.total / 100).toFixed(2)}</td>
               </tr>
             )}

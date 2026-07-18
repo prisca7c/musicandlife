@@ -23,6 +23,15 @@ interface Expense {
 }
 interface StaffMember { id: string; firstName: string; lastName: string; }
 
+// Default payroll period = this month so far. Lessons only become payable once
+// their attendance is marked (present → completed), so defaulting to *last*
+// month used to hide this month's lessons and the run came back empty.
+const monthStartISO = () => { const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]; };
+const todayISO = () => new Date().toISOString().split('T')[0];
+
+// Shown on both payroll modals: explains why a run can come back empty.
+const PAYROLL_HINT = 'Only lessons marked as completed (attendance taken) count. Overdue lessons auto-complete about a day later when that automation is on — until then, mark attendance so they appear here.';
+
 function CreateRunModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [staffId, setStaffId] = useState('');
   const [error, setError] = useState('');
@@ -55,9 +64,10 @@ function CreateRunModal({ open, onClose, onCreated }: { open: boolean; onClose: 
           {error}
         </div>
       )}
-      <p className="text-sm mb-5" style={{ color: 'var(--txt3)' }}>
+      <p className="text-sm mb-2" style={{ color: 'var(--txt3)' }}>
         Calculates gross pay from completed lessons and late-cancellation fees in the period.
       </p>
+      <p className="text-xs mb-5" style={{ color: 'var(--txt4)' }}>{PAYROLL_HINT}</p>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="ui-label">Staff member <span style={{ color: 'var(--coral)' }}>*</span></label>
@@ -69,15 +79,11 @@ function CreateRunModal({ open, onClose, onCreated }: { open: boolean; onClose: 
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="ui-label">Period start <span style={{ color: 'var(--coral)' }}>*</span></label>
-            <input name="periodStart" type="date" required
-              defaultValue={(() => { const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().split('T')[0]; })()}
-              className="ui-input" />
+            <input name="periodStart" type="date" required defaultValue={monthStartISO()} className="ui-input" />
           </div>
           <div>
             <label className="ui-label">Period end <span style={{ color: 'var(--coral)' }}>*</span></label>
-            <input name="periodEnd" type="date" required
-              defaultValue={(() => { const d=new Date(); d.setDate(0); return d.toISOString().split('T')[0]; })()}
-              className="ui-input" />
+            <input name="periodEnd" type="date" required defaultValue={todayISO()} className="ui-input" />
           </div>
         </div>
         <div className="flex gap-3 pt-1">
@@ -136,6 +142,11 @@ function RunAllModal({ open, onClose, onCreated }: { open: boolean; onClose: () 
             {result.skippedExisting > 0 && ` ${result.skippedExisting} already had a run for this period.`}
             {result.skippedEmpty > 0 && ` ${result.skippedEmpty} had no payable lessons.`}
           </p>
+          {result.created.length === 0 && (
+            <div className="text-sm rounded-xl px-4 py-3" style={{ background: 'var(--surf)', color: 'var(--txt3)', border: '1px solid var(--bd)' }}>
+              Nothing to draft for this period. {PAYROLL_HINT} You can also widen the dates above if the lessons happened earlier.
+            </div>
+          )}
           {result.created.length > 0 && (
             <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--bd)' }}>
               {result.created.map(c => (
@@ -154,23 +165,20 @@ function RunAllModal({ open, onClose, onCreated }: { open: boolean; onClose: () 
         </div>
       ) : (
         <>
-          <p className="text-sm mb-5" style={{ color: 'var(--txt3)' }}>
+          <p className="text-sm mb-2" style={{ color: 'var(--txt3)' }}>
             Drafts one payroll run per active teacher from their completed lessons and late-cancellations in the period.
             Teachers with no payable lessons, or who already have a run for this exact period, are skipped — so it&apos;s safe to re-run.
           </p>
+          <p className="text-xs mb-5" style={{ color: 'var(--txt4)' }}>{PAYROLL_HINT}</p>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="ui-label">Period start <span style={{ color: 'var(--coral)' }}>*</span></label>
-                <input name="periodStart" type="date" required
-                  defaultValue={(() => { const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().split('T')[0]; })()}
-                  className="ui-input" />
+                <input name="periodStart" type="date" required defaultValue={monthStartISO()} className="ui-input" />
               </div>
               <div>
                 <label className="ui-label">Period end <span style={{ color: 'var(--coral)' }}>*</span></label>
-                <input name="periodEnd" type="date" required
-                  defaultValue={(() => { const d=new Date(); d.setDate(0); return d.toISOString().split('T')[0]; })()}
-                  className="ui-input" />
+                <input name="periodEnd" type="date" required defaultValue={todayISO()} className="ui-input" />
               </div>
             </div>
             <div className="flex gap-3 pt-1">

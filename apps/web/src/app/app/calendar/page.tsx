@@ -247,6 +247,18 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
 }
 
 // ─── Add lesson modal ─────────────────────────────────────────────────────────
+interface SlotsResponse { date: string; weekday: string; noWindows: boolean; slots: string[]; }
+type AddResult =
+  | { kind: 'weekly'; created: number; through: string }
+  | { kind: 'request'; teacherName: string; count: number };
+
+function to12h(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number);
+  const ap = (h ?? 0) < 12 ? 'am' : 'pm';
+  const hr = ((h ?? 0) % 12) || 12;
+  return `${hr}:${String(m ?? 0).padStart(2, '0')}${ap}`;
+}
+
 function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: {
   open: boolean; onClose: () => void; onCreated: () => void;
   defaultDate?: string; defaultTime?: string;
@@ -261,9 +273,18 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   const [instrument, setInstrument] = useState('');
   const [groupName, setGroupName] = useState('');
   const [duration, setDuration] = useState('60');
+  const [date, setDate] = useState(defaultDate ?? '');
+  const [notes, setNotes] = useState('');
+  // Availability-driven time selection.
+  const [slots, setSlots] = useState<string[]>([]);
+  const [noWindows, setNoWindows] = useState(false);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [picks, setPicks] = useState<string[]>([]);     // ranked HH:MM (1st, 2nd, 3rd)
+  const [manualTime, setManualTime] = useState('');      // fallback when no teacher assigned
+  const [letTeacherChoose, setLetTeacherChoose] = useState(true);
   const [repeat, setRepeat] = useState(false);
   const [repeatWeeks, setRepeatWeeks] = useState('12');
-  const [result, setResult] = useState<{ created: number; through: string } | null>(null);
+  const [result, setResult] = useState<AddResult | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [isTeacher, setIsTeacher] = useState(false);
@@ -273,7 +294,10 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
     if (!open) return;
     setStudentId(''); setTeacherId(''); setRoomId(''); setDuration('60');
     setLessonType('private'); setInstrument(''); setGroupName('');
-    setRepeat(false); setRepeatWeeks('12'); setResult(null);
+    setDate(defaultDate ?? ''); setNotes('');
+    setSlots([]); setNoWindows(false); setPicks([]); setManualTime(defaultTime ?? '');
+    setLetTeacherChoose(true);
+    setRepeat(false); setRepeatWeeks('12'); setResult(null); setError('');
     const t = tok();
     const role = getRoleFromToken(t);
     const teacherSelf = role === 'teacher';
@@ -289,71 +313,128 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
       setStudentsList(st); setRooms(r);
       if (teacherSelf && s[0]) setTeacherId(s[0].id);
     });
-  }, [open]);
+  }, [open, defaultDate, defaultTime]);
+
+  // A teacher booking for themselves is the one choosing the time, so the
+  // "let the teacher pick" hand-off doesn't apply. Recurring weekly bookings and
+  // unassigned lessons are always booked directly too (there's no teacher to ask).
+  const isUnassigned = !teacherId;
+  const requestMode = !isTeacher && !isUnassigned && !repeat && letTeacherChoose;
+
+  // Fetch the teacher's bookable slots whenever teacher / date / duration change.
+  useEffect(() => {
+    if (!open || !teacherId || !date) { setSlots([]); setNoWindows(false); return; }
+    const t = tok();
+    setLoadingSlots(true);
+    const dur = parseInt(duration) || 60;
+    apiFetch<SlotsResponse>(`/scheduling/available-slots?teacherId=${teacherId}&date=${date}&duration=${dur}`, { token: t })
+      .then(res => {
+        setSlots(res.slots); setNoWindows(res.noWindows);
+        // Drop any ranked picks that are no longer offered (date/duration changed).
+        setPicks(prev => prev.filter(p => res.slots.includes(p)));
+      })
+      .catch(() => { setSlots([]); setNoWindows(false); })
+      .finally(() => setLoadingSlots(false));
+  }, [open, teacherId, date, duration]);
+
+  function toggleSlot(label: string) {
+    if (requestMode) {
+      setPicks(prev => prev.includes(label)
+        ? prev.filter(p => p !== label)
+        : prev.length >= 3 ? prev : [...prev, label]);
+    } else {
+      setPicks(prev => (prev[0] === label ? [] : [label]));  // single pick for direct booking
+    }
+  }
 
   const instrumentOptions = lessonType === 'private' ? PRIVATE_INSTRUMENTS : GROUP_INSTRUMENTS;
   const durationOptions = lessonType === 'private'
     ? [{ value: '30', label: '30 min' }, { value: '45', label: '45 min' }, { value: '60', label: '60 min' }]
     : [{ value: '60', label: '60 min' }];
+  const teacherName = staff.find(s => s.id === teacherId)?.firstName ?? 'the teacher';
+
+  async function ensureEnrollmentId(t?: string): Promise<string> {
+    // Find or create a matching enrollment so the lesson carries instrument + type (+ group name).
+    const detail = await apiFetch<StudentDetail>(`/students/${studentId}`, { token: t });
+    const existing = detail.enrollments.find(
+      en => en.instrument === instrument && en.lessonType === lessonType && en.status !== 'withdrawn'
+        && (lessonType !== 'group' || (en.groupName ?? '') === groupName.trim()),
+    )?.id;
+    if (existing) return existing;
+    const created = await apiFetch<{ id: string }>(`/students/${studentId}/enrollments`, {
+      method: 'POST', token: t, body: JSON.stringify({
+        instrument, lessonType, duration: parseInt(duration) || 60,
+        groupName: lessonType === 'group' && groupName.trim() ? groupName.trim() : undefined,
+        teacherId: teacherId || undefined,
+        rate: lessonRate(lessonType, parseInt(duration) || 60),
+        autoRenew: false, status: 'active',
+      }),
+    });
+    return created.id;
+  }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!studentId) { setError('Please select a student'); return; }
     if (!instrument) { setError('Please select an instrument or group'); return; }
+    if (!date) { setError('Please pick a date'); return; }
+
+    // Resolve the chosen time(s). Unassigned lessons use the manual time; every
+    // teacher-assigned lesson is picked from their availability slots.
+    const times = isUnassigned ? (manualTime ? [manualTime] : []) : picks;
+    if (times.length === 0) {
+      setError(isUnassigned ? 'Please enter a time' : `Please choose an available time in ${teacherName}'s hours`);
+      return;
+    }
+
     setSaving(true); setError('');
-    const f = new FormData(e.currentTarget);
     const t = tok();
     try {
-      // Find or create a matching enrollment for this student so the lesson carries instrument + type (+ group name).
-      const detail = await apiFetch<StudentDetail>(`/students/${studentId}`, { token: t });
-      let enrollmentId = detail.enrollments.find(
-        en => en.instrument === instrument && en.lessonType === lessonType && en.status !== 'withdrawn'
-          && (lessonType !== 'group' || (en.groupName ?? '') === groupName.trim()),
-      )?.id;
-
-      if (!enrollmentId) {
-        const created = await apiFetch<{ id: string }>(`/students/${studentId}/enrollments`, {
-          method: 'POST', token: t, body: JSON.stringify({
-            instrument, lessonType, duration: parseInt(duration) || 60,
-            groupName: lessonType === 'group' && groupName.trim() ? groupName.trim() : undefined,
-            teacherId: teacherId || undefined,
-            rate: lessonRate(lessonType, parseInt(duration) || 60),
-            autoRenew: false, status: 'active',
-          }),
-        });
-        enrollmentId = created.id;
-      }
-
-      const date = f.get('date') as string;
-      const time = f.get('time') as string;
+      const enrollmentId = await ensureEnrollmentId(t);
 
       if (repeat) {
         // Set the enrollment's weekly schedule (weekday derived from the picked
-        // date), then materialise the series from that date so every week appears
-        // on the calendar at once.
+        // date), then materialise the series so every week appears at once.
         const weekday = WEEKDAY_KEYS[(new Date(`${date}T12:00:00`).getDay() + 6) % 7];
         await apiFetch(`/enrollments/${enrollmentId}`, {
-          method: 'PATCH', token: t, body: JSON.stringify({ scheduleRule: { weekday, startTime: time } }),
+          method: 'PATCH', token: t, body: JSON.stringify({ scheduleRule: { weekday, startTime: times[0] } }),
         });
         const r = await apiFetch<{ created: number; through: string }>('/lessons/recurring', {
           method: 'POST', token: t,
           body: JSON.stringify({ enrollmentId, weeks: parseInt(repeatWeeks) || 12, startFrom: date }),
         });
         onCreated();
-        setResult({ created: r.created, through: r.through });
+        setResult({ kind: 'weekly', created: r.created, through: r.through });
+      } else if (requestMode) {
+        // Hand the ranked times to the teacher — no lesson exists until they confirm.
+        await apiFetch('/lesson-requests', { method: 'POST', token: t, body: JSON.stringify({
+          studentId, teacherId, enrollmentId, roomId: roomId || undefined,
+          duration: parseInt(duration) || 60,
+          proposedStartsAt: `${date}T${times[0]}:00`,
+          proposedStartsAt2: times[1] ? `${date}T${times[1]}:00` : undefined,
+          proposedStartsAt3: times[2] ? `${date}T${times[2]}:00` : undefined,
+          notes: notes || undefined,
+        })});
+        setResult({ kind: 'request', teacherName, count: times.length });
       } else {
         await apiFetch('/lessons', { method: 'POST', token: t, body: JSON.stringify({
           studentId, teacherId: teacherId || undefined,
           roomId: roomId || undefined,
           enrollmentId,
-          startsAt: `${date}T${time}:00`,
+          startsAt: `${date}T${times[0]}:00`,
           duration: parseInt(duration) || 60,
-          notes: f.get('notes') || undefined,
+          notes: notes || undefined,
         })});
         onCreated(); onClose();
       }
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
     finally { setSaving(false); }
   }
+
+  const submitLabel = saving ? 'Saving…'
+    : repeat ? 'Book weekly lessons'
+    : requestMode ? `Send to ${teacherName} to confirm`
+    : 'Add lesson';
 
   return (
     <Modal open={open} onClose={onClose} title="Add lesson">
@@ -367,12 +448,22 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
         <div className="space-y-4">
           <div className="rounded-xl px-4 py-4 text-sm"
             style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)', border: '1px solid var(--sage)' }}>
-            <p className="font-bold text-base mb-1">Weekly lessons booked ✓</p>
-            {result.created > 0 ? (
-              <p>Added <strong>{result.created}</strong> weekly lesson{result.created !== 1 ? 's' : ''} through{' '}
-                {new Date(result.through).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.</p>
+            {result.kind === 'weekly' ? (
+              <>
+                <p className="font-bold text-base mb-1">Weekly lessons booked ✓</p>
+                {result.created > 0 ? (
+                  <p>Added <strong>{result.created}</strong> weekly lesson{result.created !== 1 ? 's' : ''} through{' '}
+                    {new Date(result.through).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.</p>
+                ) : (
+                  <p>No new lessons were booked — they may already exist for this weekly slot.</p>
+                )}
+              </>
             ) : (
-              <p>No new lessons were booked — they may already exist for this weekly slot.</p>
+              <>
+                <p className="font-bold text-base mb-1">Sent to {result.teacherName} ✓</p>
+                <p>Proposed <strong>{result.count}</strong> time{result.count !== 1 ? 's' : ''}. {result.teacherName} will pick one to confirm —
+                  it appears on the calendar the moment they do. You can track it under <strong>Booking requests</strong>.</p>
+              </>
             )}
           </div>
           <div className="flex gap-3">
@@ -438,16 +529,6 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
         )}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="ui-label">Date <span style={{ color: 'var(--coral)' }}>*</span></label>
-            <input name="date" type="date" required defaultValue={defaultDate} className="ui-input" />
-          </div>
-          <div>
-            <label className="ui-label">Time <span style={{ color: 'var(--coral)' }}>*</span></label>
-            <input name="time" type="time" required defaultValue={defaultTime ?? '16:00'} className="ui-input" />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
             <label className="ui-label">Duration</label>
             <SearchableSelect options={durationOptions} value={duration} onChange={setDuration} disabled={lessonType === 'group'} />
           </div>
@@ -459,17 +540,109 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
             />
           </div>
         </div>
-        {!repeat && (
-          <div>
-            <label className="ui-label">Notes</label>
-            <textarea name="notes" rows={2} className="ui-input" style={{ resize: 'vertical' }} />
+
+        <div>
+          <label className="ui-label">Date <span style={{ color: 'var(--coral)' }}>*</span></label>
+          <input type="date" required value={date} onChange={e => setDate(e.target.value)} className="ui-input" />
+        </div>
+
+        {/* Time — availability-driven when a teacher is assigned, manual otherwise */}
+        <div>
+          <label className="ui-label flex items-center gap-1.5">
+            {requestMode ? 'Preferred times' : 'Time'} <span style={{ color: 'var(--coral)' }}>*</span>
+            {!isUnassigned && (
+              <InfoTooltip text={requestMode
+                ? `Pick up to three times inside ${teacherName}'s working hours. ${teacherName} confirms whichever suits — the lesson is only booked once they do.`
+                : `Only times inside ${teacherName}'s working hours that are free of other lessons are shown, so you can't double-book.`} />
+            )}
+          </label>
+
+          {isUnassigned ? (
+            <>
+              <input type="time" value={manualTime} onChange={e => setManualTime(e.target.value)} className="ui-input" />
+              <p className="text-[11px] mt-1" style={{ color: 'var(--txt4)' }}>
+                Assign a teacher above to pick from their available times.
+              </p>
+            </>
+          ) : !date ? (
+            <p className="text-sm" style={{ color: 'var(--txt4)' }}>Pick a date to see available times.</p>
+          ) : loadingSlots ? (
+            <p className="text-sm" style={{ color: 'var(--txt4)' }}>Finding {teacherName}&rsquo;s free times…</p>
+          ) : slots.length === 0 ? (
+            <div className="rounded-xl px-3.5 py-3 text-sm"
+              style={{ background: 'var(--surf)', color: 'var(--txt3)', border: '1px solid var(--bd)' }}>
+              No free times in {teacherName}&rsquo;s hours that day. Try another date, a shorter duration, or check their availability.
+            </div>
+          ) : (
+            <>
+              {noWindows && (
+                <p className="text-[11px] mb-1.5" style={{ color: 'var(--coral)' }}>
+                  {teacherName} hasn&rsquo;t set working hours yet — showing the full day. Set their availability for tighter suggestions.
+                </p>
+              )}
+              <div className="flex flex-wrap gap-1.5">
+                {slots.map(s => {
+                  const rank = picks.indexOf(s);
+                  const active = rank >= 0;
+                  return (
+                    <button
+                      key={s} type="button" onClick={() => toggleSlot(s)}
+                      className="text-xs font-semibold rounded-lg px-2.5 py-1.5 tabular-nums transition-colors flex items-center gap-1.5"
+                      style={{
+                        background: active ? 'var(--sage)' : 'white',
+                        color: active ? 'white' : 'var(--txt2)',
+                        border: `1.5px solid ${active ? 'var(--sage)' : 'var(--bd2)'}`,
+                      }}
+                    >
+                      {requestMode && active && (
+                        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] font-bold"
+                          style={{ background: 'rgba(255,255,255,0.3)' }}>{rank + 1}</span>
+                      )}
+                      {to12h(s)}
+                    </button>
+                  );
+                })}
+              </div>
+              {requestMode && (
+                <p className="text-[11px] mt-1.5" style={{ color: 'var(--txt4)' }}>
+                  {picks.length === 0
+                    ? `Tap up to 3 times in order of preference — ${teacherName} confirms one.`
+                    : `Ranked: ${picks.map((p, i) => `${i + 1}. ${to12h(p)}`).join('  ')}`}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Let the teacher pick the final time (front desk only, single non-recurring lesson) */}
+        {!isTeacher && !isUnassigned && !repeat && (
+          <div className="rounded-xl border p-3" style={{ borderColor: letTeacherChoose ? 'var(--sage)' : 'var(--bd)', background: letTeacherChoose ? 'var(--sage-lt)' : 'transparent' }}>
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input type="checkbox" checked={letTeacherChoose} onChange={e => { setLetTeacherChoose(e.target.checked); setPicks([]); }}
+                className="h-4 w-4 rounded mt-0.5" style={{ accentColor: 'var(--sage)' }} />
+              <span>
+                <span className="text-sm font-semibold block" style={{ color: 'var(--txt)' }}>Let {teacherName} pick the final time</span>
+                <span className="text-[11px]" style={{ color: 'var(--txt3)' }}>
+                  {letTeacherChoose
+                    ? `Propose up to 3 times; ${teacherName} confirms one and it's added then.`
+                    : 'Off: the lesson is booked immediately at the time you choose.'}
+                </span>
+              </span>
+            </label>
           </div>
         )}
 
-        {/* Repeat weekly — turns this into a recurring weekly booking */}
+        {!repeat && (
+          <div>
+            <label className="ui-label">Notes</label>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="ui-input" style={{ resize: 'vertical' }} />
+          </div>
+        )}
+
+        {/* Repeat weekly — turns this into a recurring weekly booking (booked directly) */}
         <div className="rounded-xl border p-3" style={{ borderColor: repeat ? 'var(--sage)' : 'var(--bd)', background: repeat ? 'var(--sage-lt)' : 'transparent' }}>
           <label className="flex items-center gap-2.5 cursor-pointer">
-            <input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)}
+            <input type="checkbox" checked={repeat} onChange={e => { setRepeat(e.target.checked); setPicks([]); }}
               className="h-4 w-4 rounded" style={{ accentColor: 'var(--sage)' }} />
             <span className="text-sm font-semibold" style={{ color: 'var(--txt)' }}>Repeat weekly</span>
           </label>
@@ -488,7 +661,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
 
         <div className="flex gap-3 pt-1">
           <button type="submit" disabled={saving} className="ui-btn-primary">
-            {saving ? 'Saving…' : repeat ? 'Book weekly lessons' : 'Add lesson'}
+            {submitLabel}
           </button>
           <button type="button" onClick={onClose} className="ui-btn-ghost">Cancel</button>
         </div>
@@ -863,6 +1036,9 @@ export default function CalendarPage() {
 
   const weekStart = getWeekStart(anchorDate);
   const role = getRoleFromToken(tok());
+  // "Assign students" / "Add student" are front-desk tasks — only management
+  // roles get them. Teachers, and any parent/student who lands here, do not.
+  const isManagement = ['system_admin', 'admin', 'manager', 'receptionist'].includes(role);
 
   // Cached reads — the week's lessons re-key on weekStart (paging weeks you've
   // already seen is instant), and staff/availability are cached too. load()
@@ -1017,7 +1193,7 @@ export default function CalendarPage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {role !== 'teacher' && (
+          {isManagement && (
             <>
               <button onClick={() => setShowAssign(true)} className="ui-btn-ghost">
                 <Users size={15} /> Assign students

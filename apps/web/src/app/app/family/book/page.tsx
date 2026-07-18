@@ -7,6 +7,7 @@ import { useApi } from '@/lib/swr';
 import { fmtTime, fmtDate } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
+import { SearchableSelect } from '@/components/searchable-select';
 import { ChevronLeft, ChevronRight, Check, Loader2 } from 'lucide-react';
 
 interface Teacher { id: string; firstName: string; lastName: string; instruments: string[]; defaultDuration: number; }
@@ -121,35 +122,46 @@ export default function BookLessonPage() {
             <p className="text-xs font-bold uppercase tracking-widest mb-4" style={{ color: 'var(--txt3)' }}>1. Lesson details</p>
 
             <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>Teacher</label>
-            <select value={selectedTeacher} onChange={e => setSelectedTeacher(e.target.value)}
-              className="w-full border border-[var(--bd2)] rounded-xl px-3 py-2 text-sm mb-3 focus:outline-none focus:border-[var(--sage)]">
-              <option value="">Select teacher…</option>
-              {teachers.map(t => (
-                <option key={t.id} value={t.id}>{t.firstName} {t.lastName} — {t.instruments.join(', ')}</option>
-              ))}
-            </select>
+            <div className="mb-3">
+              <SearchableSelect
+                options={teachers.map(t => ({ value: t.id, label: `${t.firstName} ${t.lastName} — ${t.instruments.join(', ')}` }))}
+                value={selectedTeacher} onChange={setSelectedTeacher} placeholder="Select teacher…"
+              />
+            </div>
 
             <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>Student</label>
-            <select value={selectedStudent} onChange={e => { setSelectedStudent(e.target.value); setSelectedEnrollment(''); }}
-              className="w-full border border-[var(--bd2)] rounded-xl px-3 py-2 text-sm mb-3 focus:outline-none focus:border-[var(--sage)]">
-              <option value="">Select student…</option>
-              {students.map(s => <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>)}
-            </select>
+            <div className="mb-3">
+              <SearchableSelect
+                options={students.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+                value={selectedStudent} onChange={v => { setSelectedStudent(v); setSelectedEnrollment(''); }}
+                placeholder="Select student…"
+              />
+            </div>
 
-            {student && (
-              <>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>Enrollment</label>
-                <select value={selectedEnrollment} onChange={e => setSelectedEnrollment(e.target.value)}
-                  className="w-full border border-[var(--bd2)] rounded-xl px-3 py-2 text-sm mb-3 focus:outline-none focus:border-[var(--sage)]">
-                  <option value="">Select enrollment…</option>
-                  {(student as unknown as { enrollments?: Enrollment[] }).enrollments?.filter(e => e.status === 'active' || e.status === 'trial').map(e => (
-                    <option key={e.id} value={e.id}>
-                      {e.instrument} ({e.lessonType}) — £{(e.rate / 100).toFixed(2)}/lesson
-                    </option>
-                  ))}
-                </select>
-              </>
-            )}
+            {student && (() => {
+              const bookable = (student.enrollments ?? []).filter(e => e.status === 'active' || e.status === 'trial');
+              return (
+                <>
+                  <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>Instrument / Class</label>
+                  {bookable.length === 0 ? (
+                    <p className="text-xs mb-3 rounded-xl border border-[var(--bd2)] bg-[var(--surf)] px-3 py-2" style={{ color: 'var(--txt3)' }}>
+                      This student isn&apos;t signed up for any instrument or class yet. Please contact the studio to get set up.
+                    </p>
+                  ) : (
+                    <select value={selectedEnrollment} onChange={e => setSelectedEnrollment(e.target.value)}
+                      className="w-full border border-[var(--bd2)] rounded-xl px-3 py-2 text-sm mb-3 focus:outline-none focus:border-[var(--sage)]">
+                      <option value="">Select instrument / class…</option>
+                      {bookable.map(e => (
+                        <option key={e.id} value={e.id}>
+                          {e.instrument.charAt(0).toUpperCase() + e.instrument.slice(1)}
+                          {e.lessonType === 'group' ? ' (group class)' : ''} — £{(e.rate / 100).toFixed(2)}/lesson
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </>
+              );
+            })()}
 
             <label className="flex items-center gap-2.5 text-sm cursor-pointer mt-1">
               <input type="checkbox" checked={isTrial} onChange={e => setIsTrial(e.target.checked)}

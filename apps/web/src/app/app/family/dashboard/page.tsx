@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
+import { useMe } from '@/lib/use-me';
 import { fmtTime, fmtDate } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
@@ -34,16 +35,34 @@ interface DashboardData {
   lastNote: { body: string; student: { firstName: string; lastName: string } | null } | null;
 }
 
+// 15-minute time slots (08:00–21:00) so parents pick a tidy time, never "3:27pm".
+const RESCHED_TIME_OPTIONS = (() => {
+  const out: { value: string; label: string }[] = [];
+  for (let m = 8 * 60; m <= 21 * 60; m += 15) {
+    const hh = String(Math.floor(m / 60)).padStart(2, '0');
+    const mm = String(m % 60).padStart(2, '0');
+    const value = `${hh}:${mm}`;
+    const h12 = ((Math.floor(m / 60) + 11) % 12) + 1;
+    const ampm = m < 12 * 60 ? 'am' : 'pm';
+    out.push({ value, label: `${h12}:${mm} ${ampm}` });
+  }
+  return out;
+})();
+
 export default function FamilyDashboardPage() {
   // Cached reads — the portal renders instantly on revisit, then revalidates.
   // mutateData() refreshes the dashboard after a payment or cancellation.
   const { data, mutate: mutateData } = useApi<DashboardData>('/family/dashboard');
+  const { firstName } = useMe();
   const { data: teacherAvail = [] } = useApi<AvailWindow[]>('/family/teacher-availability');
   const { data: newsRaw = [] } = useApi<NewsPost[]>('/news');
   const news = newsRaw.slice(0, 3);
   const [cancelModal, setCancelModal] = useState<{ lessonId: string; hoursUntil: number } | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [reschedModal, setReschedModal] = useState<{ lessonId: string } | null>(null);
+  // Three preferred slots, each a date + a 15-minute time (kept separate so the
+  // time picker can only offer :00/:15/:30/:45 — no "3:27pm").
+  const [reschedDates, setReschedDates] = useState<[string, string, string]>(['', '', '']);
   const [reschedTimes, setReschedTimes] = useState<[string, string, string]>(['', '', '']);
   const [reschedErr, setReschedErr] = useState('');
   const [reschedSaving, setReschedSaving] = useState(false);
@@ -54,27 +73,29 @@ export default function FamilyDashboardPage() {
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   function openReschedule(lessonId: string) {
-    setReschedTimes(['', '', '']); setReschedErr(''); setReschedDone(false);
+    setReschedDates(['', '', '']); setReschedTimes(['', '', '']);
+    setReschedErr(''); setReschedDone(false);
     setReschedModal({ lessonId });
   }
 
   async function submitReschedule() {
     if (!reschedModal) return;
-    if (!reschedTimes[0]) { setReschedErr('Please choose at least a first preferred time.'); return; }
+    if (!reschedDates[0] || !reschedTimes[0]) { setReschedErr('Please choose a date and time for your first preferred slot.'); return; }
     setReschedSaving(true); setReschedErr('');
     try {
-      // Send the naive wall-clock exactly as picked (e.g. "2026-07-13T16:00"); the
-      // backend interprets it in the studio timezone. Converting via new Date().toISOString()
-      // here would wrongly bake in the parent's *browser* timezone. Append seconds if the
-      // datetime-local value omits them ("YYYY-MM-DDTHH:MM" is 16 chars).
-      const toIso = (v: string) => (v ? (v.length === 16 ? `${v}:00` : v) : undefined);
+      // Compose the naive wall-clock exactly as picked (e.g. "2026-07-13T16:00:00");
+      // the backend interprets it in the studio timezone. Converting via
+      // new Date().toISOString() here would wrongly bake in the parent's *browser*
+      // timezone. A choice only counts when both its date and time are set.
+      const toIso = (i: number) =>
+        reschedDates[i] && reschedTimes[i] ? `${reschedDates[i]}T${reschedTimes[i]}:00` : undefined;
       await apiFetch('/reschedule-requests', {
         method: 'POST', token: tok(),
         body: JSON.stringify({
           lessonId: reschedModal.lessonId,
-          proposedStartsAt: toIso(reschedTimes[0]),
-          proposedStartsAt2: toIso(reschedTimes[1]),
-          proposedStartsAt3: toIso(reschedTimes[2]),
+          proposedStartsAt: toIso(0),
+          proposedStartsAt2: toIso(1),
+          proposedStartsAt3: toIso(2),
         }),
       });
       setReschedDone(true);
@@ -116,7 +137,10 @@ export default function FamilyDashboardPage() {
 
   return (
     <div>
-      <PageHeader title="My Dashboard" subtitle="Your family's lessons at a glance" />
+      <PageHeader
+        title={firstName ? `Welcome back, ${firstName}` : 'Welcome back'}
+        subtitle="Your family's lessons at a glance"
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
@@ -378,7 +402,7 @@ export default function FamilyDashboardPage() {
         ) : (
           <div className="space-y-4">
             <p className="text-sm flex items-start gap-1.5" style={{ color: 'var(--txt3)' }}>
-              <span>Give up to three preferred times, in order of preference.</span>
+              <span>Give up to three preferred slots, in order of preference. The studio picks whichever works best for the teacher.</span>
               <InfoTooltip text="You don't have to match the teacher's schedule yourself — offering a few options lets the studio slot you into a time the teacher is actually free, often back-to-back with other lessons. Only your 1st choice is required." />
             </p>
             {reschedErr && (
@@ -393,12 +417,23 @@ export default function FamilyDashboardPage() {
                   {i === 0 ? '1st choice' : i === 1 ? '2nd choice' : '3rd choice'}
                   {i === 0 ? <span style={{ color: 'var(--coral)' }}> *</span> : <span className="font-normal text-[11px]" style={{ color: 'var(--txt4)' }}> (optional)</span>}
                 </label>
-                <input
-                  type="datetime-local"
-                  value={reschedTimes[i]}
-                  onChange={(e) => setReschedTimes((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
-                  className="ui-input"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    value={reschedDates[i]}
+                    min={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setReschedDates((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
+                    className="ui-input flex-1"
+                  />
+                  <select
+                    value={reschedTimes[i]}
+                    onChange={(e) => setReschedTimes((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
+                    className="ui-input w-32 shrink-0"
+                  >
+                    <option value="">Time…</option>
+                    {RESCHED_TIME_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
               </div>
             ))}
             <div className="flex gap-3 pt-1">

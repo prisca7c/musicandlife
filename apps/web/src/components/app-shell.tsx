@@ -10,7 +10,7 @@ import {
   FileText, BarChart3, Settings,
   Briefcase, CreditCard, UserCheck, BookOpen,
   Clock, History, ChevronLeft, ChevronRight, ChevronDown,
-  LogOut, PanelLeftClose, PanelLeftOpen, Megaphone, CalendarClock,
+  LogOut, PanelLeftClose, PanelLeftOpen, Megaphone, CalendarClock, CalendarPlus,
 } from 'lucide-react';
 import type { BaseRole } from '@music-life/types';
 import { apiFetch } from '@/lib/api';
@@ -26,6 +26,7 @@ const NAV: NavItem[] = [
   { label: 'Lesson notes', href: '/app/family/notes',      roles: ['guardian','student'],                                     icon: <BookOpen size={16} /> },
   { label: 'Calendar',     href: '/app/calendar',          roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <Calendar size={16} /> },
   { label: 'Attendance',   href: '/app/attendance',        roles: ['system_admin','admin','manager','teacher'],               icon: <ClipboardCheck size={16} /> },
+  { label: 'Booking requests', href: '/app/lesson-requests', roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <CalendarPlus size={16} /> },
   { label: 'Reschedules',  href: '/app/reschedule-requests', roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <CalendarClock size={16} /> },
   { label: 'My availability', href: '/app/availability',    roles: ['teacher'],                                                icon: <Clock size={16} /> },
   { label: 'Notes',        href: '/app/notes',             roles: ['system_admin','admin','manager','teacher'],               icon: <FileText size={16} /> },
@@ -46,7 +47,7 @@ const NAV: NavItem[] = [
 // Group nav sections
 const GROUPS = [
   { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History','Lesson notes'] },
-  { label: 'Studio',   items: ['Calendar','Attendance','Reschedules','My availability','Notes','Intake','Messages'] },
+  { label: 'Studio',   items: ['Calendar','Attendance','Booking requests','Reschedules','My availability','Notes','Intake','Messages'] },
   { label: 'People',   items: ['Students','Families','Staff','Payroll'] },
   { label: 'Finance',  items: ['Billing'] },
   { label: 'Content',  items: ['Resources','Content','Studio News'] },

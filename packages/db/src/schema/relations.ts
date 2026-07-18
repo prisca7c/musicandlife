@@ -5,7 +5,7 @@ import {
   staffMembers, staffPrivileges, teacherAssignments, enrollments,
   notes, staffAvailability,
 } from './domain';
-import { lessons, attendance, rescheduleRequests, availability, blockedTime } from './scheduling';
+import { lessons, attendance, rescheduleRequests, lessonRequests, availability, blockedTime } from './scheduling';
 import { invoices, invoiceLineItems, ledgerEntries, payments, payrollRuns, payrollItems, expenses, rateChangeRequests, lessonCredits } from './billing';
 import { threads, threadParticipants, messages, notificationRules, notificationLog, registrations, leads, newsPosts } from './comms';
 import { files, resources, repertoirePieces } from './media';
@@ -104,6 +104,15 @@ export const rescheduleRequestsRelations = relations(rescheduleRequests, ({ one 
   lesson: one(lessons, { fields: [rescheduleRequests.lessonId], references: [lessons.id] }),
   requestedByUser: one(users, { fields: [rescheduleRequests.requestedBy], references: [users.id] }),
   decidedByUser: one(users, { fields: [rescheduleRequests.decidedBy], references: [users.id] }),
+}));
+
+export const lessonRequestsRelations = relations(lessonRequests, ({ one }) => ({
+  student: one(students, { fields: [lessonRequests.studentId], references: [students.id] }),
+  teacher: one(staffMembers, { fields: [lessonRequests.teacherId], references: [staffMembers.id] }),
+  enrollment: one(enrollments, { fields: [lessonRequests.enrollmentId], references: [enrollments.id] }),
+  room: one(rooms, { fields: [lessonRequests.roomId], references: [rooms.id] }),
+  requestedByUser: one(users, { fields: [lessonRequests.requestedBy], references: [users.id] }),
+  createdLesson: one(lessons, { fields: [lessonRequests.createdLessonId], references: [lessons.id] }),
 }));
 
 export const availabilityRelations = relations(availability, ({ one }) => ({

@@ -6,7 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Modal } from '@/components/modal';
-import { Search } from 'lucide-react';
+import { Search, Check } from 'lucide-react';
 
 interface Thread {
   id: string; subject: string; updatedAt: string;
@@ -14,18 +14,37 @@ interface Thread {
   participants: { user: { id: string; email: string } }[];
 }
 
+interface Recipient { userId: string; name: string; email: string; role: string; roleLabel: string; }
+
 function NewThreadModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [recipQuery, setRecipQuery] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
+  // Who the current user is allowed to message (staff→everyone, parent→staff only).
+  const { data: recipients = [] } = useApi<Recipient[]>(open ? '/threads/recipients' : null);
+  const rq = recipQuery.trim().toLowerCase();
+  const shown = rq
+    ? recipients.filter(r => r.name.toLowerCase().includes(rq) || r.email.toLowerCase().includes(rq) || r.roleLabel.toLowerCase().includes(rq))
+    : recipients;
+  const selectedRecips = recipients.filter(r => selected.includes(r.userId));
+
+  function toggle(id: string) {
+    setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+  }
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault(); setSaving(true); setError('');
+    e.preventDefault(); setError('');
+    if (selected.length === 0) { setError('Please choose at least one person to send this to.'); return; }
+    setSaving(true);
     const f = new FormData(e.currentTarget);
     try {
       await apiFetch('/threads', { method: 'POST', token: tok(), body: JSON.stringify({
-        subject: f.get('subject'), body: f.get('body'),
+        subject: f.get('subject'), body: f.get('body'), participantIds: selected,
       })});
+      setSelected([]); setRecipQuery('');
       onCreated(); onClose();
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
     finally { setSaving(false); }
@@ -35,8 +54,38 @@ function NewThreadModal({ open, onClose, onCreated }: { open: boolean; onClose: 
     <Modal open={open} onClose={onClose} title="New message thread">
       {error && <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
       <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium mb-1">To <span className="text-red-500">*</span></label>
+          {selectedRecips.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {selectedRecips.map(r => (
+                <span key={r.userId} className="inline-flex items-center gap-1 text-xs bg-[var(--sage-lt)] text-[var(--sage-dk)] rounded-full pl-2.5 pr-1 py-0.5">
+                  {r.name} <span className="opacity-60">· {r.roleLabel}</span>
+                  <button type="button" onClick={() => toggle(r.userId)} aria-label={`Remove ${r.name}`}
+                    className="rounded-full w-4 h-4 flex items-center justify-center hover:bg-[var(--sage-md)]">×</button>
+                </span>
+              ))}
+            </div>
+          )}
+          <input value={recipQuery} onChange={e => setRecipQuery(e.target.value)} placeholder="Search people by name, role or email…"
+            className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]" />
+          <div className="mt-1.5 max-h-40 overflow-y-auto rounded-lg border" style={{ borderColor: 'var(--bd2)' }}>
+            {shown.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-gray-400">{recipients.length === 0 ? 'No one available to message.' : 'No matches.'}</p>
+            ) : shown.map(r => {
+              const on = selected.includes(r.userId);
+              return (
+                <button type="button" key={r.userId} onClick={() => toggle(r.userId)}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-left text-sm hover:bg-[var(--surf)] ${on ? 'bg-[var(--sage-lt)]' : ''}`}>
+                  <span><span className="font-medium">{r.name}</span> <span className="text-xs text-gray-400">· {r.roleLabel}</span></span>
+                  {on && <Check size={14} className="text-[var(--sage-dk)]" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <div><label className="block text-sm font-medium mb-1">Subject <span className="text-red-500">*</span></label>
-          <input name="subject" required autoFocus className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]" /></div>
+          <input name="subject" required className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]" /></div>
         <div><label className="block text-sm font-medium mb-1">Message <span className="text-red-500">*</span></label>
           <textarea name="body" required rows={4} className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]" /></div>
         <div className="flex gap-3 pt-2">
