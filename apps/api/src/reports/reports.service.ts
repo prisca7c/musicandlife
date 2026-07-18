@@ -204,7 +204,32 @@ export class ReportsService {
     const headlineType = accountingMode === 'cash' ? 'payment' : 'charge';
     const total = Number(entries.find(e => e.type === headlineType)?.total ?? 0);
 
-    return { from, to, accountingMode, total, byType: entries };
+    // "Earned from completed lessons" — the value of the lessons actually taught
+    // (or late-cancelled) in the period, independent of how they were paid for
+    // (ledger charge, prepaid credit, or invoice). This is the figure that lines
+    // up with the "lessons completed" count on the same page: marking a lesson
+    // present makes it show up here, even when it was covered by a prepaid credit
+    // and therefore posted no ledger charge. Reconciles the "£2 revenue but many
+    // lessons completed" confusion.
+    const earnedLessons = await this.db.db.query.lessons.findMany({
+      where: and(
+        eq(lessons.organizationId, orgId),
+        gte(lessons.startsAt, new Date(from)),
+        lte(lessons.startsAt, new Date(to)),
+        inArray(lessons.status, ['completed', 'cancelled_no_makeup']),
+      ),
+      with: { enrollment: { columns: { rate: true, defaultDuration: true } } },
+    });
+    const earnedFromLessons = earnedLessons.reduce(
+      (s, l) => s + proratedAmount(l.enrollment?.rate, l.enrollment?.defaultDuration, l.duration),
+      0,
+    );
+
+    return {
+      from, to, accountingMode, total, byType: entries,
+      earnedFromLessons,
+      completedLessons: earnedLessons.length,
+    };
   }
 
   async getRetentionReport(orgId: string) {

@@ -12,7 +12,7 @@ import { Download, FileDown, Loader2 } from 'lucide-react';
 import { SearchableSelect } from '@/components/searchable-select';
 
 interface AttendanceReport { from: string; to: string; byStatus: { status: string; count: number }[]; }
-interface RevenueReport { from: string; to: string; accountingMode: 'cash' | 'accrual'; total: number; byType: { type: string; total: string | null }[]; }
+interface RevenueReport { from: string; to: string; accountingMode: 'cash' | 'accrual'; total: number; byType: { type: string; total: string | null }[]; earnedFromLessons: number; completedLessons: number; }
 interface EnrollmentReport { byInstrument: { instrument: string; lessonType: string; count: number }[]; }
 interface RetentionReport { byMonth: { month: string; active: number; withdrawn: number }[]; }
 interface StudentOption { id: string; firstName: string; lastName: string; }
@@ -229,7 +229,17 @@ export default function ReportsPage() {
           <div className="p-5">
             {!revenue ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>Loading…</p> : (
               <div className="space-y-3">
-                {revenue.byType.length === 0 && <p className="text-sm" style={{ color: 'var(--txt4)' }}>No transactions in this period.</p>}
+                {/* Earned from completed lessons — the figure that matches the
+                    "lessons completed" count, so the two cards reconcile. */}
+                <div className="flex items-center justify-between pb-3 border-b" style={{ borderColor: 'var(--bd)' }}>
+                  <span className="text-sm" style={{ color: 'var(--txt2)' }}>
+                    Earned from completed lessons
+                    <span className="block text-xs" style={{ color: 'var(--txt4)' }}>{revenue.completedLessons} lesson{revenue.completedLessons !== 1 ? 's' : ''} taught this period</span>
+                  </span>
+                  <span className="font-extrabold" style={{ color: 'var(--sage-dk)' }}>£{(revenue.earnedFromLessons / 100).toFixed(2)}</span>
+                </div>
+                <p className="text-xs" style={{ color: 'var(--txt4)' }}>Money movements ({revenue.accountingMode} basis):</p>
+                {revenue.byType.length === 0 && <p className="text-sm" style={{ color: 'var(--txt4)' }}>No payments or charges recorded in this period.</p>}
                 {revenue.byType.map(row => (
                   <div key={row.type} className="flex items-center justify-between">
                     <span className="text-sm capitalize" style={{ color: 'var(--txt3)' }}>{row.type}</span>

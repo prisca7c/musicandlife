@@ -111,7 +111,22 @@ export class FamilyPortalController {
 
     const family = await this.db.db.query.families.findFirst({
       where: eq(families.id, guardian.familyId),
-      with: { students: { columns: { id: true, firstName: true, lastName: true, status: true } } },
+      with: {
+        students: {
+          columns: { id: true, firstName: true, lastName: true, status: true },
+          // The booking page turns these into the "Instrument / Class" picker,
+          // so every student must ship its enrollments (was missing → the picker
+          // was always empty → "no enrollments available").
+          with: {
+            enrollments: {
+              columns: {
+                id: true, instrument: true, rate: true,
+                teacherId: true, lessonType: true, status: true,
+              },
+            },
+          },
+        },
+      },
     });
     if (!family) return { nextLesson: null, balance: 0, outstandingInvoice: null, students: [], lastNote: null };
 

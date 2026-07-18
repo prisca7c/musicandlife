@@ -23,6 +23,7 @@ import {
   families,
 } from '@music-life/db';
 import type { JwtPayload, BaseRole } from '@music-life/types';
+import { ROLE_LEVEL } from '@music-life/types';
 import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
 
@@ -80,12 +81,14 @@ export class AuthService {
       throw new UnauthorizedException('Please verify your email before logging in');
     }
 
-    const membership = await this.db.db.query.memberships.findFirst({
-      where: and(
-        eq(memberships.userId, user.id),
-        eq(memberships.status, 'active'),
-      ),
-    });
+    const membership = this.pickPrimaryMembership(
+      await this.db.db.query.memberships.findMany({
+        where: and(
+          eq(memberships.userId, user.id),
+          eq(memberships.status, 'active'),
+        ),
+      }),
+    );
     if (!membership) throw new UnauthorizedException('No active membership');
 
     return this.createTokens(user.id, membership.id, membership.organizationId, membership.baseRole as BaseRole, userAgent, ip);
@@ -113,12 +116,14 @@ export class AuthService {
       .set({ usedAt: new Date() })
       .where(eq(refreshTokens.id, token.id));
 
-    const membership = await this.db.db.query.memberships.findFirst({
-      where: and(
-        eq(memberships.userId, token.userId),
-        eq(memberships.status, 'active'),
-      ),
-    });
+    const membership = this.pickPrimaryMembership(
+      await this.db.db.query.memberships.findMany({
+        where: and(
+          eq(memberships.userId, token.userId),
+          eq(memberships.status, 'active'),
+        ),
+      }),
+    );
     if (!membership) throw new UnauthorizedException('No active membership');
 
     return this.issueAccessAndRefresh(token.userId, membership.id, membership.organizationId, membership.baseRole as BaseRole, token.sessionId, token.id);
@@ -290,6 +295,24 @@ export class AuthService {
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────
+
+  /**
+   * When a user holds several active memberships (e.g. an admin who is also a
+   * guardian of their own test family), pick the highest-privilege one so the
+   * token's role never gets silently downgraded — the previous unordered
+   * findFirst could hand an admin a `guardian` role and trip "Insufficient
+   * role" on staff-only endpoints like POST /lessons.
+   */
+  private pickPrimaryMembership<T extends { baseRole: string }>(
+    list: T[],
+  ): T | undefined {
+    if (list.length <= 1) return list[0];
+    return [...list].sort(
+      (a, b) =>
+        (ROLE_LEVEL[b.baseRole as BaseRole] ?? 0) -
+        (ROLE_LEVEL[a.baseRole as BaseRole] ?? 0),
+    )[0];
+  }
 
   private async createTokens(
     userId: string,

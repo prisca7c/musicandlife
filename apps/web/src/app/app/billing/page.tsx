@@ -58,6 +58,8 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
         method: 'POST', token: tok(), body: JSON.stringify({
           familyId,
           mode: apiMode,
+          // Custom invoices are manual-only — don't auto-pull the period's lessons.
+          itemizeLessons: mode !== 'custom',
           periodStart: (e.currentTarget.elements.namedItem('periodStart') as HTMLInputElement)?.value || undefined,
           periodEnd: (e.currentTarget.elements.namedItem('periodEnd') as HTMLInputElement)?.value || undefined,
           notes: (e.currentTarget.elements.namedItem('notes') as HTMLTextAreaElement)?.value || undefined,

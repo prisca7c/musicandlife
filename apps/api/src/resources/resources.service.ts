@@ -5,6 +5,7 @@ import { DbService } from '../db/db.service';
 import type { CreateResourceDto } from './dto/create-resource.dto';
 import type { BaseRole } from '@music-life/types';
 
+// What each role is allowed to SEE.
 const ROLE_SCOPES: Record<BaseRole, string[]> = {
   system_admin: ['studio', 'teacher', 'family', 'student'],
   admin: ['studio', 'teacher', 'family', 'student'],
@@ -14,6 +15,23 @@ const ROLE_SCOPES: Record<BaseRole, string[]> = {
   teacher: ['studio', 'teacher'],
   guardian: ['studio', 'family'],
   student: ['studio', 'student'],
+};
+
+// What each role is allowed to PUBLISH. Deliberately narrower than what they
+// can read: a teacher must NOT be able to broadcast to every parent/student in
+// the school (scopes studio/family/student all reach families). Teachers share
+// with their own families through per-student lesson notes instead; the shared
+// "teacher" pool here is staff-only. Only management/reception curate the
+// studio-wide and family/student libraries.
+const PUBLISH_SCOPES: Record<BaseRole, string[]> = {
+  system_admin: ['studio', 'teacher', 'family', 'student'],
+  admin: ['studio', 'teacher', 'family', 'student'],
+  manager: ['studio', 'teacher', 'family', 'student'],
+  receptionist: ['studio', 'family', 'student'],
+  technician: ['studio'],
+  teacher: ['teacher'],
+  guardian: [],
+  student: [],
 };
 
 export interface ResourceFilters {
@@ -89,6 +107,16 @@ export class ResourcesService {
   }
 
   async create(orgId: string, ownerId: string, role: BaseRole, dto: CreateResourceDto) {
+    // Enforce publish rights: a teacher can't broadcast to all families/students.
+    const allowed = PUBLISH_SCOPES[role] ?? [];
+    if (!allowed.includes(dto.scope)) {
+      throw new ForbiddenException(
+        role === 'teacher'
+          ? 'Teachers can share resources with the teaching team only. To send materials to a family, add them to a lesson note for that student.'
+          : 'You are not allowed to publish resources to that audience.',
+      );
+    }
+
     // Teachers can only tag resources as their own — never impersonate another teacher.
     let teacherId = dto.teacherId;
     if (role === 'teacher') {

@@ -1,4 +1,4 @@
-import { Controller, Patch, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Patch, Post, Body, Param, UseGuards } from '@nestjs/common';
 import { EnrollmentsService } from './enrollments.service';
 import { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -16,5 +16,12 @@ export class EnrollmentsController {
   @Roles('receptionist')
   update(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: UpdateEnrollmentDto) {
     return this.enrollments.update(user.orgId, id, dto);
+  }
+
+  // Stop an ongoing weekly series (clear the rule + cancel future lessons).
+  @Post(':id/stop-recurring')
+  @Roles('receptionist')
+  stopRecurring(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.enrollments.stopRecurring(user.orgId, id);
   }
 }

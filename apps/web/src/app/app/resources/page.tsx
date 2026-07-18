@@ -77,12 +77,27 @@ function AddResourceModal({ open, onClose, onCreated, role, staff, students }: {
         <div><label className="block text-sm font-medium mb-1">Description</label>
           <textarea name="description" rows={type==='note'?4:2} className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]" /></div>
         <div><label className="block text-sm font-medium mb-1">Visible to</label>
-          <select name="scope" className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]">
-            <option value="studio">All staff (studio)</option>
-            <option value="teacher">Teachers only</option>
-            <option value="family">Families & students</option>
-            <option value="student">Students only</option>
-          </select></div>
+          {(() => {
+            // Mirror the API's publish rights: teachers may only share with the
+            // teaching team — they can't broadcast to every family/student.
+            const allowed = role === 'teacher' ? ['teacher']
+              : role === 'receptionist' ? ['studio', 'family', 'student']
+              : role === 'technician' ? ['studio']
+              : ['studio', 'teacher', 'family', 'student'];
+            const labels: Record<string, string> = {
+              studio: 'All staff (studio)', teacher: 'Teachers only',
+              family: 'Families & students', student: 'Students only',
+            };
+            return (
+              <select name="scope" defaultValue={allowed[0]} className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]">
+                {allowed.map(s => <option key={s} value={s}>{labels[s]}</option>)}
+              </select>
+            );
+          })()}
+          {role === 'teacher' && (
+            <p className="text-xs text-gray-400 mt-1">To send materials to a family, add them to that student&apos;s lesson note.</p>
+          )}
+        </div>
 
         <div className="border-t pt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -186,18 +201,18 @@ export default function ResourcesPage() {
           <input value={search} onChange={e => applyFilters({ search: e.target.value })} placeholder="Search title or description…"
             className="w-full border rounded px-3 py-2 pl-8 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]" />
         </div>
-        <select value={instrument} onChange={e => applyFilters({ instrument: e.target.value })} className="border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]">
-          <option value="">All instruments</option>
-          {instrumentOptions.map(i => <option key={i} value={i} className="capitalize">{i}</option>)}
-        </select>
-        <select value={teacherId} onChange={e => applyFilters({ teacherId: e.target.value })} className="border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]">
-          <option value="">All teachers</option>
-          {teacherOptions.map(t => <option key={t.id} value={t.id}>{t.firstName} {t.lastName}</option>)}
-        </select>
-        <select value={studentId} onChange={e => applyFilters({ studentId: e.target.value })} className="border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]">
-          <option value="">All students</option>
-          {studentOptions.map(s => <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>)}
-        </select>
+        <SearchableSelect
+          options={instrumentOptions.map(i => ({ value: i, label: i.charAt(0).toUpperCase() + i.slice(1) }))}
+          value={instrument} onChange={v => applyFilters({ instrument: v })} emptyLabel="All instruments" placeholder="All instruments"
+        />
+        <SearchableSelect
+          options={teacherOptions.map(t => ({ value: t.id, label: `${t.firstName} ${t.lastName}` }))}
+          value={teacherId} onChange={v => applyFilters({ teacherId: v })} emptyLabel="All teachers" placeholder="All teachers"
+        />
+        <SearchableSelect
+          options={studentOptions.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+          value={studentId} onChange={v => applyFilters({ studentId: v })} emptyLabel="All students" placeholder="All students"
+        />
       </div>
 
       <div className="space-y-2">

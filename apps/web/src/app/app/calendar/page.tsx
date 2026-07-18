@@ -863,6 +863,9 @@ export default function CalendarPage() {
 
   const weekStart = getWeekStart(anchorDate);
   const role = getRoleFromToken(tok());
+  // "Assign students" / "Add student" are front-desk tasks — only management
+  // roles get them. Teachers, and any parent/student who lands here, do not.
+  const isManagement = ['system_admin', 'admin', 'manager', 'receptionist'].includes(role);
 
   // Cached reads — the week's lessons re-key on weekStart (paging weeks you've
   // already seen is instant), and staff/availability are cached too. load()
@@ -1017,7 +1020,7 @@ export default function CalendarPage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {role !== 'teacher' && (
+          {isManagement && (
             <>
               <button onClick={() => setShowAssign(true)} className="ui-btn-ghost">
                 <Users size={15} /> Assign students

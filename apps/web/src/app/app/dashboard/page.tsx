@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useApi } from '@/lib/swr';
+import { useMe } from '@/lib/use-me';
 import { fmtTime } from '@/lib/datetime';
 import { Badge } from '@/components/badge';
 import { PaidDot } from '@/components/paid-dot';
@@ -102,6 +103,7 @@ function AdminDashboard() {
   const { data: myAvailability = [] } = useApi<AvailWindow[]>('/staff/me/availability');
   const { data: kpis } = useApi<KpiData>('/reports/dashboard');
   const { data: lessons = [] } = useApi<Lesson[]>(`/lessons?weekStart=${weekStart}`);
+  const { firstName } = useMe();
 
   const today = new Date().toISOString().split('T')[0];
   const todayLessons = lessons
@@ -117,7 +119,16 @@ function AdminDashboard() {
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold tracking-tight text-[var(--txt)]">Dashboard</h1>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--txt)]">
+            {(() => {
+              const h = new Date().getHours();
+              const part = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+              return firstName ? `${part}, ${firstName}` : part;
+            })()}
+          </h1>
+          <p className="text-sm mt-0.5" style={{ color: 'var(--txt3)' }}>Here&apos;s what&apos;s happening at your studio today.</p>
+        </div>
         {kpis?.activeTerm && (
           <div className="text-sm bg-[var(--sage-lt)] border border-[var(--sage-md)] rounded-xl px-3 py-1.5 flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-[var(--sage)] inline-block" />

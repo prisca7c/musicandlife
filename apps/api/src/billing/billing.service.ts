@@ -41,10 +41,11 @@ export class BillingService {
         lineItems: {
           with: {
             lesson: {
-              columns: { startsAt: true },
+              columns: { startsAt: true, duration: true },
               with: {
                 teacher: { columns: { firstName: true, lastName: true } },
-                enrollment: { columns: { instrument: true } },
+                student: { columns: { firstName: true, lastName: true } },
+                enrollment: { columns: { instrument: true, lessonType: true } },
               },
             },
           },
@@ -60,8 +61,12 @@ export class BillingService {
         amount: li.amount,
         lessonId: li.lessonId,
         date: li.lesson?.startsAt ? li.lesson.startsAt.toISOString().split('T')[0]! : null,
+        startsAt: li.lesson?.startsAt ? li.lesson.startsAt.toISOString() : null,
+        duration: li.lesson?.duration ?? null,
         teacher: li.lesson?.teacher ? `${li.lesson.teacher.firstName} ${li.lesson.teacher.lastName}` : null,
+        student: li.lesson?.student ? `${li.lesson.student.firstName} ${li.lesson.student.lastName}` : null,
         instrument: li.lesson?.enrollment?.instrument ?? null,
+        lessonType: li.lesson?.enrollment?.lessonType ?? null,
       }))
       .sort((a, b) => {
         if (a.date && b.date) return a.date.localeCompare(b.date);
@@ -119,10 +124,23 @@ export class BillingService {
 
     const number = await this.nextInvoiceNumber(orgId);
     const today = new Date().toISOString().split('T')[0]!;
-    const due = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]!;
+
+    // Honour the family's configured due-date offset instead of a hard-coded +7.
+    // A monthly statement that still has the legacy default (7) gets ~30 days so
+    // "a monthly invoice is due in about a month", which is what studios expect;
+    // per-lesson invoices keep the shorter window. An explicitly-set offset is
+    // always respected.
+    const offsetDays =
+      dto.mode === 'monthly_statement' && family.dueDateOffsetDays === 7
+        ? 30
+        : family.dueDateOffsetDays;
+    const due = new Date(Date.now() + offsetDays * 86400000).toISOString().split('T')[0]!;
+
+    // itemizeLessons is a control flag, not a column — keep it out of the insert.
+    const { itemizeLessons, ...invoiceData } = dto;
 
     const [inv] = await this.db.db.insert(invoices).values({
-      ...dto,
+      ...invoiceData,
       organizationId: orgId,
       number,
       issuedOn: today,
@@ -130,7 +148,12 @@ export class BillingService {
       status: 'draft',
     }).returning();
 
-    if (dto.mode === 'per_lesson') {
+    // Both monthly statements and per-lesson invoices itemise the period's
+    // lessons (one line per lesson, with date/teacher/instrument derived at read
+    // time). Previously only per_lesson itemised, so monthly statements came out
+    // as an empty £0 shell — e.g. a family's weekly lessons never appeared. The
+    // "custom amount" flow passes itemizeLessons=false to stay manual-only.
+    if (itemizeLessons !== false) {
       await this.generateLessonLineItems(orgId, inv!.id, dto.familyId, dto.periodStart, dto.periodEnd);
     }
 
@@ -158,9 +181,13 @@ export class BillingService {
       ),
       with: {
         teacher: { columns: { firstName: true, lastName: true } },
-        enrollment: { columns: { instrument: true, rate: true, defaultDuration: true } },
+        enrollment: { columns: { instrument: true, rate: true, defaultDuration: true, lessonType: true } },
       },
     });
+    // No completed lessons → nothing to itemise. Returning here also avoids
+    // calling inArray() with an empty list below, which builds invalid SQL and
+    // 500s the whole invoice create (the "clicked invoice, not working" report).
+    if (candidateLessons.length === 0) return;
 
     const alreadyBilled = await this.db.db.query.invoiceLineItems.findMany({
       where: and(
@@ -182,13 +209,20 @@ export class BillingService {
 
     if (eligible.length === 0) return;
 
-    const rows = eligible.map(l => ({
-      organizationId: orgId,
-      invoiceId,
-      lessonId: l.id,
-      description: `${l.duration} min lesson`,
-      amount: proratedAmount(l.enrollment?.rate, l.enrollment?.defaultDuration, l.duration),
-    }));
+    const rows = eligible.map(l => {
+      const instrument = l.enrollment?.instrument
+        ? l.enrollment.instrument.charAt(0).toUpperCase() + l.enrollment.instrument.slice(1)
+        : '';
+      const kind = l.enrollment?.lessonType === 'group' ? 'group class' : 'lesson';
+      const description = [instrument, `${kind} · ${l.duration} min`].filter(Boolean).join(' ');
+      return {
+        organizationId: orgId,
+        invoiceId,
+        lessonId: l.id,
+        description,
+        amount: proratedAmount(l.enrollment?.rate, l.enrollment?.defaultDuration, l.duration),
+      };
+    });
     await this.db.db.insert(invoiceLineItems).values(rows);
 
     const total = rows.reduce((s, r) => s + r.amount, 0);

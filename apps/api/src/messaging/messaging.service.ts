@@ -1,15 +1,81 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, inArray } from 'drizzle-orm';
-import { threads, threadParticipants, messages, memberships } from '@music-life/db';
+import {
+  threads, threadParticipants, messages, memberships,
+  staffMembers, students, guardians,
+} from '@music-life/db';
 import type { BaseRole } from '@music-life/types';
 import { DbService } from '../db/db.service';
 import type { CreateThreadDto } from './dto/create-thread.dto';
 
 const NON_STAFF_ROLES: BaseRole[] = ['guardian', 'student'];
 
+const ROLE_LABEL: Record<string, string> = {
+  system_admin: 'Admin', admin: 'Admin', manager: 'Manager',
+  receptionist: 'Reception', technician: 'Technician', teacher: 'Teacher',
+  guardian: 'Parent', student: 'Student',
+};
+
 @Injectable()
 export class MessagingService {
   constructor(private readonly db: DbService) {}
+
+  // ─── Recipients the caller is allowed to message ─────────────────────────
+  // Powers the compose picker so a thread is never created with no addressee.
+  // Staff can reach everyone in the org; a parent/student may only reach staff
+  // (mirrors the guard in createThread). Names are resolved from the staff /
+  // student / guardian records, falling back to the email prefix.
+  async getRecipients(orgId: string, userId: string, role: BaseRole) {
+    const creatorIsStaff = !NON_STAFF_ROLES.includes(role);
+
+    const mems = await this.db.db.query.memberships.findMany({
+      where: and(eq(memberships.organizationId, orgId), eq(memberships.status, 'active')),
+      columns: { userId: true, baseRole: true },
+      with: { user: { columns: { id: true, email: true } } },
+    });
+
+    const candidates = mems.filter(
+      (m) =>
+        m.userId !== userId &&
+        (creatorIsStaff || !NON_STAFF_ROLES.includes(m.baseRole as BaseRole)),
+    );
+    const ids = candidates.map((m) => m.userId);
+    if (ids.length === 0) return [];
+
+    const [staff, studs, guards] = await Promise.all([
+      this.db.db.query.staffMembers.findMany({
+        where: and(eq(staffMembers.organizationId, orgId), inArray(staffMembers.userId, ids)),
+        columns: { userId: true, firstName: true, lastName: true },
+      }),
+      this.db.db.query.students.findMany({
+        where: and(eq(students.organizationId, orgId), inArray(students.studentUserId, ids)),
+        columns: { studentUserId: true, firstName: true, lastName: true },
+      }),
+      this.db.db.query.guardians.findMany({
+        where: and(eq(guardians.organizationId, orgId), inArray(guardians.userId, ids)),
+        with: { family: { columns: { contactName: true, name: true } } },
+      }),
+    ]);
+
+    const nameByUser = new Map<string, string>();
+    for (const s of staff) if (s.userId) nameByUser.set(s.userId, `${s.firstName} ${s.lastName}`);
+    for (const s of studs) if (s.studentUserId) nameByUser.set(s.studentUserId, `${s.firstName} ${s.lastName}`);
+    for (const g of guards) nameByUser.set(g.userId, g.family?.contactName || g.family?.name || '');
+
+    return candidates
+      .map((m) => {
+        const email = m.user?.email ?? '';
+        const name = nameByUser.get(m.userId) || email.split('@')[0] || 'User';
+        return {
+          userId: m.userId,
+          name,
+          email,
+          role: m.baseRole,
+          roleLabel: ROLE_LABEL[m.baseRole] ?? m.baseRole,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
 
   async getThreads(orgId: string, userId: string) {
     // Return threads the user participates in

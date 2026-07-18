@@ -118,7 +118,10 @@ html, body {
   background: #fff;
   border-radius: 16px;
   border: 1px solid var(--bd);
-  overflow: hidden;
+  /* Scroll wide tables horizontally on narrow screens instead of clipping them.
+     overflow-y stays hidden so the rounded corners still clip the header row. */
+  overflow-x: auto;
+  overflow-y: hidden;
   box-shadow: 0 1px 4px rgba(0,0,0,.04);
 }
 .data-table { width: 100%; font-size: 0.875rem; border-collapse: collapse; }

@@ -24,6 +24,13 @@ export class MessagingController {
     return this.messaging.createThread(user.orgId, user.userId, user.role, dto);
   }
 
+  // Declared before :id so "recipients" isn't captured as a thread id.
+  @Get('recipients')
+  @Roles('guardian')
+  getRecipients(@CurrentUser() user: RequestUser) {
+    return this.messaging.getRecipients(user.orgId, user.userId, user.role);
+  }
+
   @Get(':id')
   @Roles('guardian')
   getThread(@CurrentUser() user: RequestUser, @Param('id') id: string) {
