@@ -121,7 +121,7 @@ export class SchedulingController {
 
   // ─── Reschedule requests ──────────────────────────────────────────────────
   @Post('reschedule-requests')
-  @Roles('guardian')
+  @Roles('student')
   createRequest(@CurrentUser() user: RequestUser, @Body() dto: CreateRescheduleRequestDto) {
     return this.scheduling.createRescheduleRequest(user.orgId, dto, user.userId);
   }
