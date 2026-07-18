@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { eq, and, inArray } from 'drizzle-orm';
 import {
   threads, threadParticipants, messages, memberships,
-  staffMembers, students, guardians,
+  staffMembers, students, guardians, enrollments, teacherAssignments,
 } from '@music-life/db';
 import type { BaseRole } from '@music-life/types';
 import { DbService } from '../db/db.service';
@@ -20,13 +20,59 @@ const ROLE_LABEL: Record<string, string> = {
 export class MessagingService {
   constructor(private readonly db: DbService) {}
 
+  // The set of guardian/student user-ids a teacher is allowed to message: the
+  // families of students they actually teach (via enrollment or assignment) plus
+  // those students' own logins. A teacher shouldn't be able to contact every
+  // family in the school — only their own. Managers/admins/reception are not
+  // limited this way. Returns an empty set for a teacher with no students.
+  private async teacherFamilyUserIds(orgId: string, teacherUserId: string): Promise<Set<string>> {
+    const staff = await this.db.db.query.staffMembers.findFirst({
+      where: and(eq(staffMembers.userId, teacherUserId), eq(staffMembers.organizationId, orgId)),
+      columns: { id: true },
+    });
+    if (!staff) return new Set();
+
+    const [enr, assigns] = await Promise.all([
+      this.db.db.query.enrollments.findMany({
+        where: and(eq(enrollments.organizationId, orgId), eq(enrollments.teacherId, staff.id)),
+        columns: { studentId: true },
+      }),
+      this.db.db.query.teacherAssignments.findMany({
+        where: and(eq(teacherAssignments.organizationId, orgId), eq(teacherAssignments.staffId, staff.id)),
+        columns: { studentId: true },
+      }),
+    ]);
+    const studentIds = [...new Set([...enr.map((e) => e.studentId), ...assigns.map((a) => a.studentId)])];
+    if (studentIds.length === 0) return new Set();
+
+    const studs = await this.db.db.query.students.findMany({
+      where: and(eq(students.organizationId, orgId), inArray(students.id, studentIds)),
+      columns: { familyId: true, studentUserId: true },
+    });
+    const familyIds = [...new Set(studs.map((s) => s.familyId))];
+    const guards = familyIds.length
+      ? await this.db.db.query.guardians.findMany({
+          where: and(eq(guardians.organizationId, orgId), inArray(guardians.familyId, familyIds)),
+          columns: { userId: true },
+        })
+      : [];
+
+    const allowed = new Set<string>();
+    for (const g of guards) if (g.userId) allowed.add(g.userId);
+    for (const s of studs) if (s.studentUserId) allowed.add(s.studentUserId);
+    return allowed;
+  }
+
   // ─── Recipients the caller is allowed to message ─────────────────────────
   // Powers the compose picker so a thread is never created with no addressee.
-  // Staff can reach everyone in the org; a parent/student may only reach staff
+  // Management staff can reach everyone in the org; a TEACHER reaches all staff
+  // but only the families they teach; a parent/student may only reach staff
   // (mirrors the guard in createThread). Names are resolved from the staff /
   // student / guardian records, falling back to the email prefix.
   async getRecipients(orgId: string, userId: string, role: BaseRole) {
     const creatorIsStaff = !NON_STAFF_ROLES.includes(role);
+    const isTeacher = role === 'teacher';
+    const teacherScope = isTeacher ? await this.teacherFamilyUserIds(orgId, userId) : null;
 
     const mems = await this.db.db.query.memberships.findMany({
       where: and(eq(memberships.organizationId, orgId), eq(memberships.status, 'active')),
@@ -34,11 +80,14 @@ export class MessagingService {
       with: { user: { columns: { id: true, email: true } } },
     });
 
-    const candidates = mems.filter(
-      (m) =>
-        m.userId !== userId &&
-        (creatorIsStaff || !NON_STAFF_ROLES.includes(m.baseRole as BaseRole)),
-    );
+    const candidates = mems.filter((m) => {
+      if (m.userId === userId) return false;
+      const recipientIsNonStaff = NON_STAFF_ROLES.includes(m.baseRole as BaseRole);
+      if (!creatorIsStaff) return !recipientIsNonStaff;   // parent/student → staff only
+      if (!recipientIsNonStaff) return true;              // any staff can reach other staff
+      // recipient is a parent/student, creator is staff:
+      return isTeacher ? teacherScope!.has(m.userId) : true; // teachers limited to their families
+    });
     const ids = candidates.map((m) => m.userId);
     if (ids.length === 0) return [];
 
@@ -151,6 +200,17 @@ export class MessagingService {
         for (const id of recipientIds) {
           if (NON_STAFF_ROLES.includes(roleByUser.get(id)!)) {
             throw new ForbiddenException('You can only start conversations with staff members');
+          }
+        }
+      } else if (creatorRole === 'teacher') {
+        // A teacher may message any staff, but only families they teach.
+        const familyRecipients = recipientIds.filter((id) => NON_STAFF_ROLES.includes(roleByUser.get(id)!));
+        if (familyRecipients.length) {
+          const allowed = await this.teacherFamilyUserIds(orgId, userId);
+          for (const id of familyRecipients) {
+            if (!allowed.has(id)) {
+              throw new ForbiddenException('You can only message families of students you teach');
+            }
           }
         }
       }
