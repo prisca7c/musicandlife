@@ -11,11 +11,12 @@ import { EmailPort } from '../email/ports/email.port';
 import { eq, and, gte, lte, ne, inArray } from 'drizzle-orm';
 import {
   lessons, lessonCredits, notes, families, memberships, guardians,
-  students, availability, blockedTime, enrollments, staffMembers,
+  students, availability, enrollments, staffMembers,
   teacherAssignments, attendance,
 } from '@music-life/db';
 import { AttendanceService } from '../attendance/attendance.service';
 import { BillingService } from '../billing/billing.service';
+import { SchedulingService } from '../scheduling/scheduling.service';
 import { FilesService } from '../files/files.service';
 import { invoices } from '@music-life/db';
 import type { RequestUser } from '@music-life/types';
@@ -24,11 +25,6 @@ import type { RequestUser } from '@music-life/types';
 interface NoteAttachment { fileId: string; name: string; mime: string; size?: number }
 import { IsBoolean, IsDateString, IsInt, IsOptional, IsUUID, Min, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
-
-const WEEKDAY_MAP: Record<string, number> = {
-  sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
-  thursday: 4, friday: 5, saturday: 6,
-};
 
 class BookLessonDto {
   @IsUUID() teacherId!: string;
@@ -52,18 +48,34 @@ export class FamilyPortalController {
     private readonly email: EmailPort,
     private readonly attendance: AttendanceService,
     private readonly billing: BillingService,
+    private readonly scheduling: SchedulingService,
     private readonly files: FilesService,
   ) {}
 
-  // ─── Resolve the guardian's family ───────────────────────────────────────
-  private async requireFamily(userId: string, orgId: string) {
+  // ─── Resolve the caller's family ─────────────────────────────────────────
+  // Works for BOTH a guardian (parent) and a student — a logged-in student is
+  // linked to their family via students.userId, so the whole family portal is
+  // reachable by either. Returns the familyId or null.
+  private async resolveFamilyId(userId: string, orgId: string): Promise<string | null> {
     const guardian = await this.db.db.query.guardians.findFirst({
       where: and(eq(guardians.userId, userId), eq(guardians.organizationId, orgId)),
+      columns: { familyId: true },
     });
-    if (!guardian) throw new NotFoundException('No family found for this user');
+    if (guardian) return guardian.familyId;
+
+    const student = await this.db.db.query.students.findFirst({
+      where: and(eq(students.studentUserId, userId), eq(students.organizationId, orgId)),
+      columns: { familyId: true },
+    });
+    return student?.familyId ?? null;
+  }
+
+  private async requireFamily(userId: string, orgId: string) {
+    const familyId = await this.resolveFamilyId(userId, orgId);
+    if (!familyId) throw new NotFoundException('No family found for this user');
 
     const family = await this.db.db.query.families.findFirst({
-      where: eq(families.id, guardian.familyId),
+      where: eq(families.id, familyId),
       with: { students: { columns: { id: true } } },
     });
     if (!family) throw new NotFoundException('Family not found');
@@ -72,7 +84,7 @@ export class FamilyPortalController {
 
   // ─── Lesson history ───────────────────────────────────────────────────────
   @Get('lessons')
-  @Roles('guardian')
+  @Roles('student')
   async getLessonHistory(
     @CurrentUser() user: RequestUser,
     @Query('from') from?: string,
@@ -102,15 +114,13 @@ export class FamilyPortalController {
 
   // ─── Dashboard ────────────────────────────────────────────────────────────
   @Get('dashboard')
-  @Roles('guardian')
+  @Roles('student')
   async dashboard(@CurrentUser() user: RequestUser) {
-    const guardian = await this.db.db.query.guardians.findFirst({
-      where: and(eq(guardians.userId, user.userId), eq(guardians.organizationId, user.orgId)),
-    });
-    if (!guardian) return { nextLesson: null, balance: 0, outstandingInvoice: null, students: [], lastNote: null };
+    const familyId = await this.resolveFamilyId(user.userId, user.orgId);
+    if (!familyId) return { nextLesson: null, balance: 0, outstandingInvoice: null, students: [], lastNote: null };
 
     const family = await this.db.db.query.families.findFirst({
-      where: eq(families.id, guardian.familyId),
+      where: eq(families.id, familyId),
       with: {
         students: {
           columns: { id: true, firstName: true, lastName: true, status: true },
@@ -231,12 +241,35 @@ export class FamilyPortalController {
     return { status: 'paid', paymentId: payment.id };
   }
 
+  // ─── This family's invoices (read-only) ─────────────────────────────────────
+  // Parents RECEIVE invoices — they never create them — so this list is view-only
+  // and scoped to the caller's own family (staff use the admin /invoices route).
+  @Get('invoices')
+  @Roles('guardian')
+  async getFamilyInvoices(@CurrentUser() user: RequestUser) {
+    const family = await this.requireFamily(user.userId, user.orgId);
+    const rows = await this.db.db.query.invoices.findMany({
+      // Parents see issued invoices (sent/paid/void) — not staff-only drafts.
+      where: and(
+        eq(invoices.organizationId, user.orgId),
+        eq(invoices.familyId, family.id),
+        ne(invoices.status, 'draft'),
+      ),
+      columns: {
+        id: true, number: true, status: true, total: true,
+        issuedOn: true, dueDate: true, mode: true,
+      },
+      orderBy: (i, { desc }) => [desc(i.createdAt)],
+    });
+    return rows.map(r => ({ ...r, family: null }));
+  }
+
   // ─── Lesson notes & media (teacher → family) ────────────────────────────────
   // Family-visible notes the student's teacher has written, newest first, each
   // with any media the teacher attached. Internal ('internal') notes are never
   // returned here.
   @Get('notes')
-  @Roles('guardian')
+  @Roles('student')
   async getNotes(@CurrentUser() user: RequestUser) {
     const family = await this.requireFamily(user.userId, user.orgId);
     const studentIds = family.students.map(s => s.id);
@@ -273,7 +306,7 @@ export class FamilyPortalController {
   // students, and the fileId must actually be listed on that note. Only then do
   // we sign — never trusting the fileId alone (that would be an IDOR).
   @Get('notes/:noteId/attachments/:fileId/sign-download')
-  @Roles('guardian')
+  @Roles('student')
   async signNoteAttachment(
     @CurrentUser() user: RequestUser,
     @Param('noteId') noteId: string,
@@ -298,7 +331,7 @@ export class FamilyPortalController {
   // ─── Available booking slots ───────────────────────────────────────────────
   // Returns open time slots for a teacher in a given week, filtered by duration.
   @Get('availability')
-  @Roles('guardian')
+  @Roles('student')
   async getAvailability(
     @CurrentUser() user: RequestUser,
     @Query('teacherId') teacherId: string,
@@ -308,76 +341,16 @@ export class FamilyPortalController {
     const duration = parseInt(durationStr, 10);
     if (!teacherId || !weekStart) throw new BadRequestException('teacherId and weekStart are required');
 
-    const start = new Date(weekStart);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start.getTime() + 7 * 86400000);
-    const now = new Date();
-
-    const [windows, existingLessons, blocked] = await Promise.all([
-      this.db.db.query.availability.findMany({
-        where: and(eq(availability.staffId, teacherId), eq(availability.organizationId, user.orgId)),
-      }),
-      this.db.db.query.lessons.findMany({
-        where: and(
-          eq(lessons.organizationId, user.orgId),
-          eq(lessons.teacherId, teacherId),
-          eq(lessons.status, 'scheduled'),
-          gte(lessons.startsAt, start),
-          lte(lessons.startsAt, end),
-        ),
-      }),
-      this.db.db.query.blockedTime.findMany({
-        where: and(
-          eq(blockedTime.staffId, teacherId),
-          gte(blockedTime.startsAt, start),
-          lte(blockedTime.endsAt, end),
-        ),
-      }),
-    ]);
-
-    const slots: { startsAt: string; endsAt: string }[] = [];
-
-    for (const win of windows) {
-      const dayIdx = WEEKDAY_MAP[win.weekday];
-      if (dayIdx === undefined) continue;
-
-      // Find the actual calendar date for this weekday in the requested week
-      const weekStartDay = start.getDay(); // 0 = Sunday
-      const dayOffset = (dayIdx - weekStartDay + 7) % 7;
-      const slotDate = new Date(start.getTime() + dayOffset * 86400000);
-
-      const [sh, sm] = win.startTime.split(':').map(Number);
-      const [eh, em] = win.endTime.split(':').map(Number);
-
-      let cursor = new Date(slotDate);
-      cursor.setHours(sh!, sm!, 0, 0);
-      const windowEnd = new Date(slotDate);
-      windowEnd.setHours(eh!, em!, 0, 0);
-
-      while (cursor.getTime() + duration * 60000 <= windowEnd.getTime()) {
-        const slotEnd = new Date(cursor.getTime() + duration * 60000);
-
-        const inPast = cursor <= now;
-        const lessonConflict = existingLessons.some(l => {
-          const lEnd = new Date(l.startsAt.getTime() + l.duration * 60000);
-          return l.startsAt < slotEnd && lEnd > cursor;
-        });
-        const blockedConflict = blocked.some(b => b.startsAt < slotEnd && b.endsAt > cursor);
-
-        if (!inPast && !lessonConflict && !blockedConflict) {
-          slots.push({ startsAt: cursor.toISOString(), endsAt: slotEnd.toISOString() });
-        }
-
-        cursor = new Date(cursor.getTime() + duration * 60000);
-      }
-    }
-
-    return slots.sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+    // Delegate to the shared scheduling engine so parent booking uses the exact
+    // same slot logic as the staff calendar: 15-minute increments, interpreted in
+    // the STUDIO timezone (not the server's), and filtered against the teacher's
+    // lessons + blocked time. futureOnly drops slots already in the past.
+    return this.scheduling.getAvailableSlotsWeek(user.orgId, teacherId, weekStart, duration, { futureOnly: true });
   }
 
   // ─── Book a lesson ────────────────────────────────────────────────────────
   @Post('lessons')
-  @Roles('guardian')
+  @Roles('student')
   async bookLesson(@CurrentUser() user: RequestUser, @Body() dto: BookLessonDto) {
     const family = await this.requireFamily(user.userId, user.orgId);
 
@@ -447,7 +420,7 @@ export class FamilyPortalController {
   // Choice: absent_makeup (≥24h, get a credit) or absent_no_pay (≥24h, no credit no charge).
   // <24h: auto absent_no_makeup (teacher paid, no credit).
   @Post('lessons/:id/cancel')
-  @Roles('guardian')
+  @Roles('student')
   async cancelLesson(
     @CurrentUser() user: RequestUser,
     @Param('id') lessonId: string,
@@ -475,7 +448,7 @@ export class FamilyPortalController {
 
   // ─── List teachers with availability (for booking picker) ─────────────────
   @Get('teachers')
-  @Roles('guardian')
+  @Roles('student')
   async getTeachers(@CurrentUser() user: RequestUser) {
     const teachers = await this.db.db.query.staffMembers.findMany({
       where: and(eq(staffMembers.organizationId, user.orgId), eq(staffMembers.status, 'active')),
@@ -489,14 +462,12 @@ export class FamilyPortalController {
   // returns windows for teachers the family's students are actually linked to
   // (via enrollment or assignment), so families don't see the whole roster.
   @Get('teacher-availability')
-  @Roles('guardian')
+  @Roles('student')
   async teacherAvailability(@CurrentUser() user: RequestUser) {
-    const guardian = await this.db.db.query.guardians.findFirst({
-      where: and(eq(guardians.userId, user.userId), eq(guardians.organizationId, user.orgId)),
-    });
-    if (!guardian) return [];
+    const familyId = await this.resolveFamilyId(user.userId, user.orgId);
+    if (!familyId) return [];
     const family = await this.db.db.query.families.findFirst({
-      where: eq(families.id, guardian.familyId),
+      where: eq(families.id, familyId),
       with: { students: { columns: { id: true } } },
     });
     const studentIds = family?.students.map(s => s.id) ?? [];

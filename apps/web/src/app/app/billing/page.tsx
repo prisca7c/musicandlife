@@ -310,8 +310,23 @@ export default function BillingPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
 
-  // Cached read — instant on revisit, revalidates in the background.
-  const { data: invoices = [], mutate } = useApi<Invoice[]>('/invoices');
+  // A parent signed in is receive-only: they see their own family's invoices from
+  // the family-portal route (the admin /invoices list is staff-gated) and never
+  // get the create/record controls.
+  const [role, setRole] = useState('');
+  useEffect(() => {
+    try {
+      const t = document.cookie.match(/access_token=([^;]+)/)?.[1];
+      setRole(t ? (JSON.parse(atob(t.split('.')[1]!)).role ?? '') : '');
+    } catch { /* not signed in */ }
+  }, []);
+  const isGuardian = role === 'guardian';
+
+  // Cached read — instant on revisit, revalidates in the background. Key stays
+  // null until we know the role so we never fire the staff route for a parent.
+  const { data: invoices = [], mutate } = useApi<Invoice[]>(
+    role ? (isGuardian ? '/family/invoices' : '/invoices') : null,
+  );
   const load = () => mutate();
 
   const outstanding = invoices.filter(i => i.status === 'sent').reduce((s, i) => s + i.total, 0);
@@ -329,15 +344,17 @@ export default function BillingPage() {
         }
         subtitle={outstanding > 0 ? `£${(outstanding / 100).toFixed(2)} outstanding` : undefined}
         action={
-          <div className="flex gap-2">
-            <button onClick={() => setShowPayment(true)} className="ui-btn-ghost">
-              <PoundSterling size={15} /> Record payment
-            </button>
-            <button onClick={() => setShowCreate(true)} className="ui-btn-primary">
-              <Plus size={15} /> Create invoice
-            </button>
-            <InfoTooltip text="You usually don't need to create invoices by hand. Switch on auto-invoicing for a family (Families → Invoicing settings) and the studio drafts and emails their invoice on schedule, itemised from their lessons. 'Create invoice' is just for one-off or manual bills." />
-          </div>
+          isGuardian ? undefined : (
+            <div className="flex gap-2">
+              <button onClick={() => setShowPayment(true)} className="ui-btn-ghost">
+                <PoundSterling size={15} /> Record payment
+              </button>
+              <button onClick={() => setShowCreate(true)} className="ui-btn-primary">
+                <Plus size={15} /> Create invoice
+              </button>
+              <InfoTooltip text="You usually don't need to create invoices by hand. Switch on auto-invoicing for a family (Families → Invoicing settings) and the studio drafts and emails their invoice on schedule, itemised from their lessons. 'Create invoice' is just for one-off or manual bills." />
+            </div>
+          )
         }
       />
 
@@ -346,7 +363,7 @@ export default function BillingPage() {
           <thead>
             <tr>
               <th>Invoice #</th>
-              <th>Family</th>
+              {!isGuardian && <th>Family</th>}
               <th>Mode</th>
               <th>Issued</th>
               <th>Due</th>
@@ -356,24 +373,26 @@ export default function BillingPage() {
           </thead>
           <tbody>
             {invoices.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={isGuardian ? 6 : 7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No invoices yet.
               </td></tr>
             )}
             {invoices.map(i => (
               <tr key={i.id}>
                 <td>
-                  <Link href={`/app/billing/${i.id}`}
+                  <Link href={isGuardian ? `/pay/${i.id}` : `/app/billing/${i.id}`}
                     className="font-semibold hover:underline"
                     style={{ color: 'var(--sage-dk)' }}>
                     {i.number}
                   </Link>
                 </td>
-                <td>
-                  {i.family
-                    ? <Link href={`/app/families/${i.family.id}`} className="hover:underline" style={{ color: 'var(--txt2)' }}>{i.family.name}</Link>
-                    : '—'}
-                </td>
+                {!isGuardian && (
+                  <td>
+                    {i.family
+                      ? <Link href={`/app/families/${i.family.id}`} className="hover:underline" style={{ color: 'var(--txt2)' }}>{i.family.name}</Link>
+                      : '—'}
+                  </td>
+                )}
                 <td className="text-xs capitalize" style={{ color: 'var(--txt3)' }}>{i.mode.replace(/_/g, ' ')}</td>
                 <td style={{ color: 'var(--txt3)' }}>{i.issuedOn}</td>
                 <td style={{ color: 'var(--txt3)' }}>{i.dueDate}</td>
