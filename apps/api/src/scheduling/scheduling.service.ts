@@ -548,6 +548,37 @@ export class SchedulingService {
     return { date, weekday, noWindows, slots };
   }
 
+  /**
+   * Bookable slots for a teacher across the 7 studio-local days starting at
+   * `weekStart` (a date string), returned as concrete zoned instants. Reuses
+   * getAvailableSlots per day so parent booking and the staff calendar share one
+   * timezone-correct, 15-minute, conflict-aware engine. `futureOnly` drops slots
+   * already in the past (for the parent picker).
+   */
+  async getAvailableSlotsWeek(
+    orgId: string, teacherId: string, weekStart: string, duration = 60,
+    opts?: { futureOnly?: boolean },
+  ): Promise<{ startsAt: string; endsAt: string }[]> {
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const now = new Date();
+    // Anchor at UTC midnight so stepping by whole days keeps the date label stable.
+    const base = new Date(`${weekStart.slice(0, 10)}T00:00:00Z`);
+    const out: { startsAt: string; endsAt: string }[] = [];
+    for (let d = 0; d < 7; d++) {
+      const dateStr = new Date(base.getTime() + d * 86400000).toISOString().slice(0, 10);
+      const { slots } = await this.getAvailableSlots(orgId, teacherId, dateStr, duration);
+      for (const hhmm of slots) {
+        const startsAt = parseZonedDateTime(`${dateStr}T${hhmm}:00`, tz);
+        if (opts?.futureOnly && startsAt <= now) continue;
+        out.push({
+          startsAt: startsAt.toISOString(),
+          endsAt: new Date(startsAt.getTime() + duration * 60000).toISOString(),
+        });
+      }
+    }
+    return out.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  }
+
   // ─── Lesson requests (front desk proposes ranked times, teacher confirms) ────
   /**
    * The front desk (receptionist+) proposes up to three ranked start times for a
