@@ -5,6 +5,7 @@ import { UpdateLessonDto } from './dto/update-lesson.dto';
 import { CancelLessonDto } from './dto/cancel-lesson.dto';
 import { GenerateRecurringDto } from './dto/generate-recurring.dto';
 import { CreateRescheduleRequestDto, DecideRescheduleDto } from './dto/reschedule-request.dto';
+import { CreateLessonRequestDto, DecideLessonRequestDto } from './dto/lesson-request.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -78,6 +79,44 @@ export class SchedulingController {
     @Body() body: { startsAt: string; roomId?: string },
   ) {
     return this.scheduling.directReschedule(user.orgId, id, body.startsAt, body.roomId, { role: user.role, userId: user.userId });
+  }
+
+  // ─── Availability-driven booking ──────────────────────────────────────────
+  // Bookable 15-min slots for a teacher on a date (inside their hours, conflict-free).
+  @Get('scheduling/available-slots')
+  @Roles('teacher')
+  availableSlots(
+    @CurrentUser() user: RequestUser,
+    @Query('teacherId') teacherId: string,
+    @Query('date') date: string,
+    @Query('duration') duration?: string,
+  ) {
+    return this.scheduling.getAvailableSlots(user.orgId, teacherId, date, duration ? parseInt(duration, 10) : 60);
+  }
+
+  // ─── Lesson requests (front desk proposes ranked times, teacher confirms) ───
+  @Post('lesson-requests')
+  @Roles('receptionist')
+  createLessonRequest(@CurrentUser() user: RequestUser, @Body() dto: CreateLessonRequestDto) {
+    return this.scheduling.createLessonRequest(user.orgId, dto, user.userId);
+  }
+
+  @Get('lesson-requests')
+  @Roles('teacher')
+  getLessonRequests(@CurrentUser() user: RequestUser, @Query('status') status?: string) {
+    return this.scheduling.getLessonRequests(user.orgId, { role: user.role, userId: user.userId }, status);
+  }
+
+  @Post('lesson-requests/:id/confirm')
+  @Roles('teacher')
+  confirmLessonRequest(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: DecideLessonRequestDto) {
+    return this.scheduling.decideLessonRequest(user.orgId, id, 'confirmed', { role: user.role, userId: user.userId }, dto.chosenStartsAt, dto.reason);
+  }
+
+  @Post('lesson-requests/:id/decline')
+  @Roles('teacher')
+  declineLessonRequest(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: DecideLessonRequestDto) {
+    return this.scheduling.decideLessonRequest(user.orgId, id, 'declined', { role: user.role, userId: user.userId }, undefined, dto.reason);
   }
 
   // ─── Reschedule requests ──────────────────────────────────────────────────
