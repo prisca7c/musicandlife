@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and, gte, lte, ne, isNull, sql } from 'drizzle-orm';
-import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, rooms, organizations, enrollments } from '@music-life/db';
+import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, rooms, organizations, enrollments } from '@music-life/db';
 import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateLessonDto } from './dto/create-lesson.dto';
@@ -102,6 +102,23 @@ export class SchedulingService {
       columns: { id: true },
     });
     return staff?.id ?? null;
+  }
+
+  // A family user is either a guardian or a student with their own login; both
+  // resolve to a familyId (students link via studentUserId). Mirrors the
+  // family-portal resolver — used to scope family-initiated actions to their own
+  // family's lessons.
+  private async resolveFamilyId(orgId: string, userId: string): Promise<string | null> {
+    const guardian = await this.db.db.query.guardians.findFirst({
+      where: and(eq(guardians.userId, userId), eq(guardians.organizationId, orgId)),
+      columns: { familyId: true },
+    });
+    if (guardian) return guardian.familyId;
+    const student = await this.db.db.query.students.findFirst({
+      where: and(eq(students.studentUserId, userId), eq(students.organizationId, orgId)),
+      columns: { familyId: true },
+    });
+    return student?.familyId ?? null;
   }
 
   // ─── Lessons ──────────────────────────────────────────────────────────────
@@ -729,8 +746,25 @@ export class SchedulingService {
   }
 
   // ─── Reschedule requests ──────────────────────────────────────────────────
-  async createRescheduleRequest(orgId: string, dto: CreateRescheduleRequestDto, requestedBy: string) {
-    const lesson = await this.getLesson(orgId, dto.lessonId);
+  async createRescheduleRequest(orgId: string, dto: CreateRescheduleRequestDto, actor: Actor) {
+    // Pass the actor so teachers are scoped to their own lessons inside getLesson.
+    const lesson = await this.getLesson(orgId, dto.lessonId, actor);
+
+    // Family callers (guardian/student) may only reschedule lessons belonging to
+    // their OWN family — otherwise anyone could submit reschedule requests against
+    // another family's lessons (the request is only scoped by org). 404, not 403,
+    // so we don't confirm the lesson exists. Staff (receptionist+) are unrestricted.
+    if (actor.role === 'guardian' || actor.role === 'student') {
+      const familyId = await this.resolveFamilyId(orgId, actor.userId);
+      const student = await this.db.db.query.students.findFirst({
+        where: and(eq(students.id, lesson.studentId), eq(students.organizationId, orgId)),
+        columns: { familyId: true },
+      });
+      if (!familyId || !student || student.familyId !== familyId) {
+        throw new NotFoundException('Lesson not found');
+      }
+    }
+
     const hoursUntil = (new Date(lesson.startsAt).getTime() - Date.now()) / 3600000;
     if (hoursUntil < 24) throw new BadRequestException('Reschedule requests must be made at least 24 hours before the lesson');
 
@@ -738,7 +772,7 @@ export class SchedulingService {
     const [req] = await this.db.db.insert(rescheduleRequests).values({
       organizationId: orgId,
       lessonId: dto.lessonId,
-      requestedBy,
+      requestedBy: actor.userId,
       proposedStartsAt: parseZonedDateTime(dto.proposedStartsAt, tz),
       proposedStartsAt2: dto.proposedStartsAt2 ? parseZonedDateTime(dto.proposedStartsAt2, tz) : undefined,
       proposedStartsAt3: dto.proposedStartsAt3 ? parseZonedDateTime(dto.proposedStartsAt3, tz) : undefined,
