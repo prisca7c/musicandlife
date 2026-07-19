@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards, ForbiddenException } from '@nestjs/common';
+import { CreateNoteDto, UpdateNoteDto } from './dto/note.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -89,7 +90,7 @@ export class NotesController {
   @Roles('teacher')
   async create(
     @CurrentUser() user: RequestUser,
-    @Body() body: { studentId: string; lessonId?: string; body: string; visibility?: 'internal' | 'family'; attachments?: NoteAttachment[] },
+    @Body() body: CreateNoteDto,
   ) {
     if (user.role === 'teacher') {
       const staffId = await this.resolveStaffId(user.orgId, user.userId);
@@ -114,7 +115,7 @@ export class NotesController {
   async update(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
-    @Body() body: { body?: string; visibility?: 'internal' | 'family'; attachments?: NoteAttachment[] },
+    @Body() body: UpdateNoteDto,
   ) {
     if (user.role === 'teacher') {
       const existing = await this.db.db.query.notes.findFirst({
