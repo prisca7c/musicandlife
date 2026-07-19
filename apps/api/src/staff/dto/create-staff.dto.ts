@@ -1,33 +1,41 @@
-import { IsString, IsOptional, IsEmail, IsArray, IsInt, Min, IsIn } from 'class-validator';
+import { IsString, IsOptional, IsEmail, IsArray, IsInt, Min, Max, MaxLength, IsIn } from 'class-validator';
 
 export class CreateStaffDto {
   @IsString()
+  @MaxLength(100)
   firstName!: string;
 
   @IsString()
+  @MaxLength(100)
   lastName!: string;
 
   @IsOptional()
   @IsEmail()
+  @MaxLength(255)
   email?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(150)
   title?: string;
 
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
+  @MaxLength(80, { each: true })
   instruments?: string[];
 
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(600) // minutes
   defaultDuration?: number;
 
+  // Pence/hour. Upper bound keeps an overflow value from 500'ing the int column.
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(1_000_000) // £10,000/hr
   hourlyRate?: number;
 
   @IsOptional()
