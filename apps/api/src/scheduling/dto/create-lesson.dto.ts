@@ -1,4 +1,4 @@
-import { IsUUID, IsDateString, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsUUID, IsDateString, IsInt, IsOptional, IsString, Min, Max } from 'class-validator';
 
 export class CreateLessonDto {
   @IsUUID()
@@ -10,6 +10,7 @@ export class CreateLessonDto {
   @IsOptional()
   @IsInt()
   @Min(15)
+  @Max(240) // 4h cap — matches the lesson-request DTO and blocks absurd/overflow values
   duration?: number;
 
   @IsOptional()
