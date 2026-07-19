@@ -376,7 +376,18 @@ export class BillingService {
           .where(eq(families.id, dto.familyId));
 
         if (dto.invoiceId) {
-          const inv = await tx.query.invoices.findFirst({ where: eq(invoices.id, dto.invoiceId) });
+          // Scope the invoice to THIS org and THIS payment's family. Without the
+          // family/org filter a payment recorded for one family could flip an
+          // unrelated invoice (another family's, or another tenant's) to 'paid'
+          // whenever the amount covered its total — the money lands on the payer
+          // while someone else's invoice is marked settled.
+          const inv = await tx.query.invoices.findFirst({
+            where: and(
+              eq(invoices.id, dto.invoiceId),
+              eq(invoices.organizationId, orgId),
+              eq(invoices.familyId, dto.familyId),
+            ),
+          });
           if (inv && dto.amount >= inv.total && inv.status !== 'void') {
             await tx.update(invoices)
               .set({ status: 'paid', updatedAt: new Date() })
