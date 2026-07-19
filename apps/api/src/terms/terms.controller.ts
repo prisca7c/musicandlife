@@ -5,6 +5,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { DbService } from '../db/db.service';
 import { CreateTermDto } from './dto/create-term.dto';
+import { UpdateTermStatusDto } from './dto/update-term-status.dto';
 import { eq, and } from 'drizzle-orm';
 import { terms } from '@music-life/db';
 import type { RequestUser } from '@music-life/types';
@@ -37,7 +38,7 @@ export class TermsController {
   async updateStatus(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
-    @Body() body: { status: 'planned' | 'active' | 'closed' },
+    @Body() body: UpdateTermStatusDto,
   ) {
     const [updated] = await this.db.db.update(terms)
       .set({ status: body.status, updatedAt: new Date() })

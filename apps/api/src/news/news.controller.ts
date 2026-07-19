@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, NotFoundException } from '@nestjs/common';
+import { CreateNewsDto, UpdateNewsDto } from './dto/news.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -25,7 +26,7 @@ export class NewsController {
 
   @Post()
   @Roles('admin')
-  async create(@CurrentUser() user: RequestUser, @Body() body: { title: string; body: string; publishedAt?: string }) {
+  async create(@CurrentUser() user: RequestUser, @Body() body: CreateNewsDto) {
     const [post] = await this.db.db.insert(newsPosts).values({
       organizationId: user.orgId,
       title: body.title,
@@ -38,7 +39,7 @@ export class NewsController {
 
   @Patch(':id')
   @Roles('admin')
-  async update(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() body: { title?: string; body?: string; publishedAt?: string }) {
+  async update(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() body: UpdateNewsDto) {
     const [updated] = await this.db.db.update(newsPosts)
       .set({ ...body, publishedAt: body.publishedAt ? new Date(body.publishedAt) : undefined })
       .where(and(eq(newsPosts.id, id), eq(newsPosts.organizationId, user.orgId)))

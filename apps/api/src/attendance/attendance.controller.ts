@@ -1,6 +1,7 @@
 import { Controller, Post, Get, Body, Param, UseGuards } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
+import { MarkPresentBulkDto } from './dto/mark-present-bulk.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -21,7 +22,7 @@ export class AttendanceController {
   // Mark many lessons present at once (attendance page "Confirm all as present").
   @Post('attendance/mark-present')
   @Roles('teacher')
-  markPresentBulk(@CurrentUser() user: RequestUser, @Body() body: { lessonIds?: string[] }) {
+  markPresentBulk(@CurrentUser() user: RequestUser, @Body() body: MarkPresentBulkDto) {
     return this.attendance.markManyPresent(user.orgId, body.lessonIds ?? [], user.userId, { role: user.role, userId: user.userId });
   }
 

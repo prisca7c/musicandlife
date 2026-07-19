@@ -6,6 +6,7 @@ import { CancelLessonDto } from './dto/cancel-lesson.dto';
 import { GenerateRecurringDto } from './dto/generate-recurring.dto';
 import { CreateRescheduleRequestDto, DecideRescheduleDto } from './dto/reschedule-request.dto';
 import { CreateLessonRequestDto, DecideLessonRequestDto } from './dto/lesson-request.dto';
+import { RescheduleLessonDto } from './dto/reschedule-lesson.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -76,7 +77,7 @@ export class SchedulingController {
   reschedule(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
-    @Body() body: { startsAt: string; roomId?: string },
+    @Body() body: RescheduleLessonDto,
   ) {
     return this.scheduling.directReschedule(user.orgId, id, body.startsAt, body.roomId, { role: user.role, userId: user.userId });
   }

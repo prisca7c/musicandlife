@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
 import { MessagingService } from './messaging.service';
 import { CreateThreadDto } from './dto/create-thread.dto';
+import { SendMessageDto } from './dto/send-message.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -42,7 +43,7 @@ export class MessagingController {
   sendMessage(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
-    @Body() body: { body: string },
+    @Body() body: SendMessageDto,
   ) {
     return this.messaging.sendMessage(user.orgId, id, user.userId, body.body);
   }
