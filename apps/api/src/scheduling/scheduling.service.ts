@@ -433,6 +433,11 @@ export class SchedulingService {
 
   private static readonly WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const;
 
+  // Longest a single lesson can run (enrollment/staff defaultDuration caps). Used
+  // to size the conflict-check lookback window so a long earlier lesson is never
+  // pruned out of the overlap candidate set.
+  private static readonly MAX_LESSON_MINUTES = 600;
+
   /** Wall-clock weekday + minutes-since-midnight for an absolute instant, in the studio's timezone. */
   private localParts(date: Date, timeZone: string): { weekday: string; minutes: number } {
     const parts = new Intl.DateTimeFormat('en-GB', {
@@ -902,7 +907,13 @@ export class SchedulingService {
         eq(lessons.organizationId, orgId),
         eq(lessons.status, 'scheduled'),
         lte(lessons.startsAt, end),
-        gte(lessons.startsAt, new Date(start.getTime() - 180 * 60000)),
+        // Lower bound only prunes the candidate set; true overlap is decided
+        // in-memory below. It MUST reach back at least as far as the longest
+        // bookable lesson, or a long lesson that started earlier is dropped from
+        // the set and its overlap is missed (double-booking). Lessons can run up
+        // to MAX_LESSON_MINUTES (enrollment/staff durations, well past the 240
+        // front-desk cap), so look back that far.
+        gte(lessons.startsAt, new Date(start.getTime() - SchedulingService.MAX_LESSON_MINUTES * 60000)),
       ),
     });
 
