@@ -123,7 +123,7 @@ export class SchedulingController {
   @Post('reschedule-requests')
   @Roles('student')
   createRequest(@CurrentUser() user: RequestUser, @Body() dto: CreateRescheduleRequestDto) {
-    return this.scheduling.createRescheduleRequest(user.orgId, dto, user.userId);
+    return this.scheduling.createRescheduleRequest(user.orgId, dto, { role: user.role, userId: user.userId });
   }
 
   @Get('reschedule-requests')

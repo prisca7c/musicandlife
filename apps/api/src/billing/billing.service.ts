@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { eq, and, inArray } from 'drizzle-orm';
 import {
   invoices, invoiceLineItems, ledgerEntries, payments,
@@ -324,6 +324,28 @@ export class BillingService {
           .where(and(eq(families.id, dto.familyId), eq(families.organizationId, orgId)))
           .for('update');
         if (!family) throw new NotFoundException('Family not found');
+
+        // Guard against duplicate payments on an already-settled invoice. Because
+        // the family row is locked above, concurrent full payments serialise here:
+        // the first commits + marks the invoice paid, and every later one re-reads
+        // it as 'paid' and returns the winner's payment instead of inserting again.
+        // This closes the double-charge race for callers that don't send an
+        // idempotency key, and turns concurrent self-pay double-taps into a clean
+        // idempotent response rather than a unique-constraint 500. Partial payments
+        // (invoice still 'sent') are unaffected and still accumulate normally.
+        if (dto.invoiceId) {
+          const inv = await tx.query.invoices.findFirst({
+            where: and(eq(invoices.id, dto.invoiceId), eq(invoices.organizationId, orgId)),
+          });
+          if (inv && inv.status === 'paid') {
+            const prior = await tx.query.payments.findFirst({
+              where: and(eq(payments.invoiceId, dto.invoiceId), eq(payments.organizationId, orgId)),
+              orderBy: (p, { desc }) => [desc(p.createdAt)],
+            });
+            if (prior) return prior;
+            throw new ConflictException('This invoice has already been paid.');
+          }
+        }
 
         const [created] = await tx.insert(payments).values({
           ...dto,
