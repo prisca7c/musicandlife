@@ -4,10 +4,36 @@ import { payrollRuns, payrollItems, expenses, rateChangeRequests, lessons, atten
 import { DbService } from '../db/db.service';
 import type { CreatePayrollRunDto } from './dto/create-payroll-run.dto';
 import type { CreateExpenseDto } from './dto/create-expense.dto';
+import type { CreateRateChangeDto } from './dto/create-rate-change.dto';
+import { ROLE_LEVEL, type BaseRole } from '@music-life/types';
+
+export interface Actor { role: BaseRole; userId: string }
 
 @Injectable()
 export class PayrollService {
   constructor(private readonly db: DbService) {}
+
+  // Which staff record a payroll write applies to. Managers+ may file on behalf
+  // of any staff member (an explicit staffId is honoured); a teacher is always
+  // pinned to their own record so they can't attribute expenses / rate-change
+  // requests to a colleague by passing someone else's id.
+  private async resolveTargetStaffId(orgId: string, actor: Actor, requestedStaffId?: string): Promise<string> {
+    const isManagement = ROLE_LEVEL[actor.role] >= ROLE_LEVEL['manager'];
+    if (isManagement && requestedStaffId) {
+      const staff = await this.db.db.query.staffMembers.findFirst({
+        where: and(eq(staffMembers.id, requestedStaffId), eq(staffMembers.organizationId, orgId)),
+        columns: { id: true },
+      });
+      if (!staff) throw new NotFoundException('Staff not found');
+      return staff.id;
+    }
+    const own = await this.db.db.query.staffMembers.findFirst({
+      where: and(eq(staffMembers.userId, actor.userId), eq(staffMembers.organizationId, orgId)),
+      columns: { id: true },
+    });
+    if (!own) throw new NotFoundException('No staff record for this user');
+    return own.id;
+  }
 
   // ─── Payroll runs ─────────────────────────────────────────────────────────
   async getPayrollRuns(orgId: string, staffId?: string) {
@@ -176,8 +202,9 @@ export class PayrollService {
     });
   }
 
-  async createExpense(orgId: string, dto: CreateExpenseDto) {
-    const [expense] = await this.db.db.insert(expenses).values({ ...dto, organizationId: orgId }).returning();
+  async createExpense(orgId: string, dto: CreateExpenseDto, actor: Actor) {
+    const staffId = await this.resolveTargetStaffId(orgId, actor, dto.staffId);
+    const [expense] = await this.db.db.insert(expenses).values({ ...dto, staffId, organizationId: orgId }).returning();
     return expense!;
   }
 
@@ -191,7 +218,8 @@ export class PayrollService {
   }
 
   // ─── Rate change requests ─────────────────────────────────────────────────
-  async createRateChangeRequest(orgId: string, staffId: string, requestedRate: number) {
+  async createRateChangeRequest(orgId: string, dto: CreateRateChangeDto, actor: Actor) {
+    const staffId = await this.resolveTargetStaffId(orgId, actor, dto.staffId);
     const staff = await this.db.db.query.staffMembers.findFirst({
       where: and(eq(staffMembers.id, staffId), eq(staffMembers.organizationId, orgId)),
     });
@@ -201,7 +229,7 @@ export class PayrollService {
       organizationId: orgId,
       staffId,
       currentRate: staff.hourlyRate,
-      requestedRate,
+      requestedRate: dto.requestedRate,
       status: 'pending',
     }).returning();
     return req!;

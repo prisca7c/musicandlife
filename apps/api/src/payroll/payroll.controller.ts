@@ -3,6 +3,7 @@ import { PayrollService } from './payroll.service';
 import { CreatePayrollRunDto } from './dto/create-payroll-run.dto';
 import { BatchPayrollRunDto } from './dto/batch-payroll-run.dto';
 import { CreateExpenseDto } from './dto/create-expense.dto';
+import { CreateRateChangeDto } from './dto/create-rate-change.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -53,7 +54,7 @@ export class PayrollController {
   @Post('expenses')
   @Roles('teacher')
   createExpense(@CurrentUser() u: RequestUser, @Body() dto: CreateExpenseDto) {
-    return this.payroll.createExpense(u.orgId, dto);
+    return this.payroll.createExpense(u.orgId, dto, { role: u.role, userId: u.userId });
   }
 
   @Post('expenses/:id/approve')
@@ -70,8 +71,8 @@ export class PayrollController {
 
   @Post('rate-change-requests')
   @Roles('teacher')
-  createRateRequest(@CurrentUser() u: RequestUser, @Body() body: { staffId: string; requestedRate: number }) {
-    return this.payroll.createRateChangeRequest(u.orgId, body.staffId, body.requestedRate);
+  createRateRequest(@CurrentUser() u: RequestUser, @Body() dto: CreateRateChangeDto) {
+    return this.payroll.createRateChangeRequest(u.orgId, dto, { role: u.role, userId: u.userId });
   }
 
   @Post('rate-change-requests/:id/approve')
