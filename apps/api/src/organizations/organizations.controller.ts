@@ -5,6 +5,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { RequestUser } from '@music-life/types';
+import { UpdateOrgDto } from './dto/update-org.dto';
 
 @Controller('organizations')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -19,7 +20,7 @@ export class OrganizationsController {
 
   @Patch('me')
   @Roles('admin')
-  updateMe(@CurrentUser() user: RequestUser, @Body() body: { name?: string; settings?: Record<string, unknown> }) {
+  updateMe(@CurrentUser() user: RequestUser, @Body() body: UpdateOrgDto) {
     return this.orgs.update(user.orgId, body);
   }
 }

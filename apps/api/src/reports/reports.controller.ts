@@ -9,6 +9,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { toCsv } from '../common/csv';
+import { ParseIsoDatePipe } from '../common/parse-iso-date.pipe';
 import type { RequestUser } from '@music-life/types';
 
 @Controller('reports')
@@ -39,8 +40,8 @@ export class ReportsController {
   @Roles('manager')
   async attendance(
     @CurrentUser() user: RequestUser,
-    @Query('from') from = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
-    @Query('to') to = new Date().toISOString().split('T')[0],
+    @Query('from', ParseIsoDatePipe) from = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
+    @Query('to', ParseIsoDatePipe) to = new Date().toISOString().split('T')[0],
     @Query('format') format?: string,
     @Res({ passthrough: true }) res?: Response,
   ) {
@@ -53,8 +54,8 @@ export class ReportsController {
   @Roles('manager')
   async revenue(
     @CurrentUser() user: RequestUser,
-    @Query('from') from = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
-    @Query('to') to = new Date().toISOString().split('T')[0],
+    @Query('from', ParseIsoDatePipe) from = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
+    @Query('to', ParseIsoDatePipe) to = new Date().toISOString().split('T')[0],
     @Query('format') format?: string,
     @Res({ passthrough: true }) res?: Response,
   ) {
@@ -92,8 +93,8 @@ export class ReportsController {
   studentInvoicePdf(
     @CurrentUser() user: RequestUser,
     @Query('studentId') studentId: string,
-    @Query('from') from: string,
-    @Query('to') to: string,
+    @Query('from', ParseIsoDatePipe) from: string,
+    @Query('to', ParseIsoDatePipe) to: string,
   ) {
     return this.reports.getStudentInvoicePdfData(user.orgId, studentId, from, to);
   }
@@ -103,8 +104,8 @@ export class ReportsController {
   teacherPayrollPdf(
     @CurrentUser() user: RequestUser,
     @Query('staffId') staffId: string,
-    @Query('from') from: string,
-    @Query('to') to: string,
+    @Query('from', ParseIsoDatePipe) from: string,
+    @Query('to', ParseIsoDatePipe) to: string,
   ) {
     return this.reports.getTeacherPayrollPdfData(user.orgId, staffId, from, to);
   }
@@ -114,8 +115,8 @@ export class ReportsController {
   studentAttendancePdf(
     @CurrentUser() user: RequestUser,
     @Query('studentId') studentId: string,
-    @Query('from') from: string,
-    @Query('to') to: string,
+    @Query('from', ParseIsoDatePipe) from: string,
+    @Query('to', ParseIsoDatePipe) to: string,
   ) {
     return this.reports.getStudentAttendancePdfData(user.orgId, studentId, from, to);
   }
