@@ -588,6 +588,27 @@ export class SchedulingService {
    */
   async createLessonRequest(orgId: string, dto: CreateLessonRequestDto, requestedBy: string) {
     const tz = await this.getOrgTimezone(this.db.db, orgId);
+
+    // Validate the referenced student and teacher exist in this org BEFORE
+    // inserting — otherwise a bad id hit the foreign-key constraint and surfaced
+    // as an unhandled 500 instead of a clean 404.
+    const student = await this.db.db.query.students.findFirst({
+      where: and(eq(students.id, dto.studentId), eq(students.organizationId, orgId)),
+    });
+    if (!student) throw new NotFoundException('Student not found');
+    const teacher = await this.db.db.query.staffMembers.findFirst({
+      where: and(eq(staffMembers.id, dto.teacherId), eq(staffMembers.organizationId, orgId)),
+    });
+    if (!teacher) throw new NotFoundException('Teacher not found');
+
+    // A lesson request is a proposal for a FUTURE lesson — reject times in the
+    // past so a stale/mistyped date can't create a request (or, once confirmed,
+    // a lesson) on a day that has already happened.
+    const proposed = parseZonedDateTime(dto.proposedStartsAt, tz);
+    if (proposed.getTime() <= Date.now()) {
+      throw new BadRequestException('The proposed time must be in the future.');
+    }
+
     const [req] = await this.db.db.insert(lessonRequests).values({
       organizationId: orgId,
       studentId: dto.studentId,
@@ -595,7 +616,7 @@ export class SchedulingService {
       enrollmentId: dto.enrollmentId,
       roomId: dto.roomId,
       duration: dto.duration ?? 60,
-      proposedStartsAt: parseZonedDateTime(dto.proposedStartsAt, tz),
+      proposedStartsAt: proposed,
       proposedStartsAt2: dto.proposedStartsAt2 ? parseZonedDateTime(dto.proposedStartsAt2, tz) : undefined,
       proposedStartsAt3: dto.proposedStartsAt3 ? parseZonedDateTime(dto.proposedStartsAt3, tz) : undefined,
       notes: dto.notes,

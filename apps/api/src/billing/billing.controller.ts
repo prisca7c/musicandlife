@@ -2,6 +2,7 @@ import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@ne
 import { BillingService } from './billing.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
+import { AddLineItemDto } from './dto/add-line-item.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -48,7 +49,7 @@ export class BillingController {
   addLineItem(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
-    @Body() body: { description: string; amount: number; lessonId?: string },
+    @Body() body: AddLineItemDto,
   ) {
     return this.billing.addLineItem(user.orgId, id, body.description, body.amount, body.lessonId);
   }

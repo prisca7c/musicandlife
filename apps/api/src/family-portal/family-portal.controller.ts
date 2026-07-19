@@ -226,6 +226,10 @@ export class FamilyPortalController {
     if (!inv || inv.familyId !== family.id) throw new NotFoundException('Invoice not found');
     if (inv.status === 'void') throw new BadRequestException('This invoice has been cancelled.');
     if (inv.status === 'paid') return { status: 'paid', alreadyPaid: true };
+    // Only issued (sent) invoices are payable. Drafts are staff-only, not yet
+    // finalised, and are hidden from the family's list — so they must never be
+    // transitioned to paid from the parent portal.
+    if (inv.status !== 'sent') throw new NotFoundException('Invoice not found');
     if (inv.total <= 0) throw new BadRequestException('This invoice has nothing to pay.');
 
     const payment = await this.billing.recordPayment(user.orgId, {
