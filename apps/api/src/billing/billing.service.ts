@@ -94,7 +94,12 @@ export class BillingService {
       where: eq(invoices.id, id),
       columns: { id: true, number: true, total: true, status: true, dueDate: true, organizationId: true },
     });
-    if (!inv) throw new NotFoundException('Invoice not found');
+    // Only issued invoices are reachable via the public pay link. Drafts are
+    // staff-only and not yet finalised; voids are cancelled — neither should be
+    // resolvable (with the studio's bank details) by anyone holding the id.
+    if (!inv || (inv.status !== 'sent' && inv.status !== 'paid')) {
+      throw new NotFoundException('Invoice not found');
+    }
 
     const org = await this.db.db.query.organizations.findFirst({
       where: eq(organizations.id, inv.organizationId),
