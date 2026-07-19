@@ -26,6 +26,7 @@ import type { JwtPayload, BaseRole } from '@music-life/types';
 import { ROLE_LEVEL } from '@music-life/types';
 import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
+import { brandedEmail } from '../email/branding';
 
 // 30 days — keeps people signed in until they log out. See auth.module.ts for
 // why a long-lived access token (rather than short token + refresh) is used.
@@ -187,7 +188,13 @@ export class AuthService {
       await this.email.send({
         to: user.email,
         subject: 'Reset your Music & Life password',
-        html: `<p>Click <a href="${resetUrl}">here</a> to reset your password. This link expires in 1 hour.</p>`,
+        html: brandedEmail({
+          previewText: 'Reset your Music & Life password',
+          heading: 'Reset your password',
+          bodyHtml: '<p style="margin:0">We received a request to reset the password on your Music &amp; Life account. Click the button below to choose a new one.</p>',
+          cta: { label: 'Reset password', url: resetUrl },
+          footnote: 'This link expires in 1 hour. If you didn’t request this, you can safely ignore this email.',
+        }),
       });
     } catch (err) {
       this.logger.warn(`Password reset email failed for ${user.email}: ${err}`);
@@ -404,7 +411,13 @@ export class AuthService {
     await this.email.send({
       to: emailAddr,
       subject: 'Verify your Music & Life account',
-      html: `<p>Welcome! Click <a href="${verifyUrl}">here</a> to verify your email. This link expires in 24 hours.</p>`,
+      html: brandedEmail({
+        previewText: 'Confirm your email to activate your Music & Life account',
+        heading: 'Confirm your email',
+        bodyHtml: '<p style="margin:0">Welcome to Music &amp; Life! Please confirm this is your email address to activate your account.</p>',
+        cta: { label: 'Verify email', url: verifyUrl },
+        footnote: 'This link expires in 24 hours.',
+      }),
     });
   }
 
