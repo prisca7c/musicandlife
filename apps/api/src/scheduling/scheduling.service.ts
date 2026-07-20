@@ -175,6 +175,25 @@ export class SchedulingService {
   }
 
   async createLesson(orgId: string, dto: CreateLessonDto) {
+    // Caller-supplied resource ids must belong to this org. Without this, a bad
+    // (or foreign-org) teacherId/roomId slips past the conflict check and blows up
+    // on the row's foreign key — surfacing as a 500 to the family portal — or, for
+    // a real id from another studio, silently cross-references it. Validate up front
+    // so those come back as clean 404s and never reference another org's resources.
+    if (dto.teacherId) {
+      const teacher = await this.db.db.query.staffMembers.findFirst({
+        where: and(eq(staffMembers.id, dto.teacherId), eq(staffMembers.organizationId, orgId)),
+        columns: { id: true },
+      });
+      if (!teacher) throw new NotFoundException('Teacher not found');
+    }
+    if (dto.roomId) {
+      const room = await this.db.db.query.rooms.findFirst({
+        where: and(eq(rooms.id, dto.roomId), eq(rooms.organizationId, orgId)),
+        columns: { id: true },
+      });
+      if (!room) throw new NotFoundException('Room not found');
+    }
     return this.db.db.transaction(async (tx) => {
       const tz = await this.getOrgTimezone(tx, orgId);
       // Interpret a naive wall-clock ("...T16:00:00") as the studio's local time.
