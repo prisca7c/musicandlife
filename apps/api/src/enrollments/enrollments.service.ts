@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { eq, and, gte } from 'drizzle-orm';
-import { enrollments, students, staffMembers, lessons } from '@music-life/db';
+import { enrollments, students, staffMembers, terms, lessons } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateEnrollmentDto } from './dto/create-enrollment.dto';
 import type { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
@@ -9,18 +9,33 @@ import type { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
 export class EnrollmentsService {
   constructor(private readonly db: DbService) {}
 
+  // Both create and update accept caller-supplied teacher/term FK ids. Without an
+  // org-scoped existence check a bogus id 500s on the FK violation, and a valid id
+  // from another studio would be silently persisted as a cross-org reference.
+  private async assertTeacherAndTermInOrg(orgId: string, teacherId?: string | null, termId?: string | null) {
+    if (teacherId) {
+      const teacher = await this.db.db.query.staffMembers.findFirst({
+        where: and(eq(staffMembers.id, teacherId), eq(staffMembers.organizationId, orgId)),
+        columns: { id: true },
+      });
+      if (!teacher) throw new NotFoundException('Teacher not found');
+    }
+    if (termId) {
+      const term = await this.db.db.query.terms.findFirst({
+        where: and(eq(terms.id, termId), eq(terms.organizationId, orgId)),
+        columns: { id: true },
+      });
+      if (!term) throw new NotFoundException('Term not found');
+    }
+  }
+
   async create(orgId: string, studentId: string, dto: CreateEnrollmentDto) {
     const student = await this.db.db.query.students.findFirst({
       where: and(eq(students.id, studentId), eq(students.organizationId, orgId)),
     });
     if (!student) throw new NotFoundException('Student not found');
 
-    if (dto.teacherId) {
-      const teacher = await this.db.db.query.staffMembers.findFirst({
-        where: and(eq(staffMembers.id, dto.teacherId), eq(staffMembers.organizationId, orgId)),
-      });
-      if (!teacher) throw new NotFoundException('Teacher not found');
-    }
+    await this.assertTeacherAndTermInOrg(orgId, dto.teacherId, dto.termId);
 
     const { duration, ...rest } = dto;
     const [enrollment] = await this.db.db
@@ -40,6 +55,8 @@ export class EnrollmentsService {
       where: and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)),
     });
     if (!existing) throw new NotFoundException('Enrollment not found');
+
+    await this.assertTeacherAndTermInOrg(orgId, dto.teacherId, dto.termId);
 
     const [updated] = await this.db.db
       .update(enrollments)
