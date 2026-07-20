@@ -105,6 +105,14 @@ export class AttendanceService {
       where: eq(attendance.lessonId, lessonId),
     });
 
+    // The credit/charge side-effects below are one-shot per lesson: consuming a
+    // credit, issuing a makeup credit, and posting a PAYG charge. Re-marking
+    // attendance (a routine correction, or a double-submit) must not apply them
+    // twice — doing so double-charged the family and drained/duplicated credits.
+    // They only fire on a transition INTO a consuming state; if the lesson was
+    // already in one, the effects have already been applied, so skip them.
+    const alreadyApplied = !!existing && CONSUMES_CREDIT_STATUSES.has(existing.status);
+
     const attendanceData = {
       status: dto.status,
       markedBy,
@@ -144,7 +152,7 @@ export class AttendanceService {
 
     // Group lessons: no credits, just charge if present/late-cancel
     if (enrollment?.lessonType === 'group') {
-      if (CONSUMES_CREDIT_STATUSES.has(dto.status)) {
+      if (CONSUMES_CREDIT_STATUSES.has(dto.status) && !alreadyApplied) {
         this.postAutoCharge(orgId, lesson).catch(err =>
           this.logger.warn(`Auto-charge failed for lesson ${lessonId}: ${err}`),
         );
@@ -153,25 +161,36 @@ export class AttendanceService {
     }
 
     // Private lessons: credit pool logic
-    if (CONSUMES_CREDIT_STATUSES.has(dto.status)) {
+    if (CONSUMES_CREDIT_STATUSES.has(dto.status) && !alreadyApplied) {
       // Consume 1 available lesson credit (oldest first)
       await this.consumeOneCredit(orgId, lesson.studentId, lessonId);
     }
 
-    if (dto.status === 'absent_makeup') {
-      // Issue a makeup credit so the student can rebook at no extra cost
-      await this.db.db.insert(lessonCredits).values({
-        organizationId: orgId,
-        studentId: lesson.studentId,
-        enrollmentId: enrollment?.id ?? null,
-        type: 'makeup',
-        sourceLessonId: lessonId,
-        status: 'available',
+    if (dto.status === 'absent_makeup' && !alreadyApplied) {
+      // Issue a makeup credit so the student can rebook at no extra cost. Guard
+      // on sourceLessonId too so this lesson can only ever mint one makeup credit.
+      const existingMakeup = await this.db.db.query.lessonCredits.findFirst({
+        where: and(
+          eq(lessonCredits.organizationId, orgId),
+          eq(lessonCredits.type, 'makeup'),
+          eq(lessonCredits.sourceLessonId, lessonId),
+        ),
+        columns: { id: true },
       });
+      if (!existingMakeup) {
+        await this.db.db.insert(lessonCredits).values({
+          organizationId: orgId,
+          studentId: lesson.studentId,
+          enrollmentId: enrollment?.id ?? null,
+          type: 'makeup',
+          sourceLessonId: lessonId,
+          status: 'available',
+        });
+      }
     }
 
     // For present/absent_no_makeup: if no prepaid credit existed (PAYG), charge the family
-    if (CONSUMES_CREDIT_STATUSES.has(dto.status) && enrollment) {
+    if (CONSUMES_CREDIT_STATUSES.has(dto.status) && enrollment && !alreadyApplied) {
       this.postAutoCharge(orgId, lesson).catch(err =>
         this.logger.warn(`Auto-charge (PAYG) failed for lesson ${lessonId}: ${err}`),
       );
