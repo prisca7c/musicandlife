@@ -1,5 +1,5 @@
 import { Controller, Get, Put, Delete, Param, Body, UseGuards } from '@nestjs/common';
-import { IsString } from 'class-validator';
+import { IsString, MaxLength } from 'class-validator';
 import { NotificationsService } from './notifications.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -7,9 +7,11 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { RequestUser } from '@music-life/types';
 
+// Stored and rendered into outbound email, so cap both to keep a runaway body
+// from bloating the row / the message.
 class UpsertEmailTemplateDto {
-  @IsString() subject!: string;
-  @IsString() html!: string;
+  @IsString() @MaxLength(300) subject!: string;
+  @IsString() @MaxLength(50_000) html!: string;
 }
 
 @Controller('email-templates')
