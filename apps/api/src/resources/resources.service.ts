@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, or, ilike, sql, inArray } from 'drizzle-orm';
-import { resources, guardians, students, families, staffMembers } from '@music-life/db';
+import { resources, guardians, students, families, staffMembers, files } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateResourceDto } from './dto/create-resource.dto';
 import type { BaseRole } from '@music-life/types';
@@ -163,6 +163,31 @@ export class ResourcesService {
         columns: { id: true },
       });
       teacherId = staff?.id;
+    }
+
+    // fileId/teacherId/studentId are caller-supplied FKs (all constrained in the
+    // DB): a bogus id 500s on the constraint and a foreign-org id would tag the
+    // resource against another studio's row. Validate each against this org.
+    if (dto.fileId) {
+      const file = await this.db.db.query.files.findFirst({
+        where: and(eq(files.id, dto.fileId), eq(files.organizationId, orgId)),
+        columns: { id: true },
+      });
+      if (!file) throw new NotFoundException('File not found');
+    }
+    if (teacherId) {
+      const teacher = await this.db.db.query.staffMembers.findFirst({
+        where: and(eq(staffMembers.id, teacherId), eq(staffMembers.organizationId, orgId)),
+        columns: { id: true },
+      });
+      if (!teacher) throw new NotFoundException('Teacher not found');
+    }
+    if (dto.studentId) {
+      const student = await this.db.db.query.students.findFirst({
+        where: and(eq(students.id, dto.studentId), eq(students.organizationId, orgId)),
+        columns: { id: true },
+      });
+      if (!student) throw new NotFoundException('Student not found');
     }
 
     const [resource] = await this.db.db.insert(resources)
