@@ -1,10 +1,8 @@
-import { Logger, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import Redis from 'ioredis';
-import { getRedisConnection } from './common/redis-connection';
-import { RedisThrottlerStorage } from './common/redis-throttler.storage';
 import { HealthModule } from './health/health.module';
 import { DbModule } from './db/db.module';
 import { EmailModule } from './email/email.module';
@@ -34,20 +32,15 @@ import { FamilyPortalModule } from './family-portal/family-portal.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '../../.env' }),
-    // Rate limiting. Counters live in Redis (shared across instances + survive
-    // restarts) when REDIS_URL is set; otherwise the built-in in-memory store is
-    // used (local dev, where REDIS_URL is intentionally blank).
-    ThrottlerModule.forRootAsync({
-      useFactory: () => {
-        const throttlers = [{ name: 'default', ttl: 60_000, limit: 120 }];
-        const conn = getRedisConnection();
-        if (!conn) return { throttlers };
-        const redis = new Redis({ ...conn, maxRetriesPerRequest: null, enableOfflineQueue: false, lazyConnect: true });
-        redis.on('error', (e) => new Logger('ThrottlerRedis').warn(`Redis error: ${e.message}`));
-        redis.connect().catch((e) => new Logger('ThrottlerRedis').warn(`Redis connect failed: ${e.message}`));
-        return { throttlers, storage: new RedisThrottlerStorage(redis) };
-      },
-    }),
+    // In-process cron for the periodic maintenance jobs (recurrence generation,
+    // reminders, auto-invoicing, attendance auto-complete). Each job guards
+    // itself with a Postgres advisory lock so it stays single-run if the app is
+    // ever scaled past one instance — no external queue/Redis needed.
+    ScheduleModule.forRoot(),
+    // Rate limiting with the built-in in-memory counter. The API runs as a
+    // single instance, so a per-process counter is authoritative; this keeps the
+    // app off any external Redis.
+    ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 120 }]),
     DbModule, EmailModule,
     // @Global modules first
     NotificationsModule, FilesModule,
