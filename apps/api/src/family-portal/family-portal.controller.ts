@@ -23,7 +23,7 @@ import type { RequestUser } from '@music-life/types';
 
 // Shape of the entries stored in notes.attachments (see NotesController).
 interface NoteAttachment { fileId: string; name: string; mime: string; size?: number }
-import { IsBoolean, IsDateString, IsInt, IsOptional, IsUUID, Min, IsIn } from 'class-validator';
+import { IsBoolean, IsDateString, IsInt, IsOptional, IsUUID, Min, Max, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
 class BookLessonDto {
@@ -31,7 +31,7 @@ class BookLessonDto {
   @IsUUID() studentId!: string;
   @IsUUID() enrollmentId!: string;
   @IsDateString() startsAt!: string;
-  @IsInt() @Min(15) duration!: number;
+  @IsInt() @Min(15) @Max(240) duration!: number;
   @IsOptional() @IsBoolean() @Type(() => Boolean) isTrialLesson?: boolean;
   @IsOptional() @IsUUID() roomId?: string;
 }
@@ -369,24 +369,11 @@ export class FamilyPortalController {
     });
     if (!enrollment) throw new NotFoundException('Enrollment not found');
 
-    // Re-check availability (prevent race condition)
     const slotStart = new Date(dto.startsAt);
-    const slotEnd = new Date(slotStart.getTime() + dto.duration * 60000);
-
-    const conflict = await this.db.db.query.lessons.findFirst({
-      where: and(
-        eq(lessons.organizationId, user.orgId),
-        eq(lessons.teacherId, dto.teacherId),
-        eq(lessons.status, 'scheduled'),
-        lte(lessons.startsAt, slotEnd),
-        gte(lessons.startsAt, new Date(slotStart.getTime() - dto.duration * 60000)),
-      ),
-    });
-    if (conflict) {
-      const conflictEnd = new Date(conflict.startsAt.getTime() + conflict.duration * 60000);
-      if (conflict.startsAt < slotEnd && conflictEnd > slotStart) {
-        throw new BadRequestException('This slot is no longer available');
-      }
+    if (isNaN(slotStart.getTime())) throw new BadRequestException('Invalid start time');
+    // A parent/student must not be able to self-book a lesson in the past.
+    if (slotStart.getTime() <= Date.now()) {
+      throw new BadRequestException('Lessons must be booked for a future time.');
     }
 
     const teacher = await this.db.db.query.staffMembers.findFirst({
@@ -400,24 +387,27 @@ export class FamilyPortalController {
       with: { family: { columns: { email: true, name: true } } },
     });
 
-    const [lesson] = await this.db.db.insert(lessons).values({
-      organizationId: user.orgId,
+    // Delegate the actual write to the scheduling service so self-service booking
+    // runs under the SAME advisory lock + conflict checks as staff booking — this
+    // prevents double-booking a teacher/room (including concurrent races) and
+    // reuses the hardened overlap window. The instant is passed as a Z-suffixed
+    // ISO string, which round-trips through the service's zoned parse unchanged.
+    const lesson = await this.scheduling.createLesson(user.orgId, {
       studentId: dto.studentId,
       teacherId: dto.teacherId,
       enrollmentId: dto.enrollmentId,
       termId: enrollment.termId ?? undefined,
-      startsAt: slotStart,
+      startsAt: slotStart.toISOString(),
       duration: dto.duration,
-      isTrialLesson: dto.isTrialLesson ?? false,
       roomId: dto.roomId ?? undefined,
-      status: 'scheduled',
-    }).returning();
+      isTrialLesson: dto.isTrialLesson ?? false,
+    });
 
     // Send confirmation emails (non-blocking)
-    this.sendBookingConfirmations(user.orgId, lesson!, teacher, student!, enrollment.instrument, !!dto.isTrialLesson)
+    this.sendBookingConfirmations(user.orgId, lesson, teacher, student!, enrollment.instrument, !!dto.isTrialLesson)
       .catch(err => console.warn('Booking email failed:', err));
 
-    return lesson!;
+    return lesson;
   }
 
   // ─── Cancel a lesson (family portal) ─────────────────────────────────────

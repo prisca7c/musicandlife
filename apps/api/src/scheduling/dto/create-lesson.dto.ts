@@ -1,4 +1,4 @@
-import { IsUUID, IsDateString, IsInt, IsOptional, IsString, Min, Max } from 'class-validator';
+import { IsUUID, IsDateString, IsInt, IsOptional, IsString, IsBoolean, Min, Max } from 'class-validator';
 
 export class CreateLessonDto {
   @IsUUID()
@@ -32,4 +32,8 @@ export class CreateLessonDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isTrialLesson?: boolean;
 }
