@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and, gte, lte, ne, isNull, sql } from 'drizzle-orm';
-import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, rooms, organizations, enrollments } from '@music-life/db';
+import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, organizations, enrollments } from '@music-life/db';
 import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateLessonDto } from './dto/create-lesson.dto';
@@ -81,19 +81,15 @@ export class SchedulingService {
   ) {}
 
   // Booking conflicts are check-then-act, which races: two concurrent bookings can
-  // both pass the conflict check and then both insert, double-booking a teacher or
-  // room. To serialize per-resource we take Postgres transaction-scoped advisory
-  // locks keyed on the teacher and room before checking + writing. Locks are
-  // acquired in a deterministic (sorted) order so two transactions locking the same
-  // pair can never deadlock. This is robust against overlapping (not just identical)
-  // slots and needs no schema change / clean data — unlike a unique index.
-  private async lockResources(tx: Executor, orgId: string, teacherId?: string | null, roomId?: string | null) {
-    const keys: string[] = [];
-    if (teacherId) keys.push(`lesson:${orgId}:teacher:${teacherId}`);
-    if (roomId) keys.push(`lesson:${orgId}:room:${roomId}`);
-    for (const key of keys.sort()) {
-      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
-    }
+  // both pass the conflict check and then both insert, double-booking a teacher.
+  // To serialize per-teacher we take a Postgres transaction-scoped advisory lock
+  // keyed on the teacher before checking + writing. This is robust against
+  // overlapping (not just identical) slots and needs no schema change / clean
+  // data — unlike a unique index.
+  private async lockResources(tx: Executor, orgId: string, teacherId?: string | null) {
+    if (!teacherId) return;
+    const key = `lesson:${orgId}:teacher:${teacherId}`;
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
   }
 
   private async resolveStaffId(orgId: string, userId: string): Promise<string | null> {
@@ -133,7 +129,6 @@ export class SchedulingService {
       with: {
         student: { columns: { id: true, firstName: true, lastName: true } },
         teacher: { columns: { id: true, firstName: true, lastName: true } },
-        room: { columns: { id: true, name: true } },
         attendance: { columns: { status: true } },
         enrollment: { columns: { instrument: true, lessonType: true, groupName: true } },
       },
@@ -161,7 +156,6 @@ export class SchedulingService {
       with: {
         student: { columns: { id: true, firstName: true, lastName: true } },
         teacher: { columns: { id: true, firstName: true, lastName: true } },
-        room: true,
         attendance: true,
         enrollment: { columns: { id: true, instrument: true, lessonType: true, groupName: true } },
       },
@@ -175,12 +169,23 @@ export class SchedulingService {
   }
 
   async createLesson(orgId: string, dto: CreateLessonDto) {
+    // A caller-supplied teacherId must belong to this org. Without this, a bad (or
+    // foreign-org) id slips past the conflict check and blows up on the row's
+    // foreign key — surfacing as a 500 to the family portal. Validate up front so
+    // it comes back as a clean 404 and no lesson references another org's teacher.
+    if (dto.teacherId) {
+      const teacher = await this.db.db.query.staffMembers.findFirst({
+        where: and(eq(staffMembers.id, dto.teacherId), eq(staffMembers.organizationId, orgId)),
+        columns: { id: true },
+      });
+      if (!teacher) throw new NotFoundException('Teacher not found');
+    }
     return this.db.db.transaction(async (tx) => {
       const tz = await this.getOrgTimezone(tx, orgId);
       // Interpret a naive wall-clock ("...T16:00:00") as the studio's local time.
       const startsAt = parseZonedDateTime(dto.startsAt, tz);
-      await this.lockResources(tx, orgId, dto.teacherId, dto.roomId);
-      await this.checkConflicts(tx, orgId, startsAt.toISOString(), dto.duration ?? 60, dto.teacherId, dto.roomId);
+      await this.lockResources(tx, orgId, dto.teacherId);
+      await this.checkConflicts(tx, orgId, startsAt.toISOString(), dto.duration ?? 60, dto.teacherId);
 
       const [lesson] = await tx
         .insert(lessons)
@@ -196,7 +201,7 @@ export class SchedulingService {
    * through `weeks` weeks ahead. Idempotent: occurrences that already have a
    * lesson (same enrollment + instant) are skipped, so it's safe to call
    * repeatedly (on schedule-rule change, and from the daily top-up worker).
-   * Conflicts (teacher/room already booked) are skipped and counted, not thrown,
+   * Conflicts (teacher already booked) are skipped and counted, not thrown,
    * so one clash never aborts the whole series.
    */
   async materializeEnrollment(
@@ -290,17 +295,15 @@ export class SchedulingService {
     return this.db.db.transaction(async (tx) => {
       const tz = await this.getOrgTimezone(tx, orgId);
       const startsAt = dto.startsAt ? parseZonedDateTime(dto.startsAt, tz) : undefined;
-      if (dto.startsAt || dto.teacherId || dto.roomId) {
+      if (dto.startsAt || dto.teacherId) {
         const teacherId = dto.teacherId ?? existing.teacherId ?? undefined;
-        const roomId = dto.roomId ?? existing.roomId ?? undefined;
-        await this.lockResources(tx, orgId, teacherId, roomId);
+        await this.lockResources(tx, orgId, teacherId);
         await this.checkConflicts(
           tx,
           orgId,
           (startsAt ?? existing.startsAt).toISOString(),
           dto.duration ?? existing.duration,
           teacherId,
-          roomId,
           id,
         );
       }
@@ -355,9 +358,8 @@ export class SchedulingService {
 
     return this.db.db.transaction(async (tx) => {
       const teacherId = lesson.teacherId ?? undefined;
-      const roomId = lesson.roomId ?? undefined;
-      await this.lockResources(tx, orgId, teacherId, roomId);
-      await this.checkConflicts(tx, orgId, lesson.startsAt.toISOString(), lesson.duration, teacherId, roomId, id);
+      await this.lockResources(tx, orgId, teacherId);
+      await this.checkConflicts(tx, orgId, lesson.startsAt.toISOString(), lesson.duration, teacherId, id);
 
       const [updated] = await tx.update(lessons)
         .set({ status: 'scheduled', cancelledAt: null, updatedAt: new Date() })
@@ -367,19 +369,18 @@ export class SchedulingService {
     });
   }
 
-  async directReschedule(orgId: string, id: string, newStartsAt: string, newRoomId?: string, actor?: Actor) {
+  async directReschedule(orgId: string, id: string, newStartsAt: string, actor?: Actor) {
     const lesson = await this.getLesson(orgId, id);
     await this.assertOwnsLesson(orgId, lesson.teacherId, actor);
 
     return this.db.db.transaction(async (tx) => {
       const teacherId = lesson.teacherId ?? undefined;
-      const roomId = newRoomId ?? lesson.roomId ?? undefined;
       const tz = await this.getOrgTimezone(tx, orgId);
       // Interpret a naive wall-clock as studio-local; a zoned ISO passes through.
       const startsAt = parseZonedDateTime(newStartsAt, tz);
       const startsAtISO = startsAt.toISOString();
-      await this.lockResources(tx, orgId, teacherId, roomId);
-      await this.checkConflicts(tx, orgId, startsAtISO, lesson.duration, teacherId, roomId, id);
+      await this.lockResources(tx, orgId, teacherId);
+      await this.checkConflicts(tx, orgId, startsAtISO, lesson.duration, teacherId, id);
 
       // Reasonable-for-the-teacher check: the new slot must sit inside the
       // teacher's availability windows and not clash with their blocked time.
@@ -388,7 +389,7 @@ export class SchedulingService {
 
       const [updated] = await tx
         .update(lessons)
-        .set({ startsAt, roomId: newRoomId ?? lesson.roomId, updatedAt: new Date() })
+        .set({ startsAt, updatedAt: new Date() })
         .where(eq(lessons.id, id))
         .returning();
       return updated!;
@@ -636,7 +637,6 @@ export class SchedulingService {
       studentId: dto.studentId,
       teacherId: dto.teacherId,
       enrollmentId: dto.enrollmentId,
-      roomId: dto.roomId,
       duration: dto.duration ?? 60,
       proposedStartsAt: proposed,
       proposedStartsAt2: dto.proposedStartsAt2 ? parseZonedDateTime(dto.proposedStartsAt2, tz) : undefined,
@@ -658,7 +658,6 @@ export class SchedulingService {
       with: {
         student: { columns: { id: true, firstName: true, lastName: true } },
         teacher: { columns: { id: true, firstName: true, lastName: true } },
-        room: { columns: { id: true, name: true } },
         enrollment: { columns: { instrument: true, lessonType: true, groupName: true } },
         requestedByUser: { columns: { id: true, email: true } },
       },
@@ -674,7 +673,7 @@ export class SchedulingService {
       const options = await Promise.all(ranked.map(async (t, i) => {
         const iso = t.toISOString();
         const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, r.teacherId, iso, r.duration, tz);
-        const conflict = unavailable ? false : await this.hasConflict(this.db.db, orgId, iso, r.duration, r.teacherId, r.roomId ?? undefined);
+        const conflict = unavailable ? false : await this.hasConflict(this.db.db, orgId, iso, r.duration, r.teacherId);
         return {
           rank: i + 1,
           startsAt: iso,
@@ -713,7 +712,7 @@ export class SchedulingService {
       const tz = await this.getOrgTimezone(this.db.db, orgId);
       const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, req.teacherId, target, req.duration, tz);
       if (unavailable) throw new BadRequestException(unavailable);
-      if (await this.hasConflict(this.db.db, orgId, target, req.duration, req.teacherId, req.roomId ?? undefined)) {
+      if (await this.hasConflict(this.db.db, orgId, target, req.duration, req.teacherId)) {
         throw new BadRequestException('That time clashes with another lesson.');
       }
     }
@@ -735,7 +734,6 @@ export class SchedulingService {
       const lesson = await this.createLesson(orgId, {
         studentId: req.studentId,
         teacherId: req.teacherId,
-        roomId: req.roomId ?? undefined,
         enrollmentId: req.enrollmentId ?? undefined,
         startsAt: target,
         duration: req.duration,
@@ -781,7 +779,6 @@ export class SchedulingService {
       proposedStartsAt: parseZonedDateTime(dto.proposedStartsAt, tz),
       proposedStartsAt2: dto.proposedStartsAt2 ? parseZonedDateTime(dto.proposedStartsAt2, tz) : undefined,
       proposedStartsAt3: dto.proposedStartsAt3 ? parseZonedDateTime(dto.proposedStartsAt3, tz) : undefined,
-      proposedRoomId: dto.proposedRoomId,
       status: 'pending',
     }).returning();
     return req!;
@@ -790,10 +787,10 @@ export class SchedulingService {
   /** Did this slot clash with an existing lesson? Non-throwing wrapper over checkConflicts. */
   private async hasConflict(
     exec: Executor, orgId: string, startsAt: string, duration: number,
-    teacherId?: string, roomId?: string, excludeLessonId?: string,
+    teacherId?: string, excludeLessonId?: string,
   ): Promise<boolean> {
     try {
-      await this.checkConflicts(exec, orgId, startsAt, duration, teacherId, roomId, excludeLessonId);
+      await this.checkConflicts(exec, orgId, startsAt, duration, teacherId, excludeLessonId);
       return false;
     } catch {
       return true;
@@ -820,12 +817,11 @@ export class SchedulingService {
       const lesson = r.lesson;
       const duration = lesson?.duration ?? 30;
       const teacherId = lesson?.teacherId ?? undefined;
-      const roomId = r.proposedRoomId ?? lesson?.roomId ?? undefined;
       const ranked = [r.proposedStartsAt, r.proposedStartsAt2, r.proposedStartsAt3].filter(Boolean) as Date[];
       const options = await Promise.all(ranked.map(async (t, i) => {
         const iso = t.toISOString();
         const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, teacherId, iso, duration, tz);
-        const conflict = unavailable ? false : await this.hasConflict(this.db.db, orgId, iso, duration, teacherId, roomId, r.lessonId);
+        const conflict = unavailable ? false : await this.hasConflict(this.db.db, orgId, iso, duration, teacherId, r.lessonId);
         return {
           rank: i + 1,
           startsAt: iso,
@@ -859,7 +855,7 @@ export class SchedulingService {
       const tz = await this.getOrgTimezone(this.db.db, orgId);
       const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, lesson.teacherId ?? undefined, target, lesson.duration, tz);
       if (unavailable) throw new BadRequestException(unavailable);
-      if (await this.hasConflict(this.db.db, orgId, target, lesson.duration, lesson.teacherId ?? undefined, req.proposedRoomId ?? lesson.roomId ?? undefined, req.lessonId)) {
+      if (await this.hasConflict(this.db.db, orgId, target, lesson.duration, lesson.teacherId ?? undefined, req.lessonId)) {
         throw new BadRequestException('That time clashes with another lesson.');
       }
     }
@@ -878,7 +874,7 @@ export class SchedulingService {
     if (claimed.length === 0) throw new BadRequestException('Request already decided');
 
     if (decision === 'approved' && target) {
-      await this.directReschedule(orgId, req.lessonId, target, req.proposedRoomId ?? undefined);
+      await this.directReschedule(orgId, req.lessonId, target);
     }
 
     return { id, status: decision };
@@ -898,7 +894,7 @@ export class SchedulingService {
   }
 
   // ─── Conflict check ────────────────────────────────────────────────────────
-  private async checkConflicts(db: Executor, orgId: string, startsAt: string, duration: number, teacherId?: string, roomId?: string, excludeLessonId?: string) {
+  private async checkConflicts(db: Executor, orgId: string, startsAt: string, duration: number, teacherId?: string, excludeLessonId?: string) {
     const start = new Date(startsAt);
     const end = new Date(start.getTime() + duration * 60000);
 
@@ -923,16 +919,11 @@ export class SchedulingService {
       const overlaps = l.startsAt < end && lEnd > start;
       if (!overlaps) return false;
       if (teacherId && l.teacherId === teacherId) return true;
-      if (roomId && l.roomId === roomId) return true;
       return false;
     });
 
     if (conflicts.length > 0) {
-      const t = conflicts.find(c => c.teacherId === teacherId);
-      const r = conflicts.find(c => c.roomId === roomId);
-      throw new BadRequestException(
-        t ? 'Teacher already has a lesson at this time' : 'Room is already booked at this time'
-      );
+      throw new BadRequestException('Teacher already has a lesson at this time');
     }
   }
 }

@@ -12,16 +12,6 @@ import {
 } from 'drizzle-orm/pg-core';
 import { organizations, users } from './auth';
 
-// ─── Rooms ────────────────────────────────────────────────────────────────────
-export const rooms = pgTable('rooms', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
-  name: text('name').notNull(),
-  capacity: integer('capacity'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
-
 // ─── Terms ────────────────────────────────────────────────────────────────────
 export const terms = pgTable(
   'terms',

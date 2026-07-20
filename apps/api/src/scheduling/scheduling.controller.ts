@@ -79,7 +79,7 @@ export class SchedulingController {
     @Param('id') id: string,
     @Body() body: RescheduleLessonDto,
   ) {
-    return this.scheduling.directReschedule(user.orgId, id, body.startsAt, body.roomId, { role: user.role, userId: user.userId });
+    return this.scheduling.directReschedule(user.orgId, id, body.startsAt, { role: user.role, userId: user.userId });
   }
 
   // ─── Availability-driven booking ──────────────────────────────────────────

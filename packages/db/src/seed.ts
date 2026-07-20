@@ -5,7 +5,7 @@ config({ path: join(__dirname, '../../../.env') });
 import { eq, and } from 'drizzle-orm';
 import {
   createDb, organizations, users, memberships,
-  rooms, terms, families, students,
+  terms, families, students,
   staffMembers, staffPrivileges, teacherAssignments, enrollments,
 } from './index';
 import { hash } from 'argon2';
@@ -35,11 +35,6 @@ async function seed() {
     .returning();
   if (admin) {
     await db.insert(memberships).values({ userId: admin.id, organizationId: orgId, baseRole: 'admin' }).onConflictDoNothing();
-  }
-
-  // ── Rooms (5) ────────────────────────────────────────────────────────────────
-  for (const name of ['Room 1', 'Room 2', 'Room 3', 'Room 4', 'Room 5']) {
-    await db.insert(rooms).values({ organizationId: orgId, name, capacity: 2 }).onConflictDoNothing();
   }
 
   // ── 2025-26 Terms (T&Cs §5 — 35 lessons total) ───────────────────────────────

@@ -46,7 +46,6 @@ interface Lesson {
   id: string; startsAt: string; duration: number; status: string;
   student: { firstName: string; lastName: string } | null;
   teacher: { firstName: string; lastName: string } | null;
-  room: { name: string } | null;
   enrollment: { instrument: string; lessonType: string } | null;
 }
 
