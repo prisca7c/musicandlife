@@ -1,45 +1,25 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { Queue, Worker } from 'bullmq';
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { gte, lte, eq, and } from 'drizzle-orm';
 import { lessons, students, families } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { NotificationsService } from './notifications.service';
-import { getRedisConnection } from '../common/redis-connection';
+import { withAdvisoryLock } from '../common/cron-lock';
 
 @Injectable()
-export class ReminderWorker implements OnModuleInit {
+export class ReminderWorker {
   private readonly logger = new Logger(ReminderWorker.name);
-  private queue?: Queue;
+  private static readonly LOCK_KEY = 811002;
 
   constructor(
     private readonly db: DbService,
     private readonly notifications: NotificationsService,
   ) {}
 
-  onModuleInit() {
-    const conn = getRedisConnection();
-    if (!conn) {
-      this.logger.warn('REDIS_URL not configured — lesson reminders disabled');
-      return;
-    }
-
-    try {
-      this.queue = new Queue('reminders', { connection: conn });
-
-      // Repeatable scanner: runs every hour
-      this.queue.add('scan', {}, {
-        repeat: { every: 3600000 },
-        jobId: 'reminder-scan',
-      }).catch(() => {}); // ignore if already exists
-
-      new Worker('reminders', async (job) => {
-        if (job.name === 'scan') await this.scanReminders();
-      }, { connection: conn, concurrency: 1 });
-
-      this.logger.log('Reminder worker started');
-    } catch (err) {
-      this.logger.warn(`Reminder worker failed to start: ${err}`);
-    }
+  // Read-only/idempotent (sends 24h reminders), so it always runs — no opt-in flag.
+  @Cron(CronExpression.EVERY_HOUR)
+  async run() {
+    await withAdvisoryLock(this.db.db, ReminderWorker.LOCK_KEY, () => this.scanReminders());
   }
 
   private async scanReminders() {

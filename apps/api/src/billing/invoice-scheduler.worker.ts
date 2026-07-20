@@ -1,11 +1,11 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { Queue, Worker } from 'bullmq';
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { eq, and } from 'drizzle-orm';
 import { families, memberships } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { BillingService } from './billing.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { getRedisConnection } from '../common/redis-connection';
+import { withAdvisoryLock } from '../common/cron-lock';
 
 const PREVIEW_DAYS_AHEAD = 3;
 
@@ -41,9 +41,9 @@ function daysBetween(a: Date, b: Date): number {
 }
 
 @Injectable()
-export class InvoiceSchedulerWorker implements OnModuleInit {
+export class InvoiceSchedulerWorker {
   private readonly logger = new Logger(InvoiceSchedulerWorker.name);
-  private queue?: Queue;
+  private static readonly LOCK_KEY = 811003;
 
   constructor(
     private readonly db: DbService,
@@ -51,36 +51,12 @@ export class InvoiceSchedulerWorker implements OnModuleInit {
     private readonly notifications: NotificationsService,
   ) {}
 
-  onModuleInit() {
-    // Mirrors RecurrenceWorker's opt-in guard — this writes real invoices (and can send real
-    // emails) every run, so it must not fire just because the API process booted locally.
-    if (process.env.INVOICE_SCHEDULER_ENABLED !== 'true') {
-      this.logger.warn('INVOICE_SCHEDULER_ENABLED not set to "true" — auto-invoicing disabled');
-      return;
-    }
-
-    const conn = getRedisConnection();
-    if (!conn) {
-      this.logger.warn('REDIS_URL not configured — auto-invoicing disabled');
-      return;
-    }
-
-    try {
-      this.queue = new Queue('invoice-scheduler', { connection: conn });
-
-      this.queue.add('scan', {}, {
-        repeat: { every: 86400000 },
-        jobId: 'invoice-scheduler-scan',
-      }).catch(() => {});
-
-      new Worker('invoice-scheduler', async (job) => {
-        if (job.name === 'scan') await this.scan();
-      }, { connection: conn, concurrency: 1 });
-
-      this.logger.log('Invoice scheduler worker started');
-    } catch (err) {
-      this.logger.warn(`Invoice scheduler worker failed to start: ${err}`);
-    }
+  // Writes real invoices (and can send real emails) every run, so it stays
+  // opt-in (INVOICE_SCHEDULER_ENABLED) and must not fire from a local `pnpm dev`.
+  @Cron(CronExpression.EVERY_DAY_AT_6AM)
+  async run() {
+    if (process.env.INVOICE_SCHEDULER_ENABLED !== 'true') return;
+    await withAdvisoryLock(this.db.db, InvoiceSchedulerWorker.LOCK_KEY, () => this.scan());
   }
 
   private async scan() {
