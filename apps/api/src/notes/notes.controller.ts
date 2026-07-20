@@ -5,7 +5,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { DbService } from '../db/db.service';
-import { notes, staffMembers, teacherAssignments, enrollments } from '@music-life/db';
+import { notes, staffMembers, teacherAssignments, enrollments, students, lessons } from '@music-life/db';
 import { eq, and, inArray } from 'drizzle-orm';
 import type { RequestUser } from '@music-life/types';
 
@@ -96,6 +96,25 @@ export class NotesController {
       const staffId = await this.resolveStaffId(user.orgId, user.userId);
       const assignedIds = staffId ? await this.getAssignedStudentIds(user.orgId, staffId) : [];
       if (!assignedIds.includes(body.studentId)) throw new ForbiddenException('Not your student');
+    } else {
+      // Manager/admin skip the "your student" check, so the caller-supplied
+      // studentId is otherwise unvalidated: a bogus id 500s on the FK violation
+      // and a foreign-org id would attach the note to another studio's student.
+      const student = await this.db.db.query.students.findFirst({
+        where: and(eq(students.id, body.studentId), eq(students.organizationId, user.orgId)),
+        columns: { id: true },
+      });
+      if (!student) throw new ForbiddenException('Not your student');
+    }
+
+    // lessonId is a plain uuid column (no DB FK), so a bogus or foreign-org id
+    // would be silently stored as a dangling reference — validate it here.
+    if (body.lessonId) {
+      const lesson = await this.db.db.query.lessons.findFirst({
+        where: and(eq(lessons.id, body.lessonId), eq(lessons.organizationId, user.orgId)),
+        columns: { id: true },
+      });
+      if (!lesson) throw new ForbiddenException('Lesson not found');
     }
 
     const [note] = await this.db.db.insert(notes).values({

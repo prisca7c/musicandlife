@@ -255,6 +255,15 @@ export class BillingService {
 
   async addLineItem(orgId: string, invoiceId: string, description: string, amount: number, lessonId?: string) {
     await this.getInvoice(orgId, invoiceId);
+    // An optional lessonId is a caller-supplied FK: a bogus id 500s on the
+    // constraint and a foreign-org id would bill against another studio's lesson.
+    if (lessonId) {
+      const lesson = await this.db.db.query.lessons.findFirst({
+        where: and(eq(lessons.id, lessonId), eq(lessons.organizationId, orgId)),
+        columns: { id: true },
+      });
+      if (!lesson) throw new NotFoundException('Lesson not found');
+    }
     const [item] = await this.db.db.insert(invoiceLineItems).values({
       organizationId: orgId, invoiceId, description, amount, lessonId,
     }).returning();

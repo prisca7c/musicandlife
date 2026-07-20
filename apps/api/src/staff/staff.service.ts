@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ConflictException, Logger } from '@nestj
 import { eq, and } from 'drizzle-orm';
 import {
   staffMembers, staffPrivileges, teacherAssignments,
-  users, memberships, passwordResetTokens, availability,
+  users, memberships, passwordResetTokens, availability, students,
 } from '@music-life/db';
 import { DEFAULT_TEACHER_PRIVILEGES } from '@music-life/types';
 import { randomBytes, createHash } from 'crypto';
@@ -160,6 +160,14 @@ export class StaffService {
 
   async assignStudent(orgId: string, staffId: string, studentId: string, role: 'primary' | 'secondary' = 'primary') {
     await this.findOne(orgId, staffId);
+    // Guard the caller-supplied studentId the same way: an id from another studio
+    // (or a bogus one) would otherwise 500 on the FK violation or, if valid,
+    // cross-link another org's student to this teacher.
+    const student = await this.db.db.query.students.findFirst({
+      where: and(eq(students.id, studentId), eq(students.organizationId, orgId)),
+      columns: { id: true },
+    });
+    if (!student) throw new NotFoundException('Student not found');
     await this.db.db
       .insert(teacherAssignments)
       .values({ organizationId: orgId, staffId, studentId, role })
