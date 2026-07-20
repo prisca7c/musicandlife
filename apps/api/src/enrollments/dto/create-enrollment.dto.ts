@@ -1,4 +1,18 @@
-import { IsString, IsOptional, IsUUID, IsIn, IsInt, Min, Max, MaxLength, IsBoolean, IsObject } from 'class-validator';
+import { IsString, IsOptional, IsUUID, IsIn, IsInt, Min, Max, MaxLength, IsBoolean, ValidateNested, Matches } from 'class-validator';
+import { Type } from 'class-transformer';
+
+// The weekly recurrence rule that drives lesson generation. Previously the
+// enrollment DTO accepted this as a bare @IsObject(), so a malformed weekday or
+// an out-of-range startTime (e.g. "25:00") was persisted and later produced
+// lessons at the wrong instant. Validate the shape the recurrence worker expects.
+export class ScheduleRuleDto {
+  @IsIn(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'])
+  weekday!: string;
+
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
+  startTime!: string;
+}
 
 export class CreateEnrollmentDto {
   @IsOptional()
@@ -37,8 +51,9 @@ export class CreateEnrollmentDto {
   duration?: number;
 
   @IsOptional()
-  @IsObject()
-  scheduleRule?: { weekday: string; startTime: string };
+  @ValidateNested()
+  @Type(() => ScheduleRuleDto)
+  scheduleRule?: ScheduleRuleDto;
 
   @IsOptional()
   @IsBoolean()
