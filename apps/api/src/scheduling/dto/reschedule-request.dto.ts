@@ -16,10 +16,6 @@ export class CreateRescheduleRequestDto {
   @IsOptional()
   @IsDateString()
   proposedStartsAt3?: string;
-
-  @IsOptional()
-  @IsUUID()
-  proposedRoomId?: string;
 }
 
 export class DecideRescheduleDto {

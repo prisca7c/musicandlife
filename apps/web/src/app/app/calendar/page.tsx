@@ -18,13 +18,11 @@ interface Lesson {
   id: string; startsAt: string; duration: number; status: string; notes: string | null;
   student: { id: string; firstName: string; lastName: string } | null;
   teacher: { id: string; firstName: string; lastName: string } | null;
-  room: { id: string; name: string } | null;
   attendance: { status: string } | null;
   enrollment: { instrument: string; lessonType: string; groupName?: string | null } | null;
 }
 interface StaffMember { id: string; firstName: string; lastName: string; }
 interface Student { id: string; firstName: string; lastName: string; }
-interface Room { id: string; name: string; }
 interface Enrollment {
   id: string; instrument: string; lessonType: string; groupName?: string | null; status: string;
   teacherId?: string | null; rate?: number; defaultDuration?: number;
@@ -265,10 +263,8 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
 }) {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [studentsList, setStudentsList] = useState<Student[]>([]);
-  const [rooms, setRooms] = useState<Room[]>([]);
   const [studentId, setStudentId] = useState('');
   const [teacherId, setTeacherId] = useState('');
-  const [roomId, setRoomId] = useState('');
   const [lessonType, setLessonType] = useState<'private' | 'group'>('private');
   const [instrument, setInstrument] = useState('');
   const [groupName, setGroupName] = useState('');
@@ -292,7 +288,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
 
   useEffect(() => {
     if (!open) return;
-    setStudentId(''); setTeacherId(''); setRoomId(''); setDuration('60');
+    setStudentId(''); setTeacherId(''); setDuration('60');
     setLessonType('private'); setInstrument(''); setGroupName('');
     setDate(defaultDate ?? ''); setNotes('');
     setSlots([]); setNoWindows(false); setPicks([]); setManualTime(defaultTime ?? '');
@@ -307,10 +303,9 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
         ? apiFetch<StaffMember | null>('/staff/me', { token: t }).catch(() => null).then(me => me ? [me] : [])
         : apiFetch<StaffMember[]>('/staff', { token: t }).catch(() => []),
       apiFetch<Student[]>('/students', { token: t }).catch(() => []),
-      apiFetch<Room[]>('/rooms', { token: t }).catch(() => []),
-    ]).then(([s, st, r]) => {
+    ]).then(([s, st]) => {
       setStaff(s);
-      setStudentsList(st); setRooms(r);
+      setStudentsList(st);
       if (teacherSelf && s[0]) setTeacherId(s[0].id);
     });
   }, [open, defaultDate, defaultTime]);
@@ -408,7 +403,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
       } else if (requestMode) {
         // Hand the ranked times to the teacher — no lesson exists until they confirm.
         await apiFetch('/lesson-requests', { method: 'POST', token: t, body: JSON.stringify({
-          studentId, teacherId, enrollmentId, roomId: roomId || undefined,
+          studentId, teacherId, enrollmentId,
           duration: parseInt(duration) || 60,
           proposedStartsAt: `${date}T${times[0]}:00`,
           proposedStartsAt2: times[1] ? `${date}T${times[1]}:00` : undefined,
@@ -419,7 +414,6 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
       } else {
         await apiFetch('/lessons', { method: 'POST', token: t, body: JSON.stringify({
           studentId, teacherId: teacherId || undefined,
-          roomId: roomId || undefined,
           enrollmentId,
           startsAt: `${date}T${times[0]}:00`,
           duration: parseInt(duration) || 60,
@@ -527,18 +521,9 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
             />
           </div>
         )}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="ui-label">Duration</label>
-            <SearchableSelect options={durationOptions} value={duration} onChange={setDuration} disabled={lessonType === 'group'} />
-          </div>
-          <div>
-            <label className="ui-label">Room</label>
-            <SearchableSelect
-              options={rooms.map(r => ({ value: r.id, label: r.name }))}
-              value={roomId} onChange={setRoomId} emptyLabel="No room"
-            />
-          </div>
+        <div>
+          <label className="ui-label">Duration</label>
+          <SearchableSelect options={durationOptions} value={duration} onChange={setDuration} disabled={lessonType === 'group'} />
         </div>
 
         <div>
@@ -920,10 +905,6 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
             <span style={{ color: 'var(--txt3)' }}>Teacher</span>
             <span className="font-medium">{lesson.teacher ? `${lesson.teacher.firstName} ${lesson.teacher.lastName}` : '—'}</span>
           </div>
-          <div className="flex justify-between">
-            <span style={{ color: 'var(--txt3)' }}>Room</span>
-            <span className="font-medium">{lesson.room?.name ?? '—'}</span>
-          </div>
           <div className="flex justify-between items-center">
             <span style={{ color: 'var(--txt3)' }}>Status</span>
             <Badge variant={lesson.status}>{lesson.status.replace(/_/g, ' ')}</Badge>
@@ -966,7 +947,7 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
               <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
                 <p className="text-sm font-semibold flex items-center gap-1.5" style={{ color: 'var(--txt2)' }}>
                   Reschedule to
-                  <InfoTooltip text="We'll check the new time is free and inside the teacher's working hours — so you can't accidentally double-book a teacher or room, or pick a time they're unavailable." />
+                  <InfoTooltip text="We'll check the new time is free and inside the teacher's working hours — so you can't accidentally double-book a teacher, or pick a time they're unavailable." />
                 </p>
                 <div className="grid grid-cols-2 gap-3">
                   <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} className="ui-input" />

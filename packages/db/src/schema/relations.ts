@@ -1,7 +1,7 @@
 import { relations } from 'drizzle-orm';
 import { organizations, users, memberships } from './auth';
 import {
-  rooms, terms, families, guardians, students,
+  terms, families, guardians, students,
   staffMembers, staffPrivileges, teacherAssignments, enrollments,
   notes, staffAvailability,
 } from './domain';
@@ -16,7 +16,6 @@ export const organizationsRelations = relations(organizations, ({ many }) => ({
   students: many(students),
   staffMembers: many(staffMembers),
   terms: many(terms),
-  rooms: many(rooms),
 }));
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -72,16 +71,10 @@ export const termsRelations = relations(terms, ({ many }) => ({
   enrollments: many(enrollments),
 }));
 
-export const roomsRelations = relations(rooms, ({ one, many }) => ({
-  organization: one(organizations, { fields: [rooms.organizationId], references: [organizations.id] }),
-  lessons: many(lessons),
-}));
-
 export const lessonsRelations = relations(lessons, ({ one, many }) => ({
   student: one(students, { fields: [lessons.studentId], references: [students.id] }),
   teacher: one(staffMembers, { fields: [lessons.teacherId], references: [staffMembers.id] }),
   term: one(terms, { fields: [lessons.termId], references: [terms.id] }),
-  room: one(rooms, { fields: [lessons.roomId], references: [rooms.id] }),
   enrollment: one(enrollments, { fields: [lessons.enrollmentId], references: [enrollments.id] }),
   attendance: one(attendance, { fields: [lessons.id], references: [attendance.lessonId] }),
   creditsUsed: many(lessonCredits, { relationName: 'usedInLesson' }),
@@ -110,7 +103,6 @@ export const lessonRequestsRelations = relations(lessonRequests, ({ one }) => ({
   student: one(students, { fields: [lessonRequests.studentId], references: [students.id] }),
   teacher: one(staffMembers, { fields: [lessonRequests.teacherId], references: [staffMembers.id] }),
   enrollment: one(enrollments, { fields: [lessonRequests.enrollmentId], references: [enrollments.id] }),
-  room: one(rooms, { fields: [lessonRequests.roomId], references: [rooms.id] }),
   requestedByUser: one(users, { fields: [lessonRequests.requestedBy], references: [users.id] }),
   createdLesson: one(lessons, { fields: [lessonRequests.createdLessonId], references: [lessons.id] }),
 }));

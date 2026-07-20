@@ -2,7 +2,7 @@ import {
   pgTable, uuid, text, timestamp, integer, boolean, jsonb, date, index, uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { organizations, users } from './auth';
-import { staffMembers, students, enrollments, terms, rooms } from './domain';
+import { staffMembers, students, enrollments, terms } from './domain';
 
 export const availability = pgTable(
   'availability',
@@ -41,7 +41,6 @@ export const lessons = pgTable(
     termId: uuid('term_id').references(() => terms.id),
     teacherId: uuid('teacher_id').references(() => staffMembers.id),
     studentId: uuid('student_id').notNull().references(() => students.id),
-    roomId: uuid('room_id').references(() => rooms.id),
     startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
     duration: integer('duration').notNull().default(60),
     actualStartedAt: timestamp('actual_started_at', { withTimezone: true }),
@@ -59,7 +58,6 @@ export const lessons = pgTable(
   (t) => [
     index('lessons_org_teacher_starts_idx').on(t.organizationId, t.teacherId, t.startsAt),
     index('lessons_org_student_starts_idx').on(t.organizationId, t.studentId, t.startsAt),
-    index('lessons_org_room_starts_idx').on(t.organizationId, t.roomId, t.startsAt),
     index('lessons_org_status_idx').on(t.organizationId, t.status),
   ],
 );
@@ -77,7 +75,6 @@ export const rescheduleRequests = pgTable(
     proposedStartsAt: timestamp('proposed_starts_at', { withTimezone: true }).notNull(),
     proposedStartsAt2: timestamp('proposed_starts_at_2', { withTimezone: true }),
     proposedStartsAt3: timestamp('proposed_starts_at_3', { withTimezone: true }),
-    proposedRoomId: uuid('proposed_room_id').references(() => rooms.id),
     status: text('status', { enum: ['pending','approved','denied'] }).notNull().default('pending'),
     decidedBy: uuid('decided_by').references(() => users.id),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
@@ -96,7 +93,6 @@ export const lessonRequests = pgTable(
     enrollmentId: uuid('enrollment_id').references(() => enrollments.id),
     // The teacher who must ultimately confirm one of the ranked times.
     teacherId: uuid('teacher_id').notNull().references(() => staffMembers.id),
-    roomId: uuid('room_id').references(() => rooms.id),
     duration: integer('duration').notNull().default(60),
     // Up to three ranked start times (1st required) proposed by the front desk;
     // the teacher picks whichever works. Mirrors reschedule_requests, but for a

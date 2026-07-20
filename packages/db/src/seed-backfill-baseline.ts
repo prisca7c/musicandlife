@@ -10,7 +10,7 @@ config({ path: join(__dirname, '../../../.env') });
 
 import { eq, isNull } from 'drizzle-orm';
 import {
-  createDb, organizations, terms, rooms, enrollments, lessons, attendance,
+  createDb, organizations, terms, enrollments, lessons, attendance,
   lessonCredits, invoices, invoiceLineItems, payments,
 } from './index';
 
@@ -30,7 +30,6 @@ async function main() {
   if (!org) { console.error('Org not found'); process.exit(1); }
   const orgId = org.id;
   const activeTerm = await db.query.terms.findFirst({ where: eq(terms.organizationId, orgId) });
-  const allRooms = await db.query.rooms.findMany({ where: eq(rooms.organizationId, orgId) });
 
   const orphanEnrollments = await db
     .select()
@@ -52,7 +51,6 @@ async function main() {
     const rule = en.scheduleRule as { weekday: string; startTime: string } | null;
     const weekdayIdx = rule ? WEEKDAY_NAMES.indexOf(rule.weekday) + 1 : 1;
     const [h, m] = (rule?.startTime ?? '16:00').split(':').map(Number) as [number, number];
-    const room = allRooms[Math.floor(Math.random() * allRooms.length)];
 
     for (const weekOffset of [-3, -2, -1, 0, 1]) {
       const startsAt = isoAt(now, weekOffset, weekdayIdx || 1, h, m);
@@ -61,7 +59,7 @@ async function main() {
 
       const [lesson] = await db.insert(lessons).values({
         organizationId: orgId, enrollmentId: en.id, studentId: en.studentId,
-        teacherId: en.teacherId ?? undefined, roomId: room?.id, startsAt, duration: 60,
+        teacherId: en.teacherId ?? undefined, startsAt, duration: 60,
         status, termId: activeTerm?.id ?? undefined,
       }).returning();
       lessonCount++;

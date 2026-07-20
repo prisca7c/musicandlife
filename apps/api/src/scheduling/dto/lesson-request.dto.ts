@@ -12,10 +12,6 @@ export class CreateLessonRequestDto {
   enrollmentId?: string;
 
   @IsOptional()
-  @IsUUID()
-  roomId?: string;
-
-  @IsOptional()
   @IsInt()
   @Min(15)
   @Max(240)

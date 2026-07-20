@@ -33,7 +33,6 @@ class BookLessonDto {
   @IsDateString() startsAt!: string;
   @IsInt() @Min(15) @Max(240) duration!: number;
   @IsOptional() @IsBoolean() @Type(() => Boolean) isTrialLesson?: boolean;
-  @IsOptional() @IsUUID() roomId?: string;
 }
 
 class CancelLessonDto {
@@ -389,7 +388,7 @@ export class FamilyPortalController {
 
     // Delegate the actual write to the scheduling service so self-service booking
     // runs under the SAME advisory lock + conflict checks as staff booking — this
-    // prevents double-booking a teacher/room (including concurrent races) and
+    // prevents double-booking a teacher (including concurrent races) and
     // reuses the hardened overlap window. The instant is passed as a Z-suffixed
     // ISO string, which round-trips through the service's zoned parse unchanged.
     const lesson = await this.scheduling.createLesson(user.orgId, {
@@ -399,7 +398,6 @@ export class FamilyPortalController {
       termId: enrollment.termId ?? undefined,
       startsAt: slotStart.toISOString(),
       duration: dto.duration,
-      roomId: dto.roomId ?? undefined,
       isTrialLesson: dto.isTrialLesson ?? false,
     });
 

@@ -15,7 +15,6 @@ import { FamiliesModule } from './families/families.module';
 import { StudentsModule } from './students/students.module';
 import { StaffModule } from './staff/staff.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
-import { RoomsModule } from './rooms/rooms.module';
 import { TermsModule } from './terms/terms.module';
 import { SchedulingModule } from './scheduling/scheduling.module';
 import { AttendanceModule } from './attendance/attendance.module';
@@ -55,7 +54,7 @@ import { FamilyPortalModule } from './family-portal/family-portal.module';
     AuthModule, OrganizationsModule, UsersModule,
     // PayrollModule before StaffModule so /staff/payroll beats /staff/:id
     PayrollModule, BillingModule,
-    FamiliesModule, StudentsModule, StaffModule, EnrollmentsModule, RoomsModule, TermsModule,
+    FamiliesModule, StudentsModule, StaffModule, EnrollmentsModule, TermsModule,
     SchedulingModule, AttendanceModule,
     MessagingModule, RegistrationModule, LeadsModule,
     ResourcesModule, ReportsModule,

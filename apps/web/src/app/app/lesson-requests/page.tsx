@@ -17,7 +17,6 @@ interface Req {
   notes: string | null;
   student: { firstName: string; lastName: string } | null;
   teacher: { firstName: string; lastName: string } | null;
-  room: { name: string } | null;
   enrollment: { instrument: string; lessonType: string; groupName: string | null } | null;
   requestedByUser: { email: string } | null;
   options: Option[];
@@ -99,7 +98,6 @@ export default function LessonRequestsPage() {
                     {r.enrollment?.instrument ? <span className="capitalize">{r.enrollment.instrument}</span> : 'Lesson'}
                     {r.enrollment?.lessonType === 'group' && r.enrollment?.groupName ? ` · ${r.enrollment.groupName}` : ''}
                     {` · ${r.duration} min`}
-                    {r.room ? ` · ${r.room.name}` : ''}
                     {r.requestedByUser ? ` · from ${r.requestedByUser.email}` : ''}
                   </p>
                   {r.notes && <p className="text-xs italic mt-1" style={{ color: 'var(--txt4)' }}>&ldquo;{r.notes}&rdquo;</p>}

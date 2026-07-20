@@ -16,7 +16,7 @@ import {
   createDb,
   organizations, users, memberships,
   staffMembers, staffPrivileges, families, guardians, students, enrollments,
-  terms, rooms, lessons, attendance, invoices, invoiceLineItems, payments,
+  terms, lessons, attendance, invoices, invoiceLineItems, payments,
   ledgerEntries, lessonCredits, leads, resources, threads, threadParticipants,
   messages, notes,
 } from './index';
@@ -68,7 +68,6 @@ async function main() {
 
   const activeTerm = await db.query.terms.findFirst({ where: and(eq(terms.organizationId, orgId), eq(terms.status, 'active')) });
   const existingTeachers = await db.query.staffMembers.findMany({ where: eq(staffMembers.organizationId, orgId) });
-  const existingRooms = await db.query.rooms.findMany({ where: eq(rooms.organizationId, orgId) });
 
   // ── 1. More teaching staff (existing 3 + 9 new = 12) ─────────────────────────
   console.log('Creating teaching staff…');
@@ -101,15 +100,6 @@ async function main() {
     }
     await db.update(staffMembers).set({ userId }).where(eq(staffMembers.id, t.id));
   }
-
-  // ── 2. More rooms ─────────────────────────────────────────────────────────────
-  if (existingRooms.length < 8) {
-    const need = 8 - existingRooms.length;
-    await db.insert(rooms).values(
-      Array.from({ length: need }, (_, i) => ({ organizationId: orgId, name: `Room ${existingRooms.length + i + 1}`, capacity: 2 })),
-    );
-  }
-  const allRooms = await db.query.rooms.findMany({ where: eq(rooms.organizationId, orgId) });
 
   // ── 3. Families + students (200 students across ~140 families) ──────────────
   console.log('Creating families and students…');
@@ -236,14 +226,13 @@ async function main() {
   // ── 6. Lessons + attendance (3 weeks back, this week, 1 week ahead) ──────────
   console.log('Creating lessons + attendance…');
   const now = new Date();
-  const lessonRows: { id?: string; enrollmentId: string; studentId: string; teacherId: string | null; roomId: string; startsAt: Date; duration: number; status: string; termId: string | null }[] = [];
+  const lessonRows: { id?: string; enrollmentId: string; studentId: string; teacherId: string | null; startsAt: Date; duration: number; status: string; termId: string | null }[] = [];
 
   for (const en of insertedEnrollments) {
     const rule = en.scheduleRule as { weekday: string; startTime: string };
     const weekdayIdx = WEEKDAY_NAMES.indexOf(rule.weekday) + 1; // 1=mon
     const [h, m] = rule.startTime.split(':').map(Number) as [number, number];
     const duration = en.lessonType === 'group' ? 60 : pick([30, 45, 60]);
-    const room = pick(allRooms);
 
     for (const weekOffset of [-3, -2, -1, 0, 1]) {
       const startsAt = isoAt(now, weekOffset, weekdayIdx, h, m);
@@ -254,7 +243,7 @@ async function main() {
         status = r < 0.82 ? 'completed' : r < 0.90 ? 'cancelled_no_makeup' : r < 0.96 ? 'cancelled_makeup' : 'cancelled_teacher';
       }
       lessonRows.push({
-        enrollmentId: en.id, studentId: en.studentId, teacherId: en.teacherId, roomId: room.id,
+        enrollmentId: en.id, studentId: en.studentId, teacherId: en.teacherId,
         startsAt, duration, status, termId: activeTerm?.id ?? null,
       });
     }
@@ -262,7 +251,7 @@ async function main() {
 
   const lessonInsertRows = lessonRows.map(l => ({
     organizationId: orgId, enrollmentId: l.enrollmentId, studentId: l.studentId,
-    teacherId: l.teacherId ?? undefined, roomId: l.roomId, startsAt: l.startsAt, duration: l.duration,
+    teacherId: l.teacherId ?? undefined, startsAt: l.startsAt, duration: l.duration,
     status: l.status as 'scheduled' | 'completed' | 'cancelled_no_makeup' | 'cancelled_makeup' | 'cancelled_teacher',
     termId: l.termId ?? undefined,
   }));

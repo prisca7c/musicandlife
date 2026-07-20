@@ -15,10 +15,6 @@ export class UpdateLessonDto {
   teacherId?: string;
 
   @IsOptional()
-  @IsUUID()
-  roomId?: string;
-
-  @IsOptional()
   @IsString()
   notes?: string;
 }

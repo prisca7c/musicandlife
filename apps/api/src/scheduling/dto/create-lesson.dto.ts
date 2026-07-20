@@ -19,10 +19,6 @@ export class CreateLessonDto {
 
   @IsOptional()
   @IsUUID()
-  roomId?: string;
-
-  @IsOptional()
-  @IsUUID()
   enrollmentId?: string;
 
   @IsOptional()
