@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { eq, and, or, ilike, sql } from 'drizzle-orm';
+import { eq, and, or, ilike, sql, inArray } from 'drizzle-orm';
 import { resources, guardians, students, families, staffMembers } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateResourceDto } from './dto/create-resource.dto';
@@ -47,6 +47,31 @@ export class ResourcesService {
 
   // Resource access is a paid subscription, separate from lesson billing —
   // gates GET for guardian/student roles only; staff always bypass.
+  // The student ids that belong to the caller's own family (empty for staff or an
+  // unlinked account). Used to isolate personal-scoped resources per family.
+  private async callerStudentIds(orgId: string, role: BaseRole, userId: string): Promise<string[]> {
+    let familyId: string | null = null;
+    if (role === 'guardian') {
+      const guardian = await this.db.db.query.guardians.findFirst({
+        where: and(eq(guardians.userId, userId), eq(guardians.organizationId, orgId)),
+        columns: { familyId: true },
+      });
+      familyId = guardian?.familyId ?? null;
+    } else if (role === 'student') {
+      const student = await this.db.db.query.students.findFirst({
+        where: and(eq(students.studentUserId, userId), eq(students.organizationId, orgId)),
+        columns: { familyId: true },
+      });
+      familyId = student?.familyId ?? null;
+    }
+    if (!familyId) return [];
+    const kids = await this.db.db.query.students.findMany({
+      where: and(eq(students.familyId, familyId), eq(students.organizationId, orgId)),
+      columns: { id: true },
+    });
+    return kids.map(k => k.id);
+  }
+
   private async hasResourceAccess(orgId: string, role: BaseRole, userId: string): Promise<boolean> {
     if (role !== 'guardian' && role !== 'student') return true;
 
@@ -94,6 +119,19 @@ export class ResourcesService {
     if (filters.instrument) conditions.push(eq(resources.instrument, filters.instrument));
     if (filters.teacherId) conditions.push(eq(resources.teacherId, filters.teacherId));
     if (filters.studentId) conditions.push(eq(resources.studentId, filters.studentId));
+
+    // Personal (student/family) resources are per-subject: a family/student caller
+    // may only see ones that are untargeted (a general library item, studentId
+    // NULL) or targeted at one of their OWN students. Without this, any student or
+    // guardian could read another student's assigned material by passing (or simply
+    // omitting) the studentId filter — the scope filter alone doesn't isolate them.
+    if (role === 'student' || role === 'guardian') {
+      const myStudentIds = await this.callerStudentIds(orgId, role, userId);
+      const personalOk = myStudentIds.length
+        ? or(sql`${resources.studentId} IS NULL`, inArray(resources.studentId, myStudentIds))!
+        : sql`${resources.studentId} IS NULL`;
+      conditions.push(or(sql`${resources.scope} NOT IN ('student', 'family')`, personalOk)!);
+    }
 
     return this.db.db.query.resources.findMany({
       where: and(...conditions),
