@@ -339,6 +339,22 @@ export class BillingService {
           .for('update');
         if (!family) throw new NotFoundException('Family not found');
 
+        // Validate the optional invoiceId belongs to this org AND this family
+        // before it reaches the payment insert. Without this a bogus id 500s on
+        // the FK constraint and a valid id from another family/studio would be
+        // stored as a cross-referenced payment.
+        if (dto.invoiceId) {
+          const invOwned = await tx.query.invoices.findFirst({
+            where: and(
+              eq(invoices.id, dto.invoiceId),
+              eq(invoices.organizationId, orgId),
+              eq(invoices.familyId, dto.familyId),
+            ),
+            columns: { id: true },
+          });
+          if (!invOwned) throw new NotFoundException('Invoice not found');
+        }
+
         // Guard against duplicate payments on an already-settled invoice. Because
         // the family row is locked above, concurrent full payments serialise here:
         // the first commits + marks the invoice paid, and every later one re-reads

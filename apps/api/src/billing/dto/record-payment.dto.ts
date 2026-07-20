@@ -1,4 +1,4 @@
-import { IsUUID, IsIn, IsInt, Min, IsOptional, IsString } from 'class-validator';
+import { IsUUID, IsIn, IsInt, Min, Max, IsOptional, IsString } from 'class-validator';
 
 export class RecordPaymentDto {
   @IsUUID()
@@ -11,8 +11,11 @@ export class RecordPaymentDto {
   @IsIn(['bank_transfer', 'cash', 'card', 'other'])
   method!: 'bank_transfer' | 'cash' | 'card' | 'other';
 
+  // Pence. Upper bound keeps an out-of-range value from overflowing the integer
+  // column (and the cached balance) and surfacing as an unhandled 500.
   @IsInt()
   @Min(1)
+  @Max(100_000_000) // £1,000,000
   amount!: number;
 
   @IsOptional()
