@@ -1,12 +1,17 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, HttpCode } from '@nestjs/common';
 import { IsIn, IsString, Matches } from 'class-validator';
 
+// 24-hour HH:MM. The previous /^\d{2}:\d{2}$/ let through out-of-range values
+// like "25:00" or "08:70", which slipped past the service's end>start check and
+// poisoned the availability/slot calculations downstream.
+const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 class AddAvailabilityDto {
   @IsIn(['monday','tuesday','wednesday','thursday','friday','saturday','sunday'])
   weekday!: string;
-  @IsString() @Matches(/^\d{2}:\d{2}$/)
+  @IsString() @Matches(HH_MM)
   startTime!: string;
-  @IsString() @Matches(/^\d{2}:\d{2}$/)
+  @IsString() @Matches(HH_MM)
   endTime!: string;
 }
 import { StaffService } from './staff.service';
