@@ -1,7 +1,12 @@
 import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and, sql } from 'drizzle-orm';
 import { attendance, lessons, enrollments, families, ledgerEntries, lessonCredits, staffMembers } from '@music-life/db';
+import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
+
+// The pooled db or an open transaction — the billing side-effects run on
+// whichever is passed so they share the mark-attendance transaction.
+type Executor = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
 import type { MarkAttendanceDto } from './dto/mark-attendance.dto';
 import { proratedAmount } from '../billing/billing.service';
 import type { Actor } from '../scheduling/scheduling.service';
@@ -105,14 +110,6 @@ export class AttendanceService {
       where: eq(attendance.lessonId, lessonId),
     });
 
-    // The credit/charge side-effects below are one-shot per lesson: consuming a
-    // credit, issuing a makeup credit, and posting a PAYG charge. Re-marking
-    // attendance (a routine correction, or a double-submit) must not apply them
-    // twice — doing so double-charged the family and drained/duplicated credits.
-    // They only fire on a transition INTO a consuming state; if the lesson was
-    // already in one, the effects have already been applied, so skip them.
-    const alreadyApplied = !!existing && CONSUMES_CREDIT_STATUSES.has(existing.status);
-
     const attendanceData = {
       status: dto.status,
       markedBy,
@@ -121,86 +118,157 @@ export class AttendanceService {
       actualEndedAt: dto.actualEndedAt ? new Date(dto.actualEndedAt) : undefined,
     };
 
-    let record;
-    if (existing) {
-      const [updated] = await this.db.db
-        .update(attendance)
-        .set({ ...attendanceData, actualStartedAt: dto.actualStartedAt ? new Date(dto.actualStartedAt) : existing.actualStartedAt, actualEndedAt: dto.actualEndedAt ? new Date(dto.actualEndedAt) : existing.actualEndedAt })
-        .where(eq(attendance.lessonId, lessonId))
-        .returning();
-      record = updated!;
-    } else {
-      const [inserted] = await this.db.db
-        .insert(attendance)
-        .values({ organizationId: orgId, lessonId, ...attendanceData })
-        .returning();
-      record = inserted!;
-    }
+    // The whole thing runs in one transaction so the attendance row, the lesson
+    // status, and the credit/charge side-effects commit together (or not at all).
+    return this.db.db.transaction(async (tx) => {
+      let record;
+      if (existing) {
+        const [updated] = await tx
+          .update(attendance)
+          .set({ ...attendanceData, actualStartedAt: dto.actualStartedAt ? new Date(dto.actualStartedAt) : existing.actualStartedAt, actualEndedAt: dto.actualEndedAt ? new Date(dto.actualEndedAt) : existing.actualEndedAt })
+          .where(eq(attendance.lessonId, lessonId))
+          .returning();
+        record = updated!;
+      } else {
+        const [inserted] = await tx
+          .insert(attendance)
+          .values({ organizationId: orgId, lessonId, ...attendanceData })
+          .returning();
+        record = inserted!;
+      }
 
-    // Update lesson status to match attendance
-    await this.db.db.update(lessons)
-      .set({
-        status: LESSON_STATUS_MAP[dto.status],
-        cancelledAt: dto.status !== 'present' ? new Date() : null,
-        actualStartedAt: dto.actualStartedAt ? new Date(dto.actualStartedAt) : undefined,
-        actualEndedAt: dto.actualEndedAt ? new Date(dto.actualEndedAt) : undefined,
-        updatedAt: new Date(),
-      })
-      .where(eq(lessons.id, lessonId));
+      // Update lesson status to match attendance
+      await tx.update(lessons)
+        .set({
+          status: LESSON_STATUS_MAP[dto.status],
+          cancelledAt: dto.status !== 'present' ? new Date() : null,
+          actualStartedAt: dto.actualStartedAt ? new Date(dto.actualStartedAt) : undefined,
+          actualEndedAt: dto.actualEndedAt ? new Date(dto.actualEndedAt) : undefined,
+          updatedAt: new Date(),
+        })
+        .where(eq(lessons.id, lessonId));
 
+      // Billing effects fire only when the attendance status actually changes.
+      // On a change we FULLY reverse whatever the previous status applied
+      // (release a consumed credit, void an unused makeup credit, refund a
+      // per-lesson charge) and then apply the new status — so a correction like
+      // present -> cancelled_no_pay doesn't leave the family charged, and a
+      // re-save of the same status is a billing no-op.
+      const statusChanged = !existing || existing.status !== dto.status;
+      if (statusChanged) {
+        if (existing) await this.reverseLessonBilling(tx, orgId, lesson);
+        await this.applyLessonBilling(tx, orgId, lesson, dto.status);
+      }
+
+      return record;
+    });
+  }
+
+  // Apply the credit/charge effects for a newly-set attendance status.
+  private async applyLessonBilling(
+    tx: Executor,
+    orgId: string,
+    lesson: { id: string; enrollmentId: string | null; studentId: string; duration: number; enrollment: { id: string; lessonType: string } | null },
+    status: string,
+  ) {
+    if (!CONSUMES_CREDIT_STATUSES.has(status)) return;
     const enrollment = lesson.enrollment;
 
-    // Group lessons: no credits, just charge if present/late-cancel
+    // Group lessons: no credit pool, just a per-lesson charge.
     if (enrollment?.lessonType === 'group') {
-      if (CONSUMES_CREDIT_STATUSES.has(dto.status) && !alreadyApplied) {
-        this.postAutoCharge(orgId, lesson).catch(err =>
-          this.logger.warn(`Auto-charge failed for lesson ${lessonId}: ${err}`),
-        );
-      }
-      return record;
+      await this.postAutoCharge(tx, orgId, lesson);
+      return;
     }
 
-    // Private lessons: credit pool logic
-    if (CONSUMES_CREDIT_STATUSES.has(dto.status) && !alreadyApplied) {
-      // Consume 1 available lesson credit (oldest first)
-      await this.consumeOneCredit(orgId, lesson.studentId, lessonId);
-    }
+    // Private lessons: consume a prepaid credit if one is available…
+    await this.consumeOneCredit(tx, orgId, lesson.studentId, lesson.id);
 
-    if (dto.status === 'absent_makeup' && !alreadyApplied) {
-      // Issue a makeup credit so the student can rebook at no extra cost. Guard
-      // on sourceLessonId too so this lesson can only ever mint one makeup credit.
-      const existingMakeup = await this.db.db.query.lessonCredits.findFirst({
+    // …issue a makeup credit for an absent-with-makeup (one per lesson)…
+    if (status === 'absent_makeup') {
+      const existingMakeup = await tx.query.lessonCredits.findFirst({
         where: and(
           eq(lessonCredits.organizationId, orgId),
           eq(lessonCredits.type, 'makeup'),
-          eq(lessonCredits.sourceLessonId, lessonId),
+          eq(lessonCredits.sourceLessonId, lesson.id),
         ),
         columns: { id: true },
       });
       if (!existingMakeup) {
-        await this.db.db.insert(lessonCredits).values({
+        await tx.insert(lessonCredits).values({
           organizationId: orgId,
           studentId: lesson.studentId,
           enrollmentId: enrollment?.id ?? null,
           type: 'makeup',
-          sourceLessonId: lessonId,
+          sourceLessonId: lesson.id,
           status: 'available',
         });
       }
     }
 
-    // For present/absent_no_makeup: if no prepaid credit existed (PAYG), charge the family
-    if (CONSUMES_CREDIT_STATUSES.has(dto.status) && enrollment && !alreadyApplied) {
-      this.postAutoCharge(orgId, lesson).catch(err =>
-        this.logger.warn(`Auto-charge (PAYG) failed for lesson ${lessonId}: ${err}`),
-      );
-    }
-
-    return record;
+    // …and, when no prepaid credit covered it, charge the family (PAYG).
+    if (enrollment) await this.postAutoCharge(tx, orgId, lesson);
   }
 
-  private async consumeOneCredit(orgId: string, studentId: string, lessonId: string) {
-    const credit = await this.db.db.query.lessonCredits.findFirst({
+  // Undo the credit/charge effects a previous attendance status applied to this
+  // lesson. Driven purely by current state, so it's safe to run before
+  // re-applying the new status' effects.
+  private async reverseLessonBilling(tx: Executor, orgId: string, lesson: { id: string }) {
+    // Release any prepaid credit that was consumed by this lesson.
+    const consumed = await tx.query.lessonCredits.findMany({
+      where: and(
+        eq(lessonCredits.organizationId, orgId),
+        eq(lessonCredits.usedInLessonId, lesson.id),
+        eq(lessonCredits.status, 'used'),
+      ),
+      columns: { id: true },
+    });
+    for (const c of consumed) {
+      await tx.update(lessonCredits)
+        .set({ status: 'available', usedInLessonId: null })
+        .where(eq(lessonCredits.id, c.id));
+    }
+
+    // Void a makeup credit this lesson issued — but only if it hasn't been spent.
+    await tx.delete(lessonCredits).where(and(
+      eq(lessonCredits.organizationId, orgId),
+      eq(lessonCredits.type, 'makeup'),
+      eq(lessonCredits.sourceLessonId, lesson.id),
+      eq(lessonCredits.status, 'available'),
+    ));
+
+    // Refund any per-lesson auto-charge posted for this lesson: restore the
+    // family balance and drop the (system-generated) charge rows so the next
+    // status can post a fresh charge if it warrants one.
+    const charges = await tx.query.ledgerEntries.findMany({
+      where: and(
+        eq(ledgerEntries.organizationId, orgId),
+        eq(ledgerEntries.type, 'charge'),
+        eq(ledgerEntries.lessonId, lesson.id),
+      ),
+      columns: { id: true, amount: true, familyId: true },
+    });
+    if (charges.length === 0) return;
+    const familyId = charges[0]!.familyId;
+    const restore = -charges.reduce((s, e) => s + e.amount, 0); // charges are negative → restore is positive
+
+    await tx.delete(ledgerEntries).where(and(
+      eq(ledgerEntries.organizationId, orgId),
+      eq(ledgerEntries.type, 'charge'),
+      eq(ledgerEntries.lessonId, lesson.id),
+    ));
+
+    if (restore === 0) return;
+    const [family] = await tx.select({ balanceCached: families.balanceCached }).from(families)
+      .where(and(eq(families.id, familyId), eq(families.organizationId, orgId)))
+      .for('update');
+    if (!family) return;
+    await tx.update(families)
+      .set({ balanceCached: family.balanceCached + restore, updatedAt: new Date() })
+      .where(eq(families.id, familyId));
+  }
+
+  private async consumeOneCredit(tx: Executor, orgId: string, studentId: string, lessonId: string) {
+    const credit = await tx.query.lessonCredits.findFirst({
       where: and(
         eq(lessonCredits.organizationId, orgId),
         eq(lessonCredits.studentId, studentId),
@@ -210,48 +278,67 @@ export class AttendanceService {
     });
     if (!credit) return; // PAYG — no credit to consume, auto-charge handles billing
 
-    await this.db.db.update(lessonCredits)
+    await tx.update(lessonCredits)
       .set({ status: 'used', usedInLessonId: lessonId })
       .where(eq(lessonCredits.id, credit.id));
   }
 
-  private async postAutoCharge(orgId: string, lesson: { id: string; enrollmentId: string | null; studentId: string; duration: number }) {
+  private async postAutoCharge(tx: Executor, orgId: string, lesson: { id: string; enrollmentId: string | null; studentId: string; duration: number }) {
     if (!lesson.enrollmentId) return;
 
-    const enrollment = await this.db.db.query.enrollments.findFirst({
+    const enrollment = await tx.query.enrollments.findFirst({
       where: eq(enrollments.id, lesson.enrollmentId),
-      with: { student: { with: { family: { columns: { id: true, balanceCached: true } } } } },
+      with: { student: { with: { family: { columns: { id: true } } } } },
     });
     if (!enrollment) return;
 
     // Only charge PAYG families (no prepaid credits) — if a credit was consumed, skip charging
-    const hasCredit = await this.db.db.query.lessonCredits.findFirst({
+    const hasCredit = await tx.query.lessonCredits.findFirst({
       where: and(
         eq(lessonCredits.organizationId, orgId),
         eq(lessonCredits.studentId, enrollment.studentId),
         eq(lessonCredits.usedInLessonId, lesson.id),
       ),
+      columns: { id: true },
     });
     if (hasCredit) return; // credit covered this lesson, no PAYG charge needed
 
-    const family = (enrollment.student as { family?: { id: string; balanceCached: number } })?.family;
+    // Never post a second charge for the same lesson (idempotent re-apply).
+    const existingCharge = await tx.query.ledgerEntries.findFirst({
+      where: and(
+        eq(ledgerEntries.organizationId, orgId),
+        eq(ledgerEntries.type, 'charge'),
+        eq(ledgerEntries.lessonId, lesson.id),
+      ),
+      columns: { id: true },
+    });
+    if (existingCharge) return;
+
+    const familyId = (enrollment.student as { family?: { id: string } })?.family?.id;
+    if (!familyId) return;
+
+    // Lock the family row so concurrent charges/payments can't clobber the balance.
+    const [family] = await tx.select({ balanceCached: families.balanceCached }).from(families)
+      .where(and(eq(families.id, familyId), eq(families.organizationId, orgId)))
+      .for('update');
     if (!family) return;
 
     const amount = -proratedAmount(enrollment.rate, enrollment.defaultDuration, lesson.duration);
     const newBalance = family.balanceCached + amount;
 
-    await this.db.db.insert(ledgerEntries).values({
+    await tx.insert(ledgerEntries).values({
       organizationId: orgId,
-      familyId: family.id,
+      familyId,
       type: 'charge',
       amount,
       balanceAfter: newBalance,
+      lessonId: lesson.id,
       description: `Lesson charge`,
     });
 
-    await this.db.db.update(families)
+    await tx.update(families)
       .set({ balanceCached: newBalance, updatedAt: new Date() })
-      .where(eq(families.id, family.id));
+      .where(eq(families.id, familyId));
   }
 
   async getAttendance(orgId: string, lessonId: string, actor?: Actor) {

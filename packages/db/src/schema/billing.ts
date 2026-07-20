@@ -54,11 +54,18 @@ export const ledgerEntries = pgTable(
     amount: integer('amount').notNull(),
     balanceAfter: integer('balance_after').notNull(),
     invoiceId: uuid('invoice_id').references(() => invoices.id),
+    // The lesson a per-lesson auto-charge was posted for. Lets an attendance
+    // change find and reverse the exact charge it originally created (and dedupe
+    // so one lesson never posts two charges).
+    lessonId: uuid('lesson_id').references(() => lessons.id),
     description: text('description'),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('ledger_entries_family_idx').on(t.organizationId, t.familyId, t.occurredAt)],
+  (t) => [
+    index('ledger_entries_family_idx').on(t.organizationId, t.familyId, t.occurredAt),
+    index('ledger_entries_lesson_idx').on(t.lessonId),
+  ],
 );
 
 // ─── Payments ─────────────────────────────────────────────────────────────────
