@@ -272,15 +272,25 @@ export class PayrollService {
       where: and(eq(rateChangeRequests.id, id), eq(rateChangeRequests.organizationId, orgId)),
     });
     if (!req) throw new NotFoundException('Request not found');
+    if (req.status !== 'pending') throw new BadRequestException('Request already decided');
 
-    await this.db.db.update(rateChangeRequests)
+    // Guarded claim: only transition if still pending. Without this an already
+    // approved request could be approved again and re-write the staff rate to a
+    // now-stale value (and two concurrent approvals would both apply it).
+    const claimed = await this.db.db.update(rateChangeRequests)
       .set({ status: decision, decidedBy, decidedAt: new Date() })
-      .where(eq(rateChangeRequests.id, id));
+      .where(and(
+        eq(rateChangeRequests.id, id),
+        eq(rateChangeRequests.organizationId, orgId),
+        eq(rateChangeRequests.status, 'pending'),
+      ))
+      .returning({ id: rateChangeRequests.id });
+    if (claimed.length === 0) throw new BadRequestException('Request already decided');
 
     if (decision === 'approved') {
       await this.db.db.update(staffMembers)
         .set({ hourlyRate: req.requestedRate, updatedAt: new Date() })
-        .where(eq(staffMembers.id, req.staffId));
+        .where(and(eq(staffMembers.id, req.staffId), eq(staffMembers.organizationId, orgId)));
     }
 
     return { id, status: decision };
