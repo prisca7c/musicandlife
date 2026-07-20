@@ -134,10 +134,15 @@ export class ReportsService {
     const weekScheduled = weeklyLessonStats.find(l => l.status === 'scheduled')?.count ?? 0;
     const weekCompleted = weeklyLessonStats.find(l => l.status === 'completed')?.count ?? 0;
 
-    // Roll up instrument breakdown — merge private/group counts per instrument
+    // Roll up instrument breakdown — merge private/group counts per instrument.
+    // `instrument` is free text, so normalise the key (trim + lowercase) or the
+    // same instrument entered with different casing/whitespace ("Piano" vs
+    // "piano") shows up as two separate rows. The label is emitted lowercased and
+    // the dashboard capitalises it for display.
     const instrMap = new Map<string, { private: number; group: number }>();
     for (const row of enrollmentByInstrument) {
-      const key = row.instrument;
+      const key = row.instrument.trim().toLowerCase();
+      if (!key) continue;
       const existing = instrMap.get(key) ?? { private: 0, group: 0 };
       if (row.lessonType === 'private') existing.private += row.count;
       else existing.group += row.count;
