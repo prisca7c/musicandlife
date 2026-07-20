@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { eq, and, gte, lte } from 'drizzle-orm';
 import { payrollRuns, payrollItems, expenses, rateChangeRequests, lessons, attendance, staffMembers, files } from '@music-life/db';
 import { DbService } from '../db/db.service';
@@ -120,6 +120,21 @@ export class PayrollService {
       where: and(eq(staffMembers.id, dto.staffId), eq(staffMembers.organizationId, orgId)),
     });
     if (!staff) throw new NotFoundException('Staff member not found');
+
+    // Reject a duplicate run for the same teacher+period. The batch path
+    // (createPayrollRunsForAll) already skips existing runs; without the same
+    // guard here, two single-creates would produce two runs over the identical
+    // lessons and pay the teacher twice if both were approved.
+    const existing = await this.db.db.query.payrollRuns.findFirst({
+      where: and(
+        eq(payrollRuns.organizationId, orgId),
+        eq(payrollRuns.staffId, dto.staffId),
+        eq(payrollRuns.periodStart, dto.periodStart),
+        eq(payrollRuns.periodEnd, dto.periodEnd),
+      ),
+      columns: { id: true },
+    });
+    if (existing) throw new ConflictException('A payroll run already exists for this teacher and period');
 
     const computed = await this.computeRunItems(orgId, dto.staffId, staff.hourlyRate, new Date(dto.periodStart), new Date(dto.periodEnd));
     return this.persistRun(orgId, dto.staffId, dto.periodStart, dto.periodEnd, staff.hourlyRate, computed);
