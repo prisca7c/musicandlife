@@ -324,7 +324,7 @@ export default function BillingPage() {
 
   // Cached read — instant on revisit, revalidates in the background. Key stays
   // null until we know the role so we never fire the staff route for a parent.
-  const { data: invoices = [], mutate } = useApi<Invoice[]>(
+  const { data: invoices = [], isLoading, mutate } = useApi<Invoice[]>(
     role ? (isGuardian ? '/family/invoices' : '/invoices') : null,
   );
   const load = () => mutate();
@@ -372,7 +372,12 @@ export default function BillingPage() {
             </tr>
           </thead>
           <tbody>
-            {invoices.length === 0 && (
+            {invoices.length === 0 && (!role || isLoading) && (
+              <tr><td colSpan={isGuardian ? 6 : 7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+                Loading…
+              </td></tr>
+            )}
+            {invoices.length === 0 && role && !isLoading && (
               <tr><td colSpan={isGuardian ? 6 : 7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No invoices yet.
               </td></tr>
