@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { eq, and, gte, lte } from 'drizzle-orm';
-import { payrollRuns, payrollItems, expenses, rateChangeRequests, lessons, attendance, staffMembers } from '@music-life/db';
+import { payrollRuns, payrollItems, expenses, rateChangeRequests, lessons, attendance, staffMembers, files } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreatePayrollRunDto } from './dto/create-payroll-run.dto';
 import type { CreateExpenseDto } from './dto/create-expense.dto';
@@ -204,6 +204,15 @@ export class PayrollService {
 
   async createExpense(orgId: string, dto: CreateExpenseDto, actor: Actor) {
     const staffId = await this.resolveTargetStaffId(orgId, actor, dto.staffId);
+    // receiptFileId is a caller-supplied FK to files: a bogus id 500s on the
+    // constraint and a foreign-org id would attach another studio's file.
+    if (dto.receiptFileId) {
+      const file = await this.db.db.query.files.findFirst({
+        where: and(eq(files.id, dto.receiptFileId), eq(files.organizationId, orgId)),
+        columns: { id: true },
+      });
+      if (!file) throw new NotFoundException('Receipt file not found');
+    }
     const [expense] = await this.db.db.insert(expenses).values({ ...dto, staffId, organizationId: orgId }).returning();
     return expense!;
   }
