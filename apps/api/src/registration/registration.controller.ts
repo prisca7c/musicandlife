@@ -6,7 +6,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { DbService } from '../db/db.service';
-import { ilike, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { families, organizations } from '@music-life/db';
 import type { RequestUser } from '@music-life/types';
 
@@ -31,13 +31,20 @@ export class RegistrationController {
       where: eq(organizations.slug, 'music-and-life'),
     });
     if (!org) return [];
+    // Match the exact email in the DB (case-insensitive) rather than loading the
+    // whole families table into memory on every unauthenticated call. Still exact-
+    // only — this endpoint lets a sibling confirm an existing family to join, so it
+    // never does prefix/partial matching.
     const results = await this.db.db.query.families.findMany({
-      where: eq(families.organizationId, org.id),
-      columns: { id: true, name: true, email: true },
+      where: and(
+        eq(families.organizationId, org.id),
+        sql`lower(${families.email}) = ${q.toLowerCase()}`,
+      ),
+      columns: { name: true, email: true },
+      limit: 1,
     });
-    // Only match by exact email for privacy
     return results
-      .filter(f => f.email?.toLowerCase() === q.toLowerCase())
+      .filter(f => f.email)
       .map(f => ({ email: f.email!, name: f.name }));
   }
 
