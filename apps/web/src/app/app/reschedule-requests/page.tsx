@@ -37,7 +37,7 @@ export default function RescheduleRequestsPage() {
 
   // Cached read: revisiting renders instantly, then revalidates. mutate()
   // refreshes after an approve/deny.
-  const { data: requests = [], isLoading: loading, mutate } = useApi<Req[]>('/reschedule-requests?status=pending');
+  const { data: requests = [], isLoading: loading, error: loadError, mutate } = useApi<Req[]>('/reschedule-requests?status=pending');
   const load = () => mutate();
 
   async function approve(id: string, chosenStartsAt: string) {
@@ -79,7 +79,17 @@ export default function RescheduleRequestsPage() {
         </div>
       )}
 
-      {loading ? (
+      {/* A failed fetch used to leave this page on "Loading…" forever: SWR keeps
+          retrying, and with no data yet every retry re-enters the loading state.
+          Show what went wrong instead of an eternal spinner. */}
+      {loadError ? (
+        <div className="rounded-2xl px-6 py-12 text-center" style={{ background: 'var(--card)', border: '1px solid var(--bd)' }}>
+          <p className="text-sm mb-3" style={{ color: 'var(--coral)' }}>
+            {loadError instanceof Error ? loadError.message : 'Could not load reschedule requests.'}
+          </p>
+          <button onClick={() => mutate()} className="ui-btn-ghost text-xs px-3 py-1.5">Try again</button>
+        </div>
+      ) : loading ? (
         <p className="text-sm" style={{ color: 'var(--txt3)' }}>Loading…</p>
       ) : requests.length === 0 ? (
         <div className="rounded-2xl px-6 py-12 text-center" style={{ background: 'var(--card)', border: '1px solid var(--bd)' }}>
