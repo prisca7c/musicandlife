@@ -876,7 +876,7 @@ export class SchedulingService {
     }
   }
 
-  async getRescheduleRequests(orgId: string, status?: string) {
+  async getRescheduleRequests(orgId: string, status?: string, actor?: Actor) {
     const rows = await this.db.db.query.rescheduleRequests.findMany({
       where: status
         ? and(eq(rescheduleRequests.organizationId, orgId), eq(rescheduleRequests.status, status as 'pending' | 'approved' | 'denied'))
@@ -888,11 +888,20 @@ export class SchedulingService {
       orderBy: (r, { desc }) => [desc(r.createdAt)],
     });
 
+    // Teachers may only see requests against lessons they teach. This list is
+    // otherwise studio-wide, so without scoping, opening the page to teachers
+    // would show every family's reschedule requests to every teacher.
+    let scoped = rows;
+    if (actor?.role === 'teacher') {
+      const staffId = await this.resolveStaffId(orgId, actor.userId);
+      scoped = rows.filter((r) => r.lesson?.teacherId === staffId);
+    }
+
     // Annotate each ranked option so staff can see at a glance which times are
     // free + within the teacher's hours — the basis for slotting students
     // back-to-back instead of chasing one proposed time at a time.
     const tz = await this.getOrgTimezone(this.db.db, orgId);
-    return Promise.all(rows.map(async (r) => {
+    return Promise.all(scoped.map(async (r) => {
       const lesson = r.lesson;
       const duration = lesson?.duration ?? 30;
       const teacherId = lesson?.teacherId ?? undefined;
@@ -912,12 +921,19 @@ export class SchedulingService {
     }));
   }
 
-  async decideRescheduleRequest(orgId: string, id: string, decision: 'approved' | 'denied', decidedBy: string, reason?: string, chosenStartsAt?: string) {
+  async decideRescheduleRequest(orgId: string, id: string, decision: 'approved' | 'denied', decidedBy: string, reason?: string, chosenStartsAt?: string, actor?: Actor) {
     const req = await this.db.db.query.rescheduleRequests.findFirst({
       where: and(eq(rescheduleRequests.id, id), eq(rescheduleRequests.organizationId, orgId)),
+      with: { lesson: { columns: { teacherId: true } } },
     });
     if (!req) throw new NotFoundException('Request not found');
     if (req.status !== 'pending') throw new BadRequestException('Request already decided');
+
+    // A teacher may only decide a request against a lesson they teach.
+    if (actor?.role === 'teacher') {
+      const staffId = await this.resolveStaffId(orgId, actor.userId);
+      if (!staffId || req.lesson?.teacherId !== staffId) throw new ForbiddenException('Not your lesson');
+    }
 
     // Resolve which ranked time to approve (defaults to the 1st choice), and
     // validate it BEFORE claiming so a bad pick fails cleanly without leaving the

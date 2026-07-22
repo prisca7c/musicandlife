@@ -141,22 +141,27 @@ export class SchedulingController {
     return this.scheduling.createRescheduleRequest(user.orgId, dto, { role: user.role, userId: user.userId });
   }
 
+  // Teachers are shown this page in the nav and are the people who actually
+  // know whether a proposed time works, so they can read and decide requests —
+  // scoped in the service to lessons they teach. Previously the route required
+  // receptionist+, so a teacher opening it got a 403 that the page rendered as
+  // a permanent "Loading…".
   @Get('reschedule-requests')
-  @Roles('receptionist')
+  @Roles('teacher')
   getRequests(@CurrentUser() user: RequestUser, @Query('status') status?: string) {
-    return this.scheduling.getRescheduleRequests(user.orgId, status);
+    return this.scheduling.getRescheduleRequests(user.orgId, status, { role: user.role, userId: user.userId });
   }
 
   @Post('reschedule-requests/:id/approve')
-  @Roles('receptionist')
+  @Roles('teacher')
   approve(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: DecideRescheduleDto) {
-    return this.scheduling.decideRescheduleRequest(user.orgId, id, 'approved', user.userId, dto.reason, dto.chosenStartsAt);
+    return this.scheduling.decideRescheduleRequest(user.orgId, id, 'approved', user.userId, dto.reason, dto.chosenStartsAt, { role: user.role, userId: user.userId });
   }
 
   @Post('reschedule-requests/:id/deny')
-  @Roles('receptionist')
+  @Roles('teacher')
   deny(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: DecideRescheduleDto) {
-    return this.scheduling.decideRescheduleRequest(user.orgId, id, 'denied', user.userId, dto.reason);
+    return this.scheduling.decideRescheduleRequest(user.orgId, id, 'denied', user.userId, dto.reason, undefined, { role: user.role, userId: user.userId });
   }
 
   // ─── Lesson credits ───────────────────────────────────────────────────────
