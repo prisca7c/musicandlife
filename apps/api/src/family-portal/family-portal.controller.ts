@@ -405,6 +405,18 @@ export class FamilyPortalController {
     });
     if (!enrollment) throw new NotFoundException('Enrollment not found');
 
+    // The teacher and the enrollment were picked independently in the portal and
+    // never checked against each other. A parent could select their child's
+    // piano enrollment and book it with the cello teacher: the lesson landed on
+    // the wrong teacher's timetable, payroll paid that teacher, and the family
+    // was billed the piano enrollment's rate. The enrollment decides who teaches
+    // it; only an enrollment with no teacher assigned is open to a choice.
+    if (enrollment.teacherId && enrollment.teacherId !== dto.teacherId) {
+      throw new BadRequestException(
+        'That teacher does not teach this instrument for this student. Please choose the instrument first — the teacher is set by the enrolment.',
+      );
+    }
+
     const slotStart = new Date(dto.startsAt);
     if (isNaN(slotStart.getTime())) throw new BadRequestException('Invalid start time');
     // A parent/student must not be able to self-book a lesson in the past.
@@ -475,15 +487,54 @@ export class FamilyPortalController {
     return { id: lessonId, status, hoursUntil: Math.round(hoursUntil) };
   }
 
+  // The staff ids a family's students are actually linked to, via enrollment or
+  // explicit assignment. Shared by the booking picker and the availability
+  // visual so the two can never disagree about who "your teacher" is.
+  private async familyTeacherIds(orgId: string, studentIds: string[]): Promise<string[]> {
+    if (studentIds.length === 0) return [];
+    const [enr, assigns] = await Promise.all([
+      this.db.db.query.enrollments.findMany({
+        where: and(eq(enrollments.organizationId, orgId), inArray(enrollments.studentId, studentIds)),
+        columns: { teacherId: true },
+      }),
+      this.db.db.query.teacherAssignments.findMany({
+        where: and(eq(teacherAssignments.organizationId, orgId), inArray(teacherAssignments.studentId, studentIds)),
+        columns: { staffId: true },
+      }),
+    ]);
+    return [...new Set([
+      ...enr.map(e => e.teacherId).filter((id): id is string => !!id),
+      ...assigns.map(a => a.staffId),
+    ])];
+  }
+
   // ─── List teachers with availability (for booking picker) ─────────────────
+  // Scoped to THIS family's teachers. It used to return the entire active
+  // roster, so a parent's booking picker offered every teacher in the studio —
+  // which is why the dropdown showed staff with open slots who had nothing to
+  // do with the family, while their own teacher looked unavailable. Booking
+  // against one of those strangers also produced a lesson whose teacher didn't
+  // match the enrollment being billed (see the guard in bookLesson below).
   @Get('teachers')
   @Roles('student')
   async getTeachers(@CurrentUser() user: RequestUser) {
-    const teachers = await this.db.db.query.staffMembers.findMany({
-      where: and(eq(staffMembers.organizationId, user.orgId), eq(staffMembers.status, 'active')),
+    const familyId = await this.resolveFamilyId(user.userId, user.orgId);
+    if (!familyId) return [];
+    const family = await this.db.db.query.families.findFirst({
+      where: eq(families.id, familyId),
+      with: { students: { columns: { id: true } } },
+    });
+    const teacherIds = await this.familyTeacherIds(user.orgId, family?.students.map(s => s.id) ?? []);
+    if (teacherIds.length === 0) return [];
+
+    return this.db.db.query.staffMembers.findMany({
+      where: and(
+        eq(staffMembers.organizationId, user.orgId),
+        eq(staffMembers.status, 'active'),
+        inArray(staffMembers.id, teacherIds),
+      ),
       columns: { id: true, firstName: true, lastName: true, instruments: true, defaultDuration: true },
     });
-    return teachers;
   }
 
   // ─── This family's own teachers' weekly availability windows ───────────────
@@ -500,22 +551,7 @@ export class FamilyPortalController {
       with: { students: { columns: { id: true } } },
     });
     const studentIds = family?.students.map(s => s.id) ?? [];
-    if (studentIds.length === 0) return [];
-
-    const [enr, assigns] = await Promise.all([
-      this.db.db.query.enrollments.findMany({
-        where: and(eq(enrollments.organizationId, user.orgId), inArray(enrollments.studentId, studentIds)),
-        columns: { teacherId: true },
-      }),
-      this.db.db.query.teacherAssignments.findMany({
-        where: and(eq(teacherAssignments.organizationId, user.orgId), inArray(teacherAssignments.studentId, studentIds)),
-        columns: { staffId: true },
-      }),
-    ]);
-    const teacherIds = [...new Set([
-      ...enr.map(e => e.teacherId).filter((id): id is string => !!id),
-      ...assigns.map(a => a.staffId),
-    ])];
+    const teacherIds = await this.familyTeacherIds(user.orgId, studentIds);
     if (teacherIds.length === 0) return [];
 
     const [wins, teachers] = await Promise.all([
