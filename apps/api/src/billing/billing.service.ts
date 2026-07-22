@@ -235,12 +235,92 @@ export class BillingService {
   }
 
   async sendInvoice(orgId: string, id: string) {
-    await this.getInvoice(orgId, id);
+    const inv = await this.getInvoice(orgId, id);
     const [updated] = await this.db.db.update(invoices)
       .set({ status: 'sent', updatedAt: new Date() })
       .where(and(eq(invoices.id, id), eq(invoices.organizationId, orgId)))
       .returning();
+    // Issuing the invoice is what puts the money on the family's account.
+    if (inv.status !== 'sent') await this.syncManualInvoiceCharge(orgId, id);
     return updated!;
+  }
+
+  /**
+   * Post a ledger charge for an invoice's MANUAL lines — the ones with no
+   * lessonId.
+   *
+   * Lesson lines are deliberately excluded: attendance already posted a charge
+   * for each of those via postAutoCharge, and charging again here would bill
+   * the family twice for the same lesson. Manual lines had no such counterpart,
+   * so nothing ever debited the family for them: a hand-raised invoice left the
+   * balance untouched, and paying it pushed the family into credit by the full
+   * invoice amount (proved live — a settled £42.75 invoice left a lone
+   * `payment 4275` entry and a +£42.75 balance).
+   *
+   * Reconciling rather than one-shot: it re-runs whenever the invoice is issued
+   * or its lines change, so the single charge entry always equals the current
+   * manual total.
+   */
+  private async syncManualInvoiceCharge(orgId: string, invoiceId: string) {
+    await this.db.db.transaction(async (tx) => {
+      const inv = await tx.query.invoices.findFirst({
+        where: and(eq(invoices.id, invoiceId), eq(invoices.organizationId, orgId)),
+        columns: { id: true, familyId: true },
+      });
+      if (!inv) return;
+
+      const existing = await tx.query.ledgerEntries.findFirst({
+        where: and(
+          eq(ledgerEntries.organizationId, orgId),
+          eq(ledgerEntries.type, 'charge'),
+          eq(ledgerEntries.invoiceId, invoiceId),
+        ),
+      });
+
+      const items = await tx.query.invoiceLineItems.findMany({
+        where: eq(invoiceLineItems.invoiceId, invoiceId),
+        columns: { amount: true, lessonId: true },
+      });
+      const amount = -items.filter(i => !i.lessonId).reduce((s, i) => s + i.amount, 0);
+
+      // Nothing to post, and nothing posted before → done.
+      if (amount === 0 && !existing) return;
+      // Already correct — this runs on every send and line-item edit.
+      if (existing && existing.amount === amount) return;
+
+      // Lock the family row so a concurrent payment can't clobber the balance.
+      const [family] = await tx.select({ balanceCached: families.balanceCached }).from(families)
+        .where(and(eq(families.id, inv.familyId), eq(families.organizationId, orgId)))
+        .for('update');
+      if (!family) return;
+
+      // Back out whatever was posted before, then post the current total, so a
+      // line added or edited after the invoice was issued stays in step.
+      const balanceWithoutCharge = family.balanceCached - (existing?.amount ?? 0);
+      const newBalance = balanceWithoutCharge + amount;
+
+      if (existing && amount === 0) {
+        await tx.delete(ledgerEntries).where(eq(ledgerEntries.id, existing.id));
+      } else if (existing) {
+        await tx.update(ledgerEntries)
+          .set({ amount, balanceAfter: newBalance })
+          .where(eq(ledgerEntries.id, existing.id));
+      } else {
+        await tx.insert(ledgerEntries).values({
+          organizationId: orgId,
+          familyId: inv.familyId,
+          type: 'charge',
+          amount,
+          balanceAfter: newBalance,
+          invoiceId,
+          description: 'Invoice charge',
+        });
+      }
+
+      await tx.update(families)
+        .set({ balanceCached: newBalance, updatedAt: new Date() })
+        .where(eq(families.id, inv.familyId));
+    });
   }
 
   async voidInvoice(orgId: string, id: string) {
@@ -250,7 +330,35 @@ export class BillingService {
       .set({ status: 'void', updatedAt: new Date() })
       .where(eq(invoices.id, id))
       .returning();
+    // Cancelling the invoice has to take its charge back off the account, or
+    // the family keeps owing for something that no longer exists.
+    await this.reverseManualInvoiceCharge(orgId, id);
     return updated!;
+  }
+
+  private async reverseManualInvoiceCharge(orgId: string, invoiceId: string) {
+    await this.db.db.transaction(async (tx) => {
+      const charge = await tx.query.ledgerEntries.findFirst({
+        where: and(
+          eq(ledgerEntries.organizationId, orgId),
+          eq(ledgerEntries.type, 'charge'),
+          eq(ledgerEntries.invoiceId, invoiceId),
+        ),
+      });
+      if (!charge) return;
+
+      const [family] = await tx.select({ balanceCached: families.balanceCached }).from(families)
+        .where(and(eq(families.id, charge.familyId), eq(families.organizationId, orgId)))
+        .for('update');
+      if (!family) return;
+
+      // Deleting rather than posting a counter-entry keeps the family's ledger
+      // readable — the charge never should have stood.
+      await tx.delete(ledgerEntries).where(eq(ledgerEntries.id, charge.id));
+      await tx.update(families)
+        .set({ balanceCached: family.balanceCached - charge.amount, updatedAt: new Date() })
+        .where(eq(families.id, charge.familyId));
+    });
   }
 
   async addLineItem(orgId: string, invoiceId: string, description: string, amount: number, lessonId?: string) {
@@ -273,6 +381,13 @@ export class BillingService {
     });
     const total = items.reduce((s, i) => s + i.amount, 0);
     await this.db.db.update(invoices).set({ total, updatedAt: new Date() }).where(eq(invoices.id, invoiceId));
+
+    // A line added to an already-issued invoice has to move the balance too;
+    // on a draft this is a no-op until the invoice is sent.
+    const inv = await this.db.db.query.invoices.findFirst({
+      where: eq(invoices.id, invoiceId), columns: { status: true },
+    });
+    if (inv?.status === 'sent') await this.syncManualInvoiceCharge(orgId, invoiceId);
 
     return item!;
   }
