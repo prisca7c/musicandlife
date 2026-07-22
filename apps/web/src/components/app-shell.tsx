@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import type { BaseRole } from '@music-life/types';
 import { apiFetch } from '@/lib/api';
-import { prefetchRoute } from '@/lib/swr';
+import { prefetchRoute, clearApiCache } from '@/lib/swr';
 
 interface NavItem { label: string; href: string; roles: BaseRole[]; icon: React.ReactNode; }
 
@@ -84,6 +84,9 @@ function UserMenu({ collapsed, name, email }: { collapsed: boolean; name: string
     const token = document.cookie.match(/access_token=([^;]+)/)?.[1];
     try { await apiFetch('/auth/logout', { method: 'POST', token }); } catch { /* ignore */ }
     document.cookie = 'access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    // The SWR cache is keyed by path alone, so anything left here would be
+    // served to whoever signs in next on this browser.
+    await clearApiCache();
     router.push('/login');
   }
 

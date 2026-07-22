@@ -6,6 +6,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Eye, EyeOff } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
+import { clearApiCache } from '@/lib/swr';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -32,6 +33,10 @@ export default function LoginPage() {
       // the session survives closing the tab and following links in from email.
       // The token inside still expires in ~15 min; apiFetch refreshes it silently.
       document.cookie = `access_token=${accessToken}; path=/; max-age=${60 * 60 * 24 * 30}; SameSite=Lax`;
+      // Whoever used this browser last left their responses in the client cache,
+      // which is keyed by API path and knows nothing about who is signed in.
+      // Without this, the app opens showing THEIR data under YOUR name.
+      await clearApiCache();
       router.push('/app/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');

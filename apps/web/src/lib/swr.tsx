@@ -11,7 +11,7 @@
 //   • Hovering a nav link can pre-warm the next page's data (see prefetchRoute).
 // The auth/refresh logic in api.ts is untouched — SWR just calls through it.
 
-import useSWR, { SWRConfig, preload, type SWRConfiguration } from 'swr';
+import useSWR, { SWRConfig, preload, mutate, type SWRConfiguration } from 'swr';
 import { apiFetch } from './api';
 
 function token(): string | undefined {
@@ -38,6 +38,26 @@ const CONFIG: SWRConfiguration = {
 /** Cached GET for an API path. Pass null to skip (conditional fetching). */
 export function useApi<T>(path: string | null) {
   return useSWR<T>(path, fetcher, CONFIG);
+}
+
+/**
+ * Wipe every cached response.
+ *
+ * The cache is keyed by API path only — not by who was signed in — so without
+ * this, signing in as a different person in the same browser served them the
+ * previous account's data. It looked like a permissions bug: the sidebar showed
+ * "Teacher · QA Teacher" while the page rendered the admin's 22 students, a
+ * parent's student list came back empty because it was still the teacher's, and
+ * opening the portal in a second browser "fixed" it (separate cache, separate
+ * cookie jar). Nothing was ever leaking server-side — this is the whole cause.
+ *
+ * Called on every sign-in and sign-out, and defensively whenever /auth/me comes
+ * back as a different user than the one the cache was built for.
+ */
+export function clearApiCache() {
+  // Match every key, drop the data, and don't refetch — the pages that need it
+  // will fetch fresh on mount under the new session.
+  return mutate(() => true, undefined, { revalidate: false });
 }
 
 export function SWRProvider({ children }: { children: React.ReactNode }) {
