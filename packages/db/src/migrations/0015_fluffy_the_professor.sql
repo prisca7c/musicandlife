@@ -1,0 +1,1 @@
+ALTER TABLE "payroll_runs" ALTER COLUMN "hours_elapsed" SET DATA TYPE real;

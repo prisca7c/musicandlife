@@ -1,5 +1,5 @@
 import {
-  pgTable, uuid, text, timestamp, integer, boolean, jsonb, date, index, uniqueIndex,
+  pgTable, uuid, text, timestamp, integer, real, boolean, jsonb, date, index, uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { organizations, users } from './auth';
 import { families, students, staffMembers, terms, enrollments } from './domain';
@@ -95,7 +95,10 @@ export const payrollRuns = pgTable(
     staffId: uuid('staff_id').notNull().references(() => staffMembers.id),
     periodStart: date('period_start').notNull(),
     periodEnd: date('period_end').notNull(),
-    hoursElapsed: integer('hours_elapsed').notNull().default(0),
+    // Fractional by nature — a 30-minute lesson is 0.5h. An integer column made
+    // `run-all` fail with a 500 (`invalid input syntax for type integer: "0.5"`)
+    // for every teacher whose period contained a part-hour lesson.
+    hoursElapsed: real('hours_elapsed').notNull().default(0),
     hourlyRate: integer('hourly_rate').notNull(),
     gross: integer('gross').notNull().default(0),
     status: text('status', { enum: ['draft', 'approved', 'paid'] }).notNull().default('draft'),
