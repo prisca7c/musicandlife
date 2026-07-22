@@ -11,7 +11,7 @@ import { SearchableSelect } from '@/components/searchable-select';
 import { ChevronLeft, ChevronRight, Check, Loader2 } from 'lucide-react';
 
 interface Teacher { id: string; firstName: string; lastName: string; instruments: string[]; defaultDuration: number; }
-interface Enrollment { id: string; instrument: string; rate: number; teacherId: string | null; lessonType: string; status: string; }
+interface Enrollment { id: string; instrument: string; rate: number; teacherId: string | null; lessonType: string; status: string; defaultDuration: number; }
 interface Student { id: string; firstName: string; lastName: string; status: string; enrollments: Enrollment[]; }
 interface Slot { startsAt: string; endsAt: string; }
 interface DashboardData { students: Student[]; }
@@ -44,7 +44,22 @@ export default function BookLessonPage() {
   const teacher = teachers.find(t => t.id === selectedTeacher);
   const student = students.find(s => s.id === selectedStudent);
   const enrollment = student?.enrollments?.find(e => e.id === selectedEnrollment);
-  const duration = teacher?.defaultDuration ?? 60;
+  // Lesson length comes from the STUDENT's enrollment, not the teacher's
+  // default: a 30-minute pupil was being booked into a 60-minute slot (and
+  // charged accordingly) whenever their teacher's default happened to be 60.
+  // Families can still pick a different length — some weeks want a longer
+  // session — and the price follows, prorated exactly as the API charges it.
+  const contracted = enrollment?.defaultDuration ?? teacher?.defaultDuration ?? 60;
+  const [durationChoice, setDurationChoice] = useState<number | null>(null);
+  const duration = durationChoice ?? contracted;
+
+  // Reset to the contracted length whenever the instrument changes.
+  useEffect(() => { setDurationChoice(null); }, [selectedEnrollment]);
+
+  // Mirrors proratedAmount() on the API: a length other than the enrollment's
+  // normal one is charged in proportion.
+  const priceFor = (mins: number) =>
+    enrollment ? Math.round((enrollment.rate * mins) / (enrollment.defaultDuration || mins)) : 0;
 
   // Availability is cached per teacher+week+duration; picking a teacher (or
   // paging weeks) re-keys and loads the slots. Null key = don't fetch yet.
@@ -154,10 +169,41 @@ export default function BookLessonPage() {
                       {bookable.map(e => (
                         <option key={e.id} value={e.id}>
                           {e.instrument.charAt(0).toUpperCase() + e.instrument.slice(1)}
-                          {e.lessonType === 'group' ? ' (group class)' : ''} — £{(e.rate / 100).toFixed(2)}/lesson
+                          {e.lessonType === 'group' ? ' (group class)' : ''} — £{(e.rate / 100).toFixed(2)} / {e.defaultDuration} min
                         </option>
                       ))}
                     </select>
+                  )}
+
+                  {enrollment && (
+                    <>
+                      <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>
+                        Lesson length
+                      </label>
+                      <div className="flex gap-2 mb-3">
+                        {[30, 45, 60].map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setDurationChoice(m)}
+                            className="flex-1 rounded-xl border px-2 py-2 text-xs font-semibold transition"
+                            style={
+                              duration === m
+                                ? { borderColor: 'var(--sage)', background: 'var(--sage-lt)', color: 'var(--sage-dk)' }
+                                : { borderColor: 'var(--bd2)', color: 'var(--txt3)' }
+                            }
+                          >
+                            {m} min
+                            <span className="block font-bold" style={{ color: 'var(--txt)' }}>
+                              £{(priceFor(m) / 100).toFixed(2)}
+                            </span>
+                            {m === contracted && (
+                              <span className="block text-[10px] font-medium" style={{ color: 'var(--txt4)' }}>usual</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </>
                   )}
                 </>
               );
@@ -178,6 +224,7 @@ export default function BookLessonPage() {
               </p>
               <p className="text-sm" style={{ color: 'var(--txt3)' }}>
                 {fmtTime(selectedSlot)} · {duration} min
+                {enrollment ? ` · £${(priceFor(duration) / 100).toFixed(2)}` : ''}
               </p>
               <button onClick={book} disabled={booking || !selectedEnrollment || !selectedStudent}
                 className="mt-3 w-full bg-[var(--sage)] text-white font-bold text-sm py-2.5 rounded-xl hover:bg-[var(--sage-dk)] disabled:opacity-50 flex items-center justify-center gap-2">

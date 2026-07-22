@@ -133,6 +133,11 @@ export class FamilyPortalController {
               columns: {
                 id: true, instrument: true, rate: true,
                 teacherId: true, lessonType: true, status: true,
+                // The student's contracted lesson length. The booking page used
+                // the TEACHER's default instead, so a 30-minute pupil was booked
+                // (and charged) for a 60-minute slot whenever their teacher's
+                // default was 60.
+                defaultDuration: true,
               },
             },
           },
