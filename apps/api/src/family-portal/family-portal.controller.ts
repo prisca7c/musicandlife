@@ -114,11 +114,21 @@ export class FamilyPortalController {
   }
 
   // ─── Dashboard ────────────────────────────────────────────────────────────
+  // Serves both portals. A GUARDIAN gets the whole family: every child, the
+  // account balance and any invoice due. A STUDENT gets only themselves and no
+  // money at all — a child logging in was being shown the family balance and an
+  // "I've sent the transfer" button for their parents' invoice. What a student
+  // needs is today's lesson and what their teacher last wrote, nothing else.
   @Get('dashboard')
   @Roles('student')
   async dashboard(@CurrentUser() user: RequestUser) {
+    const viewerIsStudent = user.role === 'student';
+    const empty = {
+      nextLesson: null, balance: 0, outstandingInvoice: null, students: [], lastNote: null,
+      viewer: viewerIsStudent ? 'student' : 'guardian',
+    };
     const familyId = await this.resolveFamilyId(user.userId, user.orgId);
-    if (!familyId) return { nextLesson: null, balance: 0, outstandingInvoice: null, students: [], lastNote: null };
+    if (!familyId) return empty;
 
     const family = await this.db.db.query.families.findFirst({
       where: eq(families.id, familyId),
@@ -144,14 +154,25 @@ export class FamilyPortalController {
         },
       },
     });
-    if (!family) return { nextLesson: null, balance: 0, outstandingInvoice: null, students: [], lastNote: null };
+    if (!family) return empty;
 
-    const studentIds = family.students.map(s => s.id);
+    // A student sees only their own row; a guardian sees every child.
+    const self = viewerIsStudent
+      ? await this.db.db.query.students.findFirst({
+          where: and(eq(students.studentUserId, user.userId), eq(students.organizationId, user.orgId)),
+          columns: { id: true },
+        })
+      : null;
+    const visibleStudents = viewerIsStudent
+      ? family.students.filter(s => s.id === self?.id)
+      : family.students;
+
+    const studentIds = visibleStudents.map(s => s.id);
     const now = new Date();
 
     // Per-student lesson credit balances
     const studentsWithCredits = await Promise.all(
-      family.students.map(async s => {
+      visibleStudents.map(async s => {
         const { total, prepaid, makeup } = await this.attendance.getLessonCreditBalance(user.orgId, s.id);
         return { ...s, lessons: { total, prepaid, makeup } };
       }),
@@ -160,16 +181,24 @@ export class FamilyPortalController {
     // Next lesson across all students
     let nextLesson = null;
     if (studentIds.length > 0) {
-      const upcoming = await this.db.db.query.lessons.findMany({
-        where: and(eq(lessons.organizationId, user.orgId), eq(lessons.status, 'scheduled'), gte(lessons.startsAt, now)),
+      // Filtered by student in SQL. It used to pull the next 10 scheduled
+      // lessons in the WHOLE STUDIO and then look for one of this family's in
+      // that page — so any family whose next lesson wasn't among the studio's
+      // ten soonest was told "No upcoming lessons" while it sat in the diary.
+      const familyLesson = await this.db.db.query.lessons.findFirst({
+        where: and(
+          eq(lessons.organizationId, user.orgId),
+          eq(lessons.status, 'scheduled'),
+          gte(lessons.startsAt, now),
+          inArray(lessons.studentId, studentIds),
+        ),
         with: {
           student: { columns: { id: true, firstName: true, lastName: true } },
           teacher: { columns: { id: true, firstName: true, lastName: true } },
+          enrollment: { columns: { instrument: true, lessonType: true } },
         },
         orderBy: (l, { asc }) => [asc(l.startsAt)],
-        limit: 10,
       });
-      const familyLesson = upcoming.find(l => studentIds.includes(l.studentId));
       if (familyLesson) {
         nextLesson = {
           id: familyLesson.id,
@@ -178,12 +207,14 @@ export class FamilyPortalController {
           isTrialLesson: familyLesson.isTrialLesson,
           teacher: familyLesson.teacher,
           student: familyLesson.student,
+          instrument: familyLesson.enrollment?.instrument ?? null,
+          meetingLink: familyLesson.meetingLink ?? null,
         };
       }
     }
 
-    // Outstanding invoice
-    const outstandingInvoice = await this.db.db.query.invoices.findFirst({
+    // Outstanding invoice — parents only. Never surfaced to a child.
+    const outstandingInvoice = viewerIsStudent ? null : await this.db.db.query.invoices.findFirst({
       where: and(
         eq(invoices.familyId, family.id),
         eq(invoices.organizationId, user.orgId),
@@ -192,20 +223,27 @@ export class FamilyPortalController {
       orderBy: (i, { asc }) => [asc(i.dueDate)],
     });
 
-    // Most recent family-visible note
+    // Most recent family-visible note. Same bug as nextLesson: it took the most
+    // recent family-visible note in the ORG and returned it only if it happened
+    // to belong to this family — so a family's own note was hidden whenever any
+    // other family had a newer one, which on a busy week is always.
     let lastNote = null;
     if (studentIds.length > 0) {
-      const recentNote = await this.db.db.query.notes.findFirst({
-        where: and(eq(notes.organizationId, user.orgId), eq(notes.visibility, 'family')),
+      lastNote = await this.db.db.query.notes.findFirst({
+        where: and(
+          eq(notes.organizationId, user.orgId),
+          eq(notes.visibility, 'family'),
+          inArray(notes.studentId, studentIds),
+        ),
         with: { student: { columns: { id: true, firstName: true, lastName: true } } },
         orderBy: (n, { desc }) => [desc(n.createdAt)],
-      });
-      if (recentNote && studentIds.includes(recentNote.studentId)) lastNote = recentNote;
+      }) ?? null;
     }
 
     return {
       nextLesson,
-      balance: family.balanceCached,
+      viewer: viewerIsStudent ? 'student' : 'guardian',
+      balance: viewerIsStudent ? 0 : family.balanceCached,
       outstandingInvoice: outstandingInvoice
         ? { id: outstandingInvoice.id, number: outstandingInvoice.number, total: outstandingInvoice.total, dueDate: outstandingInvoice.dueDate }
         : null,
