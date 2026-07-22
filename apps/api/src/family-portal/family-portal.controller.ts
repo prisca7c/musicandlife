@@ -12,10 +12,11 @@ import { eq, and, gte, lte, ne, inArray } from 'drizzle-orm';
 import {
   lessons, lessonCredits, notes, families, memberships, guardians,
   students, availability, enrollments, staffMembers,
-  teacherAssignments, attendance,
+  teacherAssignments, attendance, paymentClaims,
 } from '@music-life/db';
 import { AttendanceService } from '../attendance/attendance.service';
 import { BillingService } from '../billing/billing.service';
+import { ReconciliationService } from '../billing/reconciliation.service';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { FilesService } from '../files/files.service';
 import { invoices } from '@music-life/db';
@@ -47,6 +48,7 @@ export class FamilyPortalController {
     private readonly email: EmailPort,
     private readonly attendance: AttendanceService,
     private readonly billing: BillingService,
+    private readonly recon: ReconciliationService,
     private readonly scheduling: SchedulingService,
     private readonly files: FilesService,
   ) {}
@@ -214,6 +216,16 @@ export class FamilyPortalController {
   // the invoice paid. Idempotent per invoice, so a double-tap pays exactly once.
   // The payment note flags it as self-reported so staff can reconcile it against
   // the actual bank statement.
+  /**
+   * "I've sent the transfer."
+   *
+   * This does NOT mark the invoice paid. The studio is paid by bank transfer,
+   * so nothing here can see whether the money actually moved — this used to
+   * record a real payment on the family's word alone, which meant a parent
+   * who never sent anything could clear their own invoice. It now raises a
+   * claim that settles only once a matching line shows up on the imported bank
+   * statement (or a staff member confirms it by hand).
+   */
   @Post('invoices/:id/mark-paid')
   @Roles('guardian')
   async markInvoicePaid(@CurrentUser() user: RequestUser, @Param('id') id: string) {
@@ -231,17 +243,37 @@ export class FamilyPortalController {
     if (inv.status !== 'sent') throw new NotFoundException('Invoice not found');
     if (inv.total <= 0) throw new BadRequestException('This invoice has nothing to pay.');
 
-    const payment = await this.billing.recordPayment(user.orgId, {
-      familyId: family.id,
-      invoiceId: inv.id,
-      method: 'bank_transfer',
-      amount: inv.total,
-      notes: 'Self-reported as paid by the family via the parent portal.',
-      // Stable per-invoice key → repeat taps return the same payment, never double-charge.
-      idempotencyKey: `self-pay-${inv.id}`,
-    });
+    const claim = await this.recon.createClaim(user.orgId, family.id, inv.id, inv.total);
 
-    return { status: 'paid', paymentId: payment.id };
+    // If the money had already landed and been imported, createClaim settles it
+    // immediately — tell the parent the truth either way.
+    return {
+      status: claim.status === 'confirmed' ? 'paid' : 'awaiting_confirmation',
+      claimId: claim.id,
+      reference: claim.reference,
+      amount: claim.amount,
+    };
+  }
+
+  /**
+   * The details a family needs in order to pay: their own reference (the thing
+   * that makes an incoming transfer identifiable) plus any claim still waiting
+   * to be confirmed.
+   */
+  @Get('payment-details')
+  @Roles('guardian')
+  async getPaymentDetails(@CurrentUser() user: RequestUser) {
+    const family = await this.requireFamily(user.userId, user.orgId);
+    const reference = await this.recon.ensureReference(user.orgId, family.id);
+    const pending = await this.db.db.query.paymentClaims.findMany({
+      where: and(
+        eq(paymentClaims.organizationId, user.orgId),
+        eq(paymentClaims.familyId, family.id),
+        eq(paymentClaims.status, 'pending'),
+      ),
+      columns: { id: true, amount: true, invoiceId: true, createdAt: true },
+    });
+    return { reference, pendingClaims: pending };
   }
 
   // ─── This family's invoices (read-only) ─────────────────────────────────────

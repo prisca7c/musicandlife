@@ -49,6 +49,10 @@ export const families = pgTable(
       .notNull()
       .default('monthly_statement'),
     balanceCached: integer('balance_cached').notNull().default(0),
+    // Short, stable code the family quotes on every bank transfer (e.g. ML-4F2A).
+    // It is what lets an imported statement line be matched to a family without
+    // anyone reading it by hand. Nullable so existing families backfill lazily.
+    paymentReference: text('payment_reference'),
     // ─── Auto-invoicing settings ──────────────────────────────────────────────
     billingStartDate: date('billing_start_date'),
     billingMode: text('billing_mode', { enum: ['prepaid', 'postpaid'] }).notNull().default('postpaid'),
@@ -63,7 +67,12 @@ export const families = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('families_org_id_idx').on(t.organizationId)],
+  (t) => [
+    index('families_org_id_idx').on(t.organizationId),
+    // Auto-matching a statement line to a family is only sound if the reference
+    // identifies exactly one family.
+    uniqueIndex('families_org_payment_reference_uidx').on(t.organizationId, t.paymentReference),
+  ],
 );
 
 // ─── Guardians ────────────────────────────────────────────────────────────────

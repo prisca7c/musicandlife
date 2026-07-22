@@ -70,6 +70,11 @@ export default function FamilyDashboardPage() {
   const [confirmPay, setConfirmPay] = useState(false);
   const [paying, setPaying] = useState(false);
   const [payErr, setPayErr] = useState('');
+  // Set once the family has told us they've sent the transfer. The invoice stays
+  // "due" until the money is actually seen on the statement, so the card has to
+  // say something other than "pay this" in the meantime.
+  const [claimed, setClaimed] = useState(false);
+  const { data: paymentDetails } = useApi<{ reference: string }>('/family/payment-details');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   function openReschedule(lessonId: string) {
@@ -111,6 +116,7 @@ export default function FamilyDashboardPage() {
         method: 'POST', token: tok(),
       });
       setConfirmPay(false);
+      setClaimed(true);
       mutateData();
     } catch (e) { setPayErr(e instanceof Error ? e.message : 'Could not record payment'); }
     finally { setPaying(false); }
@@ -233,17 +239,29 @@ export default function FamilyDashboardPage() {
                 </div>
               </div>
 
-              {!confirmPay ? (
+              {claimed ? (
+                <p className="mt-3 text-xs" style={{ color: 'var(--txt3)' }}>
+                  Thanks — we&apos;ll confirm {outstandingInvoice.number} as paid once the transfer
+                  reaches the studio account. You don&apos;t need to do anything else.
+                </p>
+              ) : !confirmPay ? (
                 <button
                   onClick={() => { setPayErr(''); setConfirmPay(true); }}
                   className="mt-3 w-full rounded-xl bg-[var(--amber)] text-white text-sm font-semibold py-2 hover:opacity-90 transition"
                 >
-                  I&apos;ve paid this
+                  I&apos;ve sent the transfer
                 </button>
               ) : (
                 <div className="mt-3">
                   <p className="text-xs mb-2" style={{ color: 'var(--txt3)' }}>
-                    Confirm you&apos;ve sent £{(outstandingInvoice.total / 100).toFixed(2)} by bank transfer. We&apos;ll mark {outstandingInvoice.number} as paid.
+                    Send £{(outstandingInvoice.total / 100).toFixed(2)} by bank transfer, quoting
+                    this reference so we can match your payment:
+                  </p>
+                  {/* The reference is the whole mechanism — without it an incoming
+                      transfer can't be tied to a family automatically. */}
+                  <p className="mb-2 rounded-lg px-2 py-1.5 text-center text-sm font-bold tracking-wider"
+                     style={{ background: 'var(--bg)', color: 'var(--txt)' }}>
+                    {paymentDetails?.reference ?? 'Loading…'}
                   </p>
                   {payErr && <p className="text-xs text-[var(--coral)] mb-2">{payErr}</p>}
                   <div className="flex gap-2">
@@ -252,7 +270,7 @@ export default function FamilyDashboardPage() {
                       disabled={paying}
                       className="flex-1 rounded-xl bg-[var(--amber)] text-white text-sm font-semibold py-2 hover:opacity-90 transition disabled:opacity-60"
                     >
-                      {paying ? 'Recording…' : 'Confirm payment'}
+                      {paying ? 'Sending…' : "I've sent it"}
                     </button>
                     <button
                       onClick={() => setConfirmPay(false)}

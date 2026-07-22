@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Calendar, Users, Home,
   PoundSterling, ClipboardCheck, MessageSquare,
   FileText, BarChart3, Settings,
-  Briefcase, CreditCard, UserCheck, BookOpen,
+  Briefcase, CreditCard, UserCheck, BookOpen, Landmark,
   Clock, History, ChevronLeft, ChevronRight, ChevronDown,
   LogOut, PanelLeftClose, PanelLeftOpen, Megaphone, CalendarClock, CalendarPlus,
 } from 'lucide-react';
@@ -35,6 +35,7 @@ const NAV: NavItem[] = [
   { label: 'Staff',        href: '/app/staff',             roles: ['system_admin','admin'],                                   icon: <Briefcase size={16} /> },
   { label: 'Payroll',      href: '/app/staff/payroll',     roles: ['system_admin','admin','manager'],                        icon: <PoundSterling size={16} /> },
   { label: 'Billing',      href: '/app/billing',           roles: ['system_admin','admin','manager','receptionist','guardian'], icon: <CreditCard size={16} /> },
+  { label: 'Payments',     href: '/app/billing/reconciliation', roles: ['system_admin','admin','manager','receptionist'],      icon: <Landmark size={16} /> },
   { label: 'Intake',       href: '/app/intake',            roles: ['system_admin','admin','manager','receptionist'],          icon: <ClipboardCheck size={16} /> },
   { label: 'Messages',     href: '/app/messaging',         roles: ['system_admin','admin','manager','teacher','guardian'],    icon: <MessageSquare size={16} /> },
   { label: 'Resources',    href: '/app/resources',         roles: ['system_admin','admin','manager','teacher','guardian','student'], icon: <FileText size={16} /> },
@@ -49,7 +50,7 @@ const GROUPS = [
   { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History','Lesson notes'] },
   { label: 'Studio',   items: ['Calendar','Attendance','Booking requests','Reschedules','My availability','Notes','Intake','Messages'] },
   { label: 'People',   items: ['Students','Families','Staff','Payroll'] },
-  { label: 'Finance',  items: ['Billing'] },
+  { label: 'Finance',  items: ['Billing','Payments'] },
   { label: 'Content',  items: ['Resources','Content','Studio News'] },
   { label: 'Admin',    items: ['Reports','Settings'] },
 ];

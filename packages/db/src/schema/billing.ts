@@ -1,6 +1,7 @@
 import {
   pgTable, uuid, text, timestamp, integer, real, boolean, jsonb, date, index, uniqueIndex,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { organizations, users } from './auth';
 import { families, students, staffMembers, terms, enrollments } from './domain';
 import { lessons } from './scheduling';
@@ -84,6 +85,82 @@ export const payments = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('payments_family_idx').on(t.organizationId, t.familyId)],
+);
+
+// ─── Bank-transfer reconciliation ─────────────────────────────────────────────
+// The studio is paid by bank transfer (no card fees), which means nothing tells
+// the system when money actually lands. A parent tapping "I've sent the
+// transfer" therefore records a CLAIM, not a payment — the ledger only moves
+// once the claim is matched against a real line on the bank statement.
+//
+// Matching is automatic: every family gets a short, stable reference they quote
+// on the transfer, and imported statement rows are matched on that reference
+// plus the amount. Staff only ever look at what fails to match.
+export const paymentClaims = pgTable(
+  'payment_claims',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    familyId: uuid('family_id').notNull().references(() => families.id),
+    invoiceId: uuid('invoice_id').references(() => invoices.id),
+    amount: integer('amount').notNull(),
+    // Snapshot of the family's reference at claim time, so a later reference
+    // change can't orphan an old claim.
+    reference: text('reference').notNull(),
+    // pending  → waiting for a matching statement line
+    // confirmed→ matched (auto or by staff); a payment row exists
+    // rejected → staff decided the money never arrived
+    status: text('status', { enum: ['pending', 'confirmed', 'rejected'] }).notNull().default('pending'),
+    matchedTransactionId: uuid('matched_transaction_id'),
+    paymentId: uuid('payment_id').references(() => payments.id),
+    confirmedBy: uuid('confirmed_by').references(() => users.id),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    // Set when staff confirm/reject by hand rather than the importer matching it.
+    resolvedManually: boolean('resolved_manually').notNull().default(false),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('payment_claims_org_status_idx').on(t.organizationId, t.status),
+    index('payment_claims_family_idx').on(t.organizationId, t.familyId),
+    // One open claim per invoice — repeat taps must not queue a second one.
+    uniqueIndex('payment_claims_open_invoice_uidx')
+      .on(t.invoiceId)
+      .where(sql`${t.status} = 'pending' AND ${t.invoiceId} IS NOT NULL`),
+  ],
+);
+
+// One row per line on an imported bank statement. Kept permanently so the same
+// statement can be re-imported without double-crediting anyone.
+export const bankTransactions = pgTable(
+  'bank_transactions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    bookedOn: date('booked_on').notNull(),
+    // Pence, always positive — only money IN is imported.
+    amount: integer('amount').notNull(),
+    reference: text('reference'),
+    description: text('description'),
+    // Hash of the raw statement line. Re-importing an overlapping statement is a
+    // normal thing to do (monthly exports overlap at the edges), so the importer
+    // relies on this to skip rows it has already seen.
+    fingerprint: text('fingerprint').notNull(),
+    matchedFamilyId: uuid('matched_family_id').references(() => families.id),
+    matchedClaimId: uuid('matched_claim_id').references(() => paymentClaims.id),
+    paymentId: uuid('payment_id').references(() => payments.id),
+    // matched     → credited to a family
+    // unmatched   → no reference/amount hit; needs a human
+    // ignored     → staff dismissed it (refund, transfer between own accounts…)
+    status: text('status', { enum: ['matched', 'unmatched', 'ignored'] }).notNull().default('unmatched'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('bank_transactions_org_fingerprint_uidx').on(t.organizationId, t.fingerprint),
+    index('bank_transactions_org_status_idx').on(t.organizationId, t.status),
+  ],
 );
 
 // ─── Payroll ──────────────────────────────────────────────────────────────────
