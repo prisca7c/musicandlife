@@ -50,6 +50,27 @@ export default function LessonRequestsPage() {
     finally { setBusyId(null); }
   }
 
+  // The teacher's own suggested times, keyed by request id.
+  const [suggesting, setSuggesting] = useState<string | null>(null);
+  const [suggestTimes, setSuggestTimes] = useState<string[]>(['']);
+
+  async function counterPropose(id: string) {
+    const times = suggestTimes.filter(Boolean);
+    if (!times.length) { setError('Pick at least one time'); return; }
+    setBusyId(id); setError('');
+    try {
+      await apiFetch(`/lesson-requests/${id}/counter-propose`, {
+        method: 'POST', token: tok(),
+        // datetime-local gives a naive wall-clock string; send it as-is so the
+        // API interprets it in the studio timezone like every other booking.
+        body: JSON.stringify({ times }),
+      });
+      setSuggesting(null); setSuggestTimes(['']);
+      load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not suggest those times'); }
+    finally { setBusyId(null); }
+  }
+
   async function decline(id: string) {
     setBusyId(id); setError('');
     try {
@@ -112,7 +133,11 @@ export default function LessonRequestsPage() {
                 </button>
               </div>
 
-              <p className="text-xs font-semibold mb-2" style={{ color: 'var(--txt3)' }}>Proposed times</p>
+              <p className="text-xs font-semibold mb-2" style={{ color: 'var(--txt3)' }}>
+                {r.status === 'counter_proposed'
+                  ? 'Times the teacher suggested — confirm one to book it'
+                  : 'Proposed times'}
+              </p>
               <div className="space-y-2">
                 {r.options.map((o) => (
                   <div key={o.rank} className="flex items-center justify-between gap-3 rounded-xl px-3.5 py-2.5"
@@ -139,6 +164,65 @@ export default function LessonRequestsPage() {
                   </div>
                 ))}
               </div>
+
+              {/* Every proposed slot clashing is normal — the front desk is
+                  guessing at the teacher's diary. Without this the only enabled
+                  button was Decline, which sent the family back to square one. */}
+              {r.options.every((o) => !o.ok) && suggesting !== r.id && (
+                <button
+                  onClick={() => { setSuggesting(r.id); setSuggestTimes(['']); setError(''); }}
+                  className="mt-3 text-xs font-semibold rounded-lg px-3 py-1.5"
+                  style={{ border: '1.5px solid var(--sage)', color: 'var(--sage-dk)', background: '#fff' }}
+                >
+                  None of these work — suggest a time
+                </button>
+              )}
+
+              {suggesting === r.id && (
+                <div className="mt-3 rounded-xl p-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
+                  <p className="text-xs font-semibold mb-2" style={{ color: 'var(--txt3)' }}>
+                    Suggest up to 3 times that suit you
+                  </p>
+                  {suggestTimes.map((t, i) => (
+                    <input
+                      key={i}
+                      type="datetime-local"
+                      value={t}
+                      onChange={(e) => {
+                        const next = [...suggestTimes];
+                        next[i] = e.target.value;
+                        setSuggestTimes(next);
+                      }}
+                      className="ui-input mb-2 text-sm"
+                    />
+                  ))}
+                  {suggestTimes.length < 3 && (
+                    <button
+                      onClick={() => setSuggestTimes([...suggestTimes, ''])}
+                      className="text-xs font-semibold mb-2"
+                      style={{ color: 'var(--sage-dk)' }}
+                    >
+                      + Add another time
+                    </button>
+                  )}
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      onClick={() => counterPropose(r.id)}
+                      disabled={busyId === r.id}
+                      className="ui-btn-primary text-xs disabled:opacity-50"
+                    >
+                      {busyId === r.id ? 'Sending…' : 'Send these to the front desk'}
+                    </button>
+                    <button
+                      onClick={() => { setSuggesting(null); setError(''); }}
+                      className="text-xs font-semibold rounded-lg px-3 py-1.5"
+                      style={{ border: '1px solid var(--bd)', color: 'var(--txt3)' }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>

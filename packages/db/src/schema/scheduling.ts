@@ -100,8 +100,15 @@ export const lessonRequests = pgTable(
     proposedStartsAt: timestamp('proposed_starts_at', { withTimezone: true }).notNull(),
     proposedStartsAt2: timestamp('proposed_starts_at_2', { withTimezone: true }),
     proposedStartsAt3: timestamp('proposed_starts_at_3', { withTimezone: true }),
+    // When every proposed time clashes or falls outside the teacher's hours, the
+    // teacher's only move used to be "Decline" — a dead end that sent the family
+    // back to square one. They can now counter with times that do work, which
+    // the front desk confirms on the family's behalf.
+    counterStartsAt: timestamp('counter_starts_at', { withTimezone: true }),
+    counterStartsAt2: timestamp('counter_starts_at_2', { withTimezone: true }),
+    counterStartsAt3: timestamp('counter_starts_at_3', { withTimezone: true }),
     notes: text('notes'),
-    status: text('status', { enum: ['pending','confirmed','declined'] }).notNull().default('pending'),
+    status: text('status', { enum: ['pending','counter_proposed','confirmed','declined'] }).notNull().default('pending'),
     requestedBy: uuid('requested_by').notNull().references(() => users.id),
     decidedBy: uuid('decided_by').references(() => users.id),
     decidedAt: timestamp('decided_at', { withTimezone: true }),

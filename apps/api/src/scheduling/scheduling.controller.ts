@@ -5,7 +5,7 @@ import { UpdateLessonDto } from './dto/update-lesson.dto';
 import { CancelLessonDto } from './dto/cancel-lesson.dto';
 import { GenerateRecurringDto } from './dto/generate-recurring.dto';
 import { CreateRescheduleRequestDto, DecideRescheduleDto } from './dto/reschedule-request.dto';
-import { CreateLessonRequestDto, DecideLessonRequestDto } from './dto/lesson-request.dto';
+import { CreateLessonRequestDto, DecideLessonRequestDto, CounterProposeLessonRequestDto } from './dto/lesson-request.dto';
 import { RescheduleLessonDto } from './dto/reschedule-lesson.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -112,6 +112,20 @@ export class SchedulingController {
   @Roles('teacher')
   confirmLessonRequest(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: DecideLessonRequestDto) {
     return this.scheduling.decideLessonRequest(user.orgId, id, 'confirmed', { role: user.role, userId: user.userId }, dto.chosenStartsAt, dto.reason);
+  }
+
+  // A teacher who can't make any of the proposed times offers their own instead
+  // of the request dying at "Decline".
+  @Post('lesson-requests/:id/counter-propose')
+  @Roles('teacher')
+  counterProposeLessonRequest(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Body() dto: CounterProposeLessonRequestDto,
+  ) {
+    return this.scheduling.counterProposeLessonRequest(
+      user.orgId, id, { role: user.role, userId: user.userId }, dto.times, dto.reason,
+    );
   }
 
   @Post('lesson-requests/:id/decline')
