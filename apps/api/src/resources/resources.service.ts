@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { eq, and, or, ilike, sql, inArray } from 'drizzle-orm';
-import { resources, guardians, students, families, staffMembers, files } from '@music-life/db';
+import { resources, guardians, students, families, staffMembers, teacherAssignments, enrollments, files } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateResourceDto } from './dto/create-resource.dto';
 import type { BaseRole } from '@music-life/types';
@@ -72,6 +72,33 @@ export class ResourcesService {
     return kids.map(k => k.id);
   }
 
+  /**
+   * The students a teacher actually teaches — the union of explicit assignments
+   * and enrollment.teacherId, matching how the students list scopes them.
+   */
+  private async teacherStudentIds(orgId: string, userId: string): Promise<{ staffId: string | null; studentIds: string[] }> {
+    const staff = await this.db.db.query.staffMembers.findFirst({
+      where: and(eq(staffMembers.userId, userId), eq(staffMembers.organizationId, orgId)),
+      columns: { id: true },
+    });
+    if (!staff) return { staffId: null, studentIds: [] };
+
+    const [assignments, enrolled] = await Promise.all([
+      this.db.db.query.teacherAssignments.findMany({
+        where: and(eq(teacherAssignments.organizationId, orgId), eq(teacherAssignments.staffId, staff.id)),
+        columns: { studentId: true },
+      }),
+      this.db.db.query.enrollments.findMany({
+        where: and(eq(enrollments.organizationId, orgId), eq(enrollments.teacherId, staff.id)),
+        columns: { studentId: true },
+      }),
+    ]);
+    return {
+      staffId: staff.id,
+      studentIds: [...new Set([...assignments.map(a => a.studentId), ...enrolled.map(e => e.studentId)])],
+    };
+  }
+
   private async hasResourceAccess(orgId: string, role: BaseRole, userId: string): Promise<boolean> {
     if (role !== 'guardian' && role !== 'student') return true;
 
@@ -107,9 +134,29 @@ export class ResourcesService {
     }
 
     const allowedScopes = (ROLE_SCOPES[role] ?? ['studio']) as ('studio'|'teacher'|'family'|'student')[];
+    const scopeMatch = sql`${resources.scope} = ANY(ARRAY[${sql.join(allowedScopes.map(s => sql`${s}`), sql`, `)}])`;
+
+    // A teacher's allowed scopes are studio + teacher, which meant they could
+    // see FEWER resources than their own pupils: material shared with a family
+    // was invisible to the teacher who has to talk to that family about it, and
+    // a teacher couldn't even see an item they had published themselves. Widen
+    // the teacher view to also include anything they own and anything targeted
+    // at one of their own students — but nothing belonging to other teachers'
+    // students, which is what the scope list is there to prevent.
+    const visible = [scopeMatch];
+    if (role === 'teacher') {
+      const { staffId, studentIds } = await this.teacherStudentIds(orgId, userId);
+      visible.push(eq(resources.ownerId, userId));
+      // Items attributed to this teacher — the case that prompted this: two
+      // family-scope links tagged to a teacher were visible to their student
+      // but not to the teacher named on them.
+      if (staffId) visible.push(eq(resources.teacherId, staffId));
+      if (studentIds.length) visible.push(inArray(resources.studentId, studentIds));
+    }
+
     const conditions = [
       eq(resources.organizationId, orgId),
-      sql`${resources.scope} = ANY(ARRAY[${sql.join(allowedScopes.map(s => sql`${s}`), sql`, `)}])`,
+      visible.length === 1 ? visible[0]! : or(...visible)!,
     ];
     if (filters.search) {
       conditions.push(
