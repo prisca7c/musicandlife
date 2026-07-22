@@ -56,6 +56,14 @@ export default function BookLessonPage() {
   // Reset to the contracted length whenever the instrument changes.
   useEffect(() => { setDurationChoice(null); }, [selectedEnrollment]);
 
+  // The enrolment names the teacher; adopt it rather than asking. Only an
+  // enrolment with no teacher assigned falls through to the picker.
+  const enrollmentTeacherId = enrollment?.teacherId ?? null;
+  useEffect(() => {
+    if (enrollmentTeacherId) setSelectedTeacher(enrollmentTeacherId);
+    else setSelectedTeacher('');
+  }, [enrollmentTeacherId]);
+
   // Mirrors proratedAmount() on the API: a length other than the enrollment's
   // normal one is charged in proportion.
   const priceFor = (mins: number) =>
@@ -127,7 +135,7 @@ export default function BookLessonPage() {
             <InfoTooltip text="You'll only ever see times the teacher is genuinely free — we hide slots that clash with another lesson or fall outside their working hours. Pick a slot and the studio confirms it shortly after." />
           </span>
         }
-        subtitle="Pick a teacher, then choose a slot"
+        subtitle="Choose the student and instrument, then pick a slot"
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -135,14 +143,6 @@ export default function BookLessonPage() {
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
             <p className="text-xs font-bold uppercase tracking-widest mb-4" style={{ color: 'var(--txt3)' }}>1. Lesson details</p>
-
-            <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>Teacher</label>
-            <div className="mb-3">
-              <SearchableSelect
-                options={teachers.map(t => ({ value: t.id, label: `${t.firstName} ${t.lastName} — ${t.instruments.join(', ')}` }))}
-                value={selectedTeacher} onChange={setSelectedTeacher} placeholder="Select teacher…"
-              />
-            </div>
 
             <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>Student</label>
             <div className="mb-3">
@@ -177,6 +177,28 @@ export default function BookLessonPage() {
 
                   {enrollment && (
                     <>
+                      {/* The teacher follows from the instrument — it is not a
+                          free choice. Picking them separately let a family book
+                          a piano lesson with the cello teacher; the API now
+                          rejects that outright, so don't offer it. */}
+                      <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>Teacher</label>
+                      {enrollment.teacherId ? (
+                        <p className="mb-3 rounded-xl border px-3 py-2 text-sm font-medium"
+                          style={{ borderColor: 'var(--bd2)', background: 'var(--surf)', color: 'var(--txt)' }}>
+                          {teacher ? `${teacher.firstName} ${teacher.lastName}` : 'Your teacher'}
+                          <span className="block text-xs font-normal" style={{ color: 'var(--txt3)' }}>
+                            Set by this enrolment
+                          </span>
+                        </p>
+                      ) : (
+                        <div className="mb-3">
+                          <SearchableSelect
+                            options={teachers.map(t => ({ value: t.id, label: `${t.firstName} ${t.lastName} — ${t.instruments.join(', ')}` }))}
+                            value={selectedTeacher} onChange={setSelectedTeacher} placeholder="Select teacher…"
+                          />
+                        </div>
+                      )}
+
                       <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>
                         Lesson length
                       </label>
@@ -239,7 +261,7 @@ export default function BookLessonPage() {
         <div className="lg:col-span-2">
           {!selectedTeacher ? (
             <div className="bg-white rounded-2xl border border-[var(--bd)] p-12 text-center">
-              <p className="text-sm" style={{ color: 'var(--txt3)' }}>Select a teacher to see available slots.</p>
+              <p className="text-sm" style={{ color: 'var(--txt3)' }}>Choose a student and instrument to see available slots.</p>
             </div>
           ) : (
             <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
