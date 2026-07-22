@@ -6,7 +6,7 @@ import {
   notes, staffAvailability,
 } from './domain';
 import { lessons, attendance, rescheduleRequests, lessonRequests, availability, blockedTime } from './scheduling';
-import { invoices, invoiceLineItems, ledgerEntries, payments, payrollRuns, payrollItems, expenses, rateChangeRequests, lessonCredits } from './billing';
+import { invoices, invoiceLineItems, ledgerEntries, payments, paymentClaims, bankTransactions, payrollRuns, payrollItems, expenses, rateChangeRequests, lessonCredits } from './billing';
 import { threads, threadParticipants, messages, notificationRules, notificationLog, registrations, leads, newsPosts } from './comms';
 import { files, resources, repertoirePieces } from './media';
 
@@ -134,6 +134,17 @@ export const ledgerEntriesRelations = relations(ledgerEntries, ({ one }) => ({
 export const paymentsRelations = relations(payments, ({ one }) => ({
   family: one(families, { fields: [payments.familyId], references: [families.id] }),
   invoice: one(invoices, { fields: [payments.invoiceId], references: [invoices.id] }),
+}));
+
+export const paymentClaimsRelations = relations(paymentClaims, ({ one }) => ({
+  family: one(families, { fields: [paymentClaims.familyId], references: [families.id] }),
+  invoice: one(invoices, { fields: [paymentClaims.invoiceId], references: [invoices.id] }),
+  payment: one(payments, { fields: [paymentClaims.paymentId], references: [payments.id] }),
+}));
+
+export const bankTransactionsRelations = relations(bankTransactions, ({ one }) => ({
+  matchedFamily: one(families, { fields: [bankTransactions.matchedFamilyId], references: [families.id] }),
+  claim: one(paymentClaims, { fields: [bankTransactions.matchedClaimId], references: [paymentClaims.id] }),
 }));
 
 export const payrollRunsRelations = relations(payrollRuns, ({ one, many }) => ({
