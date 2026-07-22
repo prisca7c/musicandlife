@@ -180,12 +180,18 @@ export class AuthService {
     });
 
     const resetUrl = `${process.env.WEB_URL}/reset-password?token=${rawToken}`;
-    // A mail-provider outage must not turn this into a 500 — that both breaks
-    // the reset page and leaks which emails exist (a real email would error
-    // while an unknown one returned the generic message). Swallow send failures
-    // and always return the same generic response.
-    try {
-      await this.email.send({
+    // Dispatch without awaiting. Two leaks to avoid, both of which would defeat
+    // the generic message returned below:
+    //   1. A mail-provider outage must not turn this into a 500 — a registered
+    //      email would error while an unknown one returned the generic message.
+    //      Failures are swallowed and logged.
+    //   2. Awaiting the provider (~1.5s) while the unknown-email path returns
+    //      immediately made response time a user-enumeration oracle: registered
+    //      addresses answered ~8x slower, so anyone could test whether an email
+    //      belongs to a family here. Sending in the background keeps both paths
+    //      at the same latency.
+    void this.email
+      .send({
         to: user.email,
         subject: 'Reset your Music & Life password',
         html: brandedEmail({
@@ -195,10 +201,10 @@ export class AuthService {
           cta: { label: 'Reset password', url: resetUrl },
           footnote: 'This link expires in 1 hour. If you didn’t request this, you can safely ignore this email.',
         }),
+      })
+      .catch((err) => {
+        this.logger.warn(`Password reset email failed for ${user.email}: ${err}`);
       });
-    } catch (err) {
-      this.logger.warn(`Password reset email failed for ${user.email}: ${err}`);
-    }
 
     return { message: 'If that email is registered, a reset link has been sent.' };
   }
