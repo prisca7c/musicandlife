@@ -56,6 +56,14 @@ export default function BookLessonPage() {
   // Reset to the contracted length whenever the instrument changes.
   useEffect(() => { setDurationChoice(null); }, [selectedEnrollment]);
 
+  // A student signing in with their own login is shown a "Student" dropdown
+  // containing exactly one option: themselves. Pick it for them. The same
+  // applies to a one-child family — there is nothing to choose.
+  const onlyStudentId = students.length === 1 ? students[0]!.id : null;
+  useEffect(() => {
+    if (onlyStudentId) setSelectedStudent(prev => prev || onlyStudentId);
+  }, [onlyStudentId]);
+
   // The enrolment names the teacher; adopt it rather than asking. Only an
   // enrolment with no teacher assigned falls through to the picker.
   const enrollmentTeacherId = enrollment?.teacherId ?? null;
@@ -145,13 +153,22 @@ export default function BookLessonPage() {
             <p className="text-xs font-bold uppercase tracking-widest mb-4" style={{ color: 'var(--txt3)' }}>1. Lesson details</p>
 
             <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>Student</label>
-            <div className="mb-3">
-              <SearchableSelect
-                options={students.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
-                value={selectedStudent} onChange={v => { setSelectedStudent(v); setSelectedEnrollment(''); }}
-                placeholder="Select student…"
-              />
-            </div>
+            {/* One option is not a choice — a student logging in was made to
+                pick themselves out of a dropdown of one. */}
+            {students.length === 1 ? (
+              <p className="mb-3 rounded-xl border px-3 py-2 text-sm font-medium"
+                style={{ borderColor: 'var(--bd2)', background: 'var(--surf)', color: 'var(--txt)' }}>
+                {students[0]!.firstName} {students[0]!.lastName}
+              </p>
+            ) : (
+              <div className="mb-3">
+                <SearchableSelect
+                  options={students.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+                  value={selectedStudent} onChange={v => { setSelectedStudent(v); setSelectedEnrollment(''); }}
+                  placeholder="Select student…"
+                />
+              </div>
+            )}
 
             {student && (() => {
               const bookable = (student.enrollments ?? []).filter(e => e.status === 'active' || e.status === 'trial');

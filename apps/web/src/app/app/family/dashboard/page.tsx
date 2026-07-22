@@ -21,8 +21,12 @@ import {
 interface NewsPost { id: string; title: string; body: string; publishedAt: string; }
 
 interface DashboardData {
+  // 'student' means a pupil is signed in with their own login; the API omits
+  // the family's money entirely in that case.
+  viewer: 'student' | 'guardian';
   nextLesson: {
     id: string; startsAt: string; duration: number; isTrialLesson: boolean;
+    instrument: string | null; meetingLink: string | null;
     teacher: { firstName: string; lastName: string } | null;
     student: { firstName: string; lastName: string } | null;
   } | null;
@@ -141,29 +145,48 @@ export default function FamilyDashboardPage() {
   const { nextLesson, balance, outstandingInvoice, students, lastNote } = data;
   const hoursUntil = nextLesson ? (new Date(nextLesson.startsAt).getTime() - Date.now()) / 3600000 : 0;
 
+  // A pupil's home page is not a smaller parent home page. Money — the balance,
+  // an invoice due, the "I've sent the transfer" button — is between the studio
+  // and whoever pays; a child was being shown all of it. What's left is what
+  // they actually need: the next lesson, what to bring, and what their teacher
+  // last wrote. Changing or cancelling a lesson has a fee attached, so that
+  // stays with the parent too.
+  const isStudent = data.viewer === 'student';
+  const isToday = nextLesson
+    ? new Date(nextLesson.startsAt).toDateString() === new Date().toDateString()
+    : false;
+
   return (
     <div>
       <PageHeader
         title={firstName ? `Welcome back, ${firstName}` : 'Welcome back'}
-        subtitle="Your family's lessons at a glance"
+        subtitle={isStudent ? 'Your lessons and notes' : "Your family's lessons at a glance"}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
         {/* ── Next lesson ── */}
         <div className="lg:col-span-2 bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
-          <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--txt3)' }}>Next lesson</p>
+          <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--txt3)' }}>
+            {isToday ? 'Today' : 'Next lesson'}
+          </p>
           {nextLesson ? (
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
                 <p className="font-bold text-lg" style={{ color: 'var(--txt)' }}>
-                  {nextLesson.student?.firstName} {nextLesson.student?.lastName}
+                  {/* A pupil already knows who they are — lead with the lesson. */}
+                  {isStudent
+                    ? (nextLesson.instrument
+                        ? nextLesson.instrument.charAt(0).toUpperCase() + nextLesson.instrument.slice(1)
+                        : 'Your lesson')
+                    : `${nextLesson.student?.firstName ?? ''} ${nextLesson.student?.lastName ?? ''}`}
                   {nextLesson.isTrialLesson && (
                     <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-[var(--amber-lt)] text-[var(--amber)]">Trial</span>
                   )}
                 </p>
                 <p className="text-sm mt-1" style={{ color: 'var(--txt3)' }}>
                   with {nextLesson.teacher?.firstName} {nextLesson.teacher?.lastName}
+                  {!isStudent && nextLesson.instrument ? ` · ${nextLesson.instrument}` : ''}
                 </p>
                 <div className="flex items-center gap-4 mt-3 text-sm" style={{ color: 'var(--txt3)' }}>
                   <span className="flex items-center gap-1.5">
@@ -178,12 +201,20 @@ export default function FamilyDashboardPage() {
                 </div>
               </div>
               <div className="flex gap-2 flex-wrap">
-                <Link href="/app/family/book"
-                  className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-xl border font-medium hover:bg-[var(--surf)]"
-                  style={{ borderColor: 'var(--bd2)', color: 'var(--txt)' }}>
-                  <Plus size={13} /> Book another
-                </Link>
-                {hoursUntil >= 24 && (
+                {/* Rescheduling and cancelling both have a fee attached, so they
+                    belong to whoever pays the bill — not to the pupil. */}
+                {isStudent ? (
+                  <p className="text-xs max-w-[14rem]" style={{ color: 'var(--txt4)' }}>
+                    Need to move or cancel this lesson? Ask a parent — they can do it from their account.
+                  </p>
+                ) : (
+                  <Link href="/app/family/book"
+                    className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-xl border font-medium hover:bg-[var(--surf)]"
+                    style={{ borderColor: 'var(--bd2)', color: 'var(--txt)' }}>
+                    <Plus size={13} /> Book another
+                  </Link>
+                )}
+                {!isStudent && hoursUntil >= 24 && (
                   <button
                     onClick={() => openReschedule(nextLesson.id)}
                     className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-xl border font-medium hover:bg-[var(--surf)]"
@@ -191,7 +222,7 @@ export default function FamilyDashboardPage() {
                     <CalendarClock size={13} /> Request reschedule
                   </button>
                 )}
-                {hoursUntil > 0 && (
+                {!isStudent && hoursUntil > 0 && (
                   <button
                     onClick={() => setCancelModal({ lessonId: nextLesson.id, hoursUntil })}
                     className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-xl border font-medium hover:bg-[var(--coral-lt)]"
@@ -204,16 +235,41 @@ export default function FamilyDashboardPage() {
           ) : (
             <div className="text-center py-6">
               <p className="text-sm mb-3" style={{ color: 'var(--txt3)' }}>No upcoming lessons.</p>
-              <Link href="/app/family/book"
-                className="inline-flex items-center gap-1.5 bg-[var(--sage)] text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-[var(--sage-dk)]">
-                <Plus size={14} /> Book a lesson
-              </Link>
+              {isStudent ? (
+                <p className="text-xs" style={{ color: 'var(--txt4)' }}>Your parent can book your next one.</p>
+              ) : (
+                <Link href="/app/family/book"
+                  className="inline-flex items-center gap-1.5 bg-[var(--sage)] text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-[var(--sage-dk)]">
+                  <Plus size={14} /> Book a lesson
+                </Link>
+              )}
             </div>
           )}
         </div>
 
-        {/* ── Balance / invoice ── */}
-        <div className="space-y-4">
+        {/* ── What the teacher last wrote — the student's main reason to be here ── */}
+        {isStudent && (
+          <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+            <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--txt3)' }}>
+              <BookOpen size={12} className="inline mr-1" /> From your last lesson
+            </p>
+            {lastNote ? (
+              <>
+                <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--txt)' }}>{lastNote.body}</p>
+                <Link href="/app/family/notes" className="inline-block mt-3 text-xs font-semibold text-[var(--sage-dk)] hover:underline">
+                  All lesson notes →
+                </Link>
+              </>
+            ) : (
+              <p className="text-sm" style={{ color: 'var(--txt3)' }}>
+                No notes yet — your teacher&apos;s notes will appear here after your lesson.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ── Balance / invoice — parents only ── */}
+        <div className={`space-y-4 ${isStudent ? 'hidden' : ''}`}>
           <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
             <p className="text-xs font-bold uppercase tracking-widest mb-2 flex items-center gap-2" style={{ color: 'var(--txt3)' }}>
               Account balance
@@ -288,7 +344,7 @@ export default function FamilyDashboardPage() {
         </div>
 
         {/* ── Students / lessons remaining ── */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+        <div className={`lg:col-span-2 bg-white rounded-2xl border p-5 ${isStudent ? 'hidden' : ''}`} style={{ borderColor: 'var(--bd)' }}>
           <p className="text-xs font-bold uppercase tracking-widest mb-4" style={{ color: 'var(--txt3)' }}>Students</p>
           <div className="space-y-3">
             {students.map(s => (
@@ -340,8 +396,20 @@ export default function FamilyDashboardPage() {
           </div>
         )}
 
-        {/* ── Last note ── */}
-        {lastNote && (
+        {/* Lessons remaining — the one number a pupil benefits from knowing,
+            with none of the family's money attached to it. */}
+        {isStudent && students[0] && (
+          <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+            <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--txt3)' }}>Lessons available</p>
+            <p className="text-2xl font-black" style={{ color: 'var(--sage-dk)' }}>{students[0].lessons.total}</p>
+            {students[0].lessons.makeup > 0 && (
+              <p className="text-xs mt-1" style={{ color: 'var(--txt4)' }}>includes {students[0].lessons.makeup} makeup</p>
+            )}
+          </div>
+        )}
+
+        {/* ── Last note (parent view; students get the fuller card above) ── */}
+        {!isStudent && lastNote && (
           <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
             <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--txt3)' }}>
               <BookOpen size={12} className="inline mr-1" /> Latest note
