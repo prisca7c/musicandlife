@@ -8,10 +8,14 @@ import { PageHeader } from '@/components/page-header';
 import { Modal } from '@/components/modal';
 import { Search, Check } from 'lucide-react';
 
+interface Person { userId: string; name: string; email: string; role: string; roleLabel: string; }
 interface Thread {
   id: string; subject: string; updatedAt: string;
   messages: { body: string; createdAt: string }[];
   participants: { user: { id: string; email: string } }[];
+  withNames: string[];
+  people: Person[];
+  unreadCount: number;
 }
 
 interface Recipient { userId: string; name: string; email: string; role: string; roleLabel: string; }
@@ -76,9 +80,14 @@ function NewThreadModal({ open, onClose, onCreated }: { open: boolean; onClose: 
               const on = selected.includes(r.userId);
               return (
                 <button type="button" key={r.userId} onClick={() => toggle(r.userId)}
-                  className={`w-full flex items-center justify-between px-3 py-2 text-left text-sm hover:bg-[var(--surf)] ${on ? 'bg-[var(--sage-lt)]' : ''}`}>
-                  <span><span className="font-medium">{r.name}</span> <span className="text-xs text-gray-400">· {r.roleLabel}</span></span>
-                  {on && <Check size={14} className="text-[var(--sage-dk)]" />}
+                  className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--surf)] ${on ? 'bg-[var(--sage-lt)]' : ''}`}>
+                  <span className="min-w-0">
+                    <span className="font-medium">{r.name}</span> <span className="text-xs text-gray-400">· {r.roleLabel}</span>
+                    {/* Two people can share a name; the address is what tells them
+                        apart before you send a parent something meant for staff. */}
+                    <span className="block text-xs text-gray-400 truncate">{r.email}</span>
+                  </span>
+                  {on && <Check size={14} className="text-[var(--sage-dk)] shrink-0" />}
                 </button>
               );
             })}
@@ -103,13 +112,14 @@ export default function MessagingPage() {
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   // Cached read — instant on revisit, revalidates in the background.
-  const { data: threads = [], mutate } = useApi<Thread[]>('/threads');
+  const { data: threads = [], error, isLoading, mutate } = useApi<Thread[]>('/threads');
   const load = () => mutate();
 
   const q = search.trim().toLowerCase();
   const filtered = q ? threads.filter(t =>
     t.subject.toLowerCase().includes(q) ||
     t.messages.some(m => m.body.toLowerCase().includes(q)) ||
+    (t.withNames ?? []).some(n => n.toLowerCase().includes(q)) ||
     t.participants.some(p => p.user.email.toLowerCase().includes(q))
   ) : threads;
 
@@ -132,28 +142,57 @@ export default function MessagingPage() {
       </div>
 
       <div className="space-y-2">
-        {filtered.length === 0 && (
+        {error && (
+          <div className="bg-white rounded-lg border px-4 py-8 text-center">
+            <p className="text-sm text-red-600">Couldn&apos;t load your messages.</p>
+            <button onClick={() => mutate()} className="mt-3 text-sm border rounded px-3 py-1.5 hover:bg-gray-50">Try again</button>
+          </div>
+        )}
+        {!error && isLoading && threads.length === 0 && (
+          <div className="bg-white rounded-lg border px-4 py-12 text-center text-gray-400">Loading…</div>
+        )}
+        {!error && !isLoading && filtered.length === 0 && (
           <div className="bg-white rounded-lg border px-4 py-12 text-center text-gray-400">
             {threads.length === 0 ? 'No messages yet.' : 'No results for that search.'}
           </div>
         )}
-        {filtered.map(t => (
-          <Link key={t.id} href={`/app/messaging/${t.id}`}
-            className="block bg-white rounded-lg border px-4 py-3 hover:shadow-sm transition-shadow">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="font-medium text-gray-900">{t.subject}</p>
-                <p className="text-sm text-gray-500 mt-0.5 line-clamp-1">{t.messages[0]?.body ?? ''}</p>
+        {!error && filtered.map(t => {
+          // Lead with WHO, the way a chat app does — the subject is the second
+          // line. People recognise "Aiko Nakamura · Parent", not "Re: Tuesday".
+          const names = t.withNames?.length ? t.withNames : ['(no one else)'];
+          const unread = (t.unreadCount ?? 0) > 0;
+          return (
+            <Link key={t.id} href={`/app/messaging/${t.id}`}
+              className="block bg-white rounded-lg border px-4 py-3 hover:shadow-sm transition-shadow">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className={`truncate ${unread ? 'font-semibold text-gray-900' : 'font-medium text-gray-800'}`}>
+                    {names.join(', ')}
+                  </p>
+                  <p className="text-sm text-gray-600 mt-0.5 truncate">{t.subject}</p>
+                  <p className={`text-sm mt-0.5 line-clamp-1 ${unread ? 'text-gray-800' : 'text-gray-400'}`}>
+                    {t.messages[0]?.body ?? ''}
+                  </p>
+                </div>
+                <div className="shrink-0 flex flex-col items-end gap-1.5">
+                  <span className="text-xs text-gray-400">{new Date(t.updatedAt).toLocaleDateString('en-GB')}</span>
+                  {unread && (
+                    <span className="min-w-[1.25rem] text-center text-[11px] font-semibold text-white bg-[var(--sage)] rounded-full px-1.5 py-0.5">
+                      {t.unreadCount}
+                    </span>
+                  )}
+                </div>
               </div>
-              <span className="text-xs text-gray-400 ml-4 shrink-0">{new Date(t.updatedAt).toLocaleDateString('en-GB')}</span>
-            </div>
-            <div className="flex gap-1 mt-2">
-              {t.participants.slice(0,4).map(p => (
-                <span key={p.user.id} className="text-xs bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">{p.user.email.split('@')[0]}</span>
-              ))}
-            </div>
-          </Link>
-        ))}
+              <div className="flex flex-wrap gap-1 mt-2">
+                {(t.people ?? []).slice(0, 4).map(p => (
+                  <span key={p.userId} className="text-xs bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">
+                    {p.name}{p.roleLabel ? ` · ${p.roleLabel}` : ''}
+                  </span>
+                ))}
+              </div>
+            </Link>
+          );
+        })}
       </div>
     </div>
   );

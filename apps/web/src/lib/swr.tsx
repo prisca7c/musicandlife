@@ -35,9 +35,13 @@ const CONFIG: SWRConfiguration = {
   dedupingInterval: 30_000,
 };
 
-/** Cached GET for an API path. Pass null to skip (conditional fetching). */
-export function useApi<T>(path: string | null) {
-  return useSWR<T>(path, fetcher, CONFIG);
+/**
+ * Cached GET for an API path. Pass null to skip (conditional fetching).
+ * `options` merges over the shared config — used for the few reads that want a
+ * poll (the unread-message badge) rather than the default fetch-on-mount.
+ */
+export function useApi<T>(path: string | null, options?: SWRConfiguration) {
+  return useSWR<T>(path, fetcher, options ? { ...CONFIG, ...options } : CONFIG);
 }
 
 /**

@@ -32,6 +32,12 @@ export class MessagingController {
     return this.messaging.getRecipients(user.orgId, user.userId, user.role);
   }
 
+  @Get('unread-count')
+  @Roles('guardian')
+  getUnreadCount(@CurrentUser() user: RequestUser) {
+    return this.messaging.getUnreadCount(user.orgId, user.userId);
+  }
+
   @Get(':id')
   @Roles('guardian')
   getThread(@CurrentUser() user: RequestUser, @Param('id') id: string) {
