@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import type { BaseRole } from '@music-life/types';
 import { apiFetch } from '@/lib/api';
-import { prefetchRoute, clearApiCache } from '@/lib/swr';
+import { prefetchRoute, clearApiCache, useApi } from '@/lib/swr';
 
 interface NavItem { label: string; href: string; roles: BaseRole[]; icon: React.ReactNode; }
 
@@ -128,6 +128,17 @@ export function AppShell({ role, children }: { role: BaseRole; children: React.R
   const [collapsed, setCollapsed] = useState(false);
   const [me, setMe] = useState<{ name: string; email: string } | null>(null);
 
+  // Unread badge on Messages. Polled rather than fetched once, so a message
+  // that arrives while someone is on another page still shows up — previously
+  // there was no way to know you had mail without opening Messages and reading
+  // every thread. Only asked for by roles that actually have the page.
+  const canMessage = visible.some(item => item.href === '/app/messaging');
+  const { data: unreadData } = useApi<{ unread: number }>(
+    canMessage ? '/threads/unread-count' : null,
+    { refreshInterval: 60_000, dedupingInterval: 15_000 },
+  );
+  const unread = unreadData?.unread ?? 0;
+
   useEffect(() => {
     const stored = localStorage.getItem('sidebar-collapsed');
     if (stored === '1') setCollapsed(true);
@@ -213,8 +224,19 @@ export function AppShell({ role, children }: { role: BaseRole; children: React.R
                             : 'hover:text-white hover:bg-white/10'
                           }`}
                         style={active ? { background: 'var(--sage)', color: 'white' } : { color: 'rgba(255,255,255,0.62)' }}>
-                        <span className="shrink-0">{item.icon}</span>
+                        <span className="shrink-0 relative">
+                          {item.icon}
+                          {item.href === '/app/messaging' && unread > 0 && collapsed && (
+                            <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[var(--sage)] ring-2 ring-[#2f3a34]" />
+                          )}
+                        </span>
                         {!collapsed && item.label}
+                        {!collapsed && item.href === '/app/messaging' && unread > 0 && (
+                          <span className="ml-auto min-w-[1.25rem] text-center text-[10.5px] font-bold rounded-full px-1.5 py-0.5"
+                            style={{ background: active ? 'rgba(255,255,255,0.25)' : 'var(--sage)', color: 'white' }}>
+                            {unread > 99 ? '99+' : unread}
+                          </span>
+                        )}
                       </Link>
                     );
                   })}
