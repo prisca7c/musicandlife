@@ -60,7 +60,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # drizzle-kit has no `generate --check`; detect drift by regenerating and
+      # failing if that produces any uncommitted migration/snapshot changes.
       - name: Check for schema drift
-        run: pnpm db:generate --check
+        run: |
+          pnpm --filter @music-life/db run generate
+          if [ -n "$(git status --porcelain packages/db/src/migrations)" ]; then
+            echo "::error::Schema drift detected — run 'pnpm db:generate' locally and commit the generated migration."
+            git --no-pager diff -- packages/db/src/migrations
+            exit 1
+          fi
+          echo "No schema drift."
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
