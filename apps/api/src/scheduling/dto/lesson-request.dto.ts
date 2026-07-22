@@ -1,4 +1,4 @@
-import { IsDateString, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { IsArray, ArrayMinSize, ArrayMaxSize, IsDateString, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 
 export class CreateLessonRequestDto {
   @IsUUID()
@@ -44,4 +44,22 @@ export class DecideLessonRequestDto {
   @IsOptional()
   @IsDateString()
   chosenStartsAt?: string;
+}
+
+/**
+ * The teacher's own suggested times, offered when none of the front desk's
+ * proposals work. Up to three, validated against the teacher's availability and
+ * existing lessons before they're stored.
+ */
+export class CounterProposeLessonRequestDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(3)
+  @IsDateString({}, { each: true })
+  times!: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
 }

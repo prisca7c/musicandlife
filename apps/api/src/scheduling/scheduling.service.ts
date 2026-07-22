@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
-import { eq, and, gte, lte, ne, isNull, sql } from 'drizzle-orm';
+import { eq, and, gte, lte, ne, isNull, inArray, sql } from 'drizzle-orm';
 import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, organizations, enrollments } from '@music-life/db';
 import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
@@ -652,8 +652,17 @@ export class SchedulingService {
     const teacherStaffId = actor.role === 'teacher' ? await this.resolveStaffId(orgId, actor.userId) : null;
 
     const rows = await this.db.db.query.lessonRequests.findMany({
+      // "pending" means "still open", which now includes requests the teacher has
+      // countered — those are waiting on the front desk, not finished. Filtering
+      // strictly on 'pending' would make a countered request vanish from both
+      // queues and strand the family.
       where: status
-        ? and(eq(lessonRequests.organizationId, orgId), eq(lessonRequests.status, status as 'pending' | 'confirmed' | 'declined'))
+        ? and(
+            eq(lessonRequests.organizationId, orgId),
+            status === 'pending'
+              ? inArray(lessonRequests.status, ['pending', 'counter_proposed'])
+              : eq(lessonRequests.status, status as 'confirmed' | 'declined'),
+          )
         : eq(lessonRequests.organizationId, orgId),
       with: {
         student: { columns: { id: true, firstName: true, lastName: true } },
@@ -669,7 +678,11 @@ export class SchedulingService {
 
     const tz = await this.getOrgTimezone(this.db.db, orgId);
     return Promise.all(scoped.map(async (r) => {
-      const ranked = [r.proposedStartsAt, r.proposedStartsAt2, r.proposedStartsAt3].filter(Boolean) as Date[];
+      // Once the teacher has countered, their times are the live options — the
+      // front desk confirms one of those, not the originals.
+      const ranked = (r.status === 'counter_proposed'
+        ? [r.counterStartsAt, r.counterStartsAt2, r.counterStartsAt3]
+        : [r.proposedStartsAt, r.proposedStartsAt2, r.proposedStartsAt3]).filter(Boolean) as Date[];
       const options = await Promise.all(ranked.map(async (t, i) => {
         const iso = t.toISOString();
         const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, r.teacherId, iso, r.duration, tz);
@@ -685,6 +698,65 @@ export class SchedulingService {
     }));
   }
 
+  /**
+   * The teacher offers times of their own instead of accepting or killing the
+   * request.
+   *
+   * Every proposed slot clashing is the normal case, not an edge case — the
+   * front desk is guessing at a teacher's diary. Before this, "Decline" was the
+   * only enabled button and the family had to start over with no idea what
+   * would actually work.
+   *
+   * Counter times are validated exactly as a confirmation would be, so a teacher
+   * can't offer a slot they aren't free for.
+   */
+  async counterProposeLessonRequest(
+    orgId: string, id: string, actor: Actor, times: string[], reason?: string,
+  ) {
+    const req = await this.db.db.query.lessonRequests.findFirst({
+      where: and(eq(lessonRequests.id, id), eq(lessonRequests.organizationId, orgId)),
+    });
+    if (!req) throw new NotFoundException('Request not found');
+    if (req.status !== 'pending' && req.status !== 'counter_proposed') {
+      throw new BadRequestException('Request already decided');
+    }
+    if (actor.role === 'teacher') {
+      const staffId = await this.resolveStaffId(orgId, actor.userId);
+      if (!staffId || req.teacherId !== staffId) throw new ForbiddenException('Not your request');
+    }
+    if (!times.length) throw new BadRequestException('Suggest at least one time');
+
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const iso: string[] = [];
+    for (const t of times.slice(0, 3)) {
+      const target = new Date(t).toISOString();
+      const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, req.teacherId, target, req.duration, tz);
+      if (unavailable) throw new BadRequestException(unavailable);
+      if (await this.hasConflict(this.db.db, orgId, target, req.duration, req.teacherId)) {
+        throw new BadRequestException('One of your suggested times clashes with another lesson.');
+      }
+      iso.push(target);
+    }
+
+    const openStatus = req.status;
+    const claimed = await this.db.db.update(lessonRequests)
+      .set({
+        status: 'counter_proposed',
+        counterStartsAt: new Date(iso[0]!),
+        counterStartsAt2: iso[1] ? new Date(iso[1]) : null,
+        counterStartsAt3: iso[2] ? new Date(iso[2]) : null,
+        reason: reason ?? req.reason,
+      })
+      .where(and(
+        eq(lessonRequests.id, id),
+        eq(lessonRequests.organizationId, orgId),
+        eq(lessonRequests.status, openStatus),
+      ))
+      .returning();
+    if (claimed.length === 0) throw new BadRequestException('Request already decided');
+    return claimed[0]!;
+  }
+
   async decideLessonRequest(
     orgId: string, id: string, decision: 'confirmed' | 'declined',
     actor: Actor, chosenStartsAt?: string, reason?: string,
@@ -693,7 +765,10 @@ export class SchedulingService {
       where: and(eq(lessonRequests.id, id), eq(lessonRequests.organizationId, orgId)),
     });
     if (!req) throw new NotFoundException('Request not found');
-    if (req.status !== 'pending') throw new BadRequestException('Request already decided');
+    // A counter-proposal is still live — it's awaiting the front desk, not decided.
+    if (req.status !== 'pending' && req.status !== 'counter_proposed') {
+      throw new BadRequestException('Request already decided');
+    }
 
     // A teacher may only decide their own requests; receptionist+ may decide any.
     if (actor.role === 'teacher') {
@@ -703,8 +778,11 @@ export class SchedulingService {
 
     let target: string | undefined;
     if (decision === 'confirmed') {
-      const ranked = [req.proposedStartsAt, req.proposedStartsAt2, req.proposedStartsAt3]
-        .filter(Boolean).map((d) => (d as Date).toISOString());
+      // Once the teacher has countered, their times are the ones on the table.
+      const ranked = [
+        req.proposedStartsAt, req.proposedStartsAt2, req.proposedStartsAt3,
+        req.counterStartsAt, req.counterStartsAt2, req.counterStartsAt3,
+      ].filter(Boolean).map((d) => (d as Date).toISOString());
       target = chosenStartsAt ? new Date(chosenStartsAt).toISOString() : ranked[0]!;
       if (chosenStartsAt && !ranked.includes(target)) {
         throw new BadRequestException('Chosen time is not one of the proposed options');
@@ -717,13 +795,14 @@ export class SchedulingService {
       }
     }
 
-    // Guarded claim: only the first decider transitions it out of 'pending'.
+    // Guarded claim: only the first decider transitions it out of the open state.
+    const openStatus = req.status;
     const claimed = await this.db.db.update(lessonRequests)
       .set({ status: decision, decidedBy: actor.userId, decidedAt: new Date(), reason })
       .where(and(
         eq(lessonRequests.id, id),
         eq(lessonRequests.organizationId, orgId),
-        eq(lessonRequests.status, 'pending'),
+        eq(lessonRequests.status, openStatus),
       ))
       .returning({ id: lessonRequests.id });
     if (claimed.length === 0) throw new BadRequestException('Request already decided');
