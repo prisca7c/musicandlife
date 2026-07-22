@@ -362,6 +362,101 @@ export class MessagingService {
     return thread!;
   }
 
+  // ─── Admin oversight ──────────────────────────────────────────────────────
+  // A studio running lessons for minors has to be able to review what staff say
+  // to families. Deliberately kept OUT of the admin's own inbox: mixing other
+  // people's conversations into your unread list makes the inbox unusable and
+  // hides the fact that you're reading someone else's mail. It is a separate,
+  // read-only tab — an admin can look, but can't post into the thread and
+  // doesn't mark anything read on the participants' behalf.
+  //
+  // Scope is exactly "staff ↔ family" threads the admin isn't already in.
+  // Threads that are purely internal (staff only) or purely between families
+  // are not oversight material and aren't listed.
+  async getOversightThreads(orgId: string, userId: string) {
+    const all = await this.db.db.query.threads.findMany({
+      where: eq(threads.organizationId, orgId),
+      with: {
+        messages: { orderBy: (m, { desc }) => [desc(m.createdAt)], limit: 1 },
+        participants: true,
+      },
+      orderBy: (t, { desc }) => [desc(t.updatedAt)],
+      limit: 200,
+    });
+    if (all.length === 0) return [];
+
+    const described = await this.describeUsers(orgId, all.flatMap(t => t.participants.map(p => p.userId)));
+
+    return all
+      .filter(t => !t.participants.some(p => p.userId === userId))
+      .map(t => {
+        const people = t.participants
+          .map(p => described.get(p.userId))
+          .filter((p): p is NonNullable<typeof p> => Boolean(p));
+        const family = people.filter(p => NON_STAFF_ROLES.includes(p.role as BaseRole));
+        const staff = people.filter(p => !NON_STAFF_ROLES.includes(p.role as BaseRole));
+        return { thread: t, people, family, staff };
+      })
+      .filter(t => t.family.length > 0 && t.staff.length > 0)
+      .map(({ thread, people, family, staff }) => ({
+        id: thread.id,
+        subject: thread.subject,
+        updatedAt: thread.updatedAt,
+        messages: thread.messages,
+        people,
+        staffNames: staff.map(p => p.name),
+        familyNames: family.map(p => p.name),
+      }));
+  }
+
+  async getOversightThread(orgId: string, threadId: string) {
+    const thread = await this.db.db.query.threads.findFirst({
+      where: and(eq(threads.id, threadId), eq(threads.organizationId, orgId)),
+      with: {
+        messages: {
+          with: { sender: { columns: { id: true, email: true } } },
+          orderBy: (m, { asc }) => [asc(m.createdAt)],
+        },
+        participants: true,
+      },
+    });
+    if (!thread) throw new NotFoundException('Thread not found');
+
+    const described = await this.describeUsers(orgId, [
+      ...thread.participants.map(p => p.userId),
+      ...thread.messages.map(m => m.senderId),
+    ]);
+    const describe = (id: string, email?: string | null) =>
+      described.get(id) ?? { userId: id, name: email?.split('@')[0] ?? 'User', email: email ?? '', role: '', roleLabel: '' };
+
+    const people = thread.participants.map(p => describe(p.userId));
+    // Same guard as the list: oversight is for staff↔family conversations only,
+    // so an admin can't reach an arbitrary thread id by typing it into the URL.
+    const hasFamily = people.some(p => NON_STAFF_ROLES.includes(p.role as BaseRole));
+    const hasStaff = people.some(p => p.role && !NON_STAFF_ROLES.includes(p.role as BaseRole));
+    if (!hasFamily || !hasStaff) {
+      throw new ForbiddenException('Only staff–family conversations can be reviewed here');
+    }
+
+    return {
+      id: thread.id,
+      subject: thread.subject,
+      createdAt: thread.createdAt,
+      updatedAt: thread.updatedAt,
+      people,
+      // No readBy write anywhere in this path: reviewing a conversation must not
+      // tell the parent their message was "read" by someone who never replied.
+      messages: thread.messages.map(m => ({
+        id: m.id,
+        body: m.body,
+        createdAt: m.createdAt,
+        senderId: m.senderId,
+        senderName: describe(m.senderId, m.sender?.email).name,
+        senderRoleLabel: describe(m.senderId, m.sender?.email).roleLabel,
+      })),
+    };
+  }
+
   async sendMessage(orgId: string, threadId: string, userId: string, body: string) {
     await this.loadThread(orgId, threadId, userId);
 
