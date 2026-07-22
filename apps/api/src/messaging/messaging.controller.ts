@@ -32,6 +32,20 @@ export class MessagingController {
     return this.messaging.getRecipients(user.orgId, user.userId, user.role);
   }
 
+  // Reviewing other people's conversations is an admin power, not a
+  // management-wide one — deliberately above manager/reception.
+  @Get('oversight')
+  @Roles('admin')
+  getOversightThreads(@CurrentUser() user: RequestUser) {
+    return this.messaging.getOversightThreads(user.orgId, user.userId);
+  }
+
+  @Get('oversight/:id')
+  @Roles('admin')
+  getOversightThread(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.messaging.getOversightThread(user.orgId, id);
+  }
+
   @Get('unread-count')
   @Roles('guardian')
   getUnreadCount(@CurrentUser() user: RequestUser) {

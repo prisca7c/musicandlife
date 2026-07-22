@@ -4,9 +4,10 @@ import { useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
+import { useMe } from '@/lib/use-me';
 import { PageHeader } from '@/components/page-header';
 import { Modal } from '@/components/modal';
-import { Search, Check } from 'lucide-react';
+import { Search, Check, Eye } from 'lucide-react';
 
 interface Person { userId: string; name: string; email: string; role: string; roleLabel: string; }
 interface Thread {
@@ -106,14 +107,31 @@ function NewThreadModal({ open, onClose, onCreated }: { open: boolean; onClose: 
   );
 }
 
+interface OversightThread {
+  id: string; subject: string; updatedAt: string;
+  messages: { body: string; createdAt: string }[];
+  people: Person[]; staffNames: string[]; familyNames: string[];
+}
+
 export default function MessagingPage() {
   const [search, setSearch] = useState('');
   const [showNew, setShowNew] = useState(false);
+  const [tab, setTab] = useState<'mine' | 'oversight'>('mine');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  // Oversight lives behind its own tab rather than in the inbox: an admin
+  // reviewing staff–family conversations shouldn't have them mixed into their
+  // own unread mail, and the separation makes it obvious you're reading
+  // someone else's thread.
+  const { me } = useMe();
+  const isAdmin = me?.membership?.role === 'admin' || me?.membership?.role === 'system_admin';
 
   // Cached read — instant on revisit, revalidates in the background.
   const { data: threads = [], error, isLoading, mutate } = useApi<Thread[]>('/threads');
   const load = () => mutate();
+  const {
+    data: oversight = [], error: oversightError, isLoading: oversightLoading, mutate: reloadOversight,
+  } = useApi<OversightThread[]>(isAdmin && tab === 'oversight' ? '/threads/oversight' : null);
 
   const q = search.trim().toLowerCase();
   const filtered = q ? threads.filter(t =>
@@ -122,12 +140,32 @@ export default function MessagingPage() {
     (t.withNames ?? []).some(n => n.toLowerCase().includes(q)) ||
     t.participants.some(p => p.user.email.toLowerCase().includes(q))
   ) : threads;
+  const filteredOversight = q ? oversight.filter(t =>
+    t.subject.toLowerCase().includes(q) ||
+    t.messages.some(m => m.body.toLowerCase().includes(q)) ||
+    [...(t.staffNames ?? []), ...(t.familyNames ?? [])].some(n => n.toLowerCase().includes(q))
+  ) : oversight;
 
   return (
     <div>
       <NewThreadModal open={showNew} onClose={() => setShowNew(false)} onCreated={load} />
       <PageHeader title="Messages"
         action={<button onClick={() => setShowNew(true)} className="bg-[var(--sage)] text-white rounded px-4 py-2 text-sm font-medium hover:bg-[var(--sage-dk)]">+ New message</button>} />
+
+      {isAdmin && (
+        <div className="mb-4 flex gap-1 border-b" style={{ borderColor: 'var(--bd2)' }}>
+          {([['mine', 'My messages'], ['oversight', 'Staff ↔ family']] as const).map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)}
+              className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                tab === key
+                  ? 'border-[var(--sage)] text-[var(--sage-dk)]'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="mb-5 relative">
         <span className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--txt4)' }}>
@@ -141,7 +179,51 @@ export default function MessagingPage() {
         />
       </div>
 
-      <div className="space-y-2">
+      {tab === 'oversight' && isAdmin && (
+        <div className="space-y-2">
+          <div className="flex items-start gap-2 rounded-lg border px-3.5 py-2.5 text-sm"
+            style={{ borderColor: 'var(--bd2)', background: 'var(--surf)' }}>
+            <Eye size={15} className="mt-0.5 shrink-0 text-gray-500" />
+            <p className="text-gray-600">
+              Conversations between staff and families that you are not part of. <strong>Read-only</strong> —
+              opening one doesn&apos;t mark it read for them and you can&apos;t reply. To join a conversation,
+              start a new message instead.
+            </p>
+          </div>
+
+          {oversightError && (
+            <div className="bg-white rounded-lg border px-4 py-8 text-center">
+              <p className="text-sm text-red-600">Couldn&apos;t load these conversations.</p>
+              <button onClick={() => reloadOversight()} className="mt-3 text-sm border rounded px-3 py-1.5 hover:bg-gray-50">Try again</button>
+            </div>
+          )}
+          {!oversightError && oversightLoading && oversight.length === 0 && (
+            <div className="bg-white rounded-lg border px-4 py-12 text-center text-gray-400">Loading…</div>
+          )}
+          {!oversightError && !oversightLoading && filteredOversight.length === 0 && (
+            <div className="bg-white rounded-lg border px-4 py-12 text-center text-gray-400">
+              {oversight.length === 0 ? 'No staff–family conversations to review.' : 'No results for that search.'}
+            </div>
+          )}
+          {!oversightError && filteredOversight.map(t => (
+            <Link key={t.id} href={`/app/messaging/oversight/${t.id}`}
+              className="block bg-white rounded-lg border px-4 py-3 hover:shadow-sm transition-shadow">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-medium text-gray-800 truncate">
+                    {(t.staffNames ?? []).join(', ')} <span className="text-gray-400">↔</span> {(t.familyNames ?? []).join(', ')}
+                  </p>
+                  <p className="text-sm text-gray-600 mt-0.5 truncate">{t.subject}</p>
+                  <p className="text-sm text-gray-400 mt-0.5 line-clamp-1">{t.messages[0]?.body ?? ''}</p>
+                </div>
+                <span className="text-xs text-gray-400 shrink-0">{new Date(t.updatedAt).toLocaleDateString('en-GB')}</span>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+
+      <div className={`space-y-2 ${tab === 'mine' ? '' : 'hidden'}`}>
         {error && (
           <div className="bg-white rounded-lg border px-4 py-8 text-center">
             <p className="text-sm text-red-600">Couldn&apos;t load your messages.</p>
