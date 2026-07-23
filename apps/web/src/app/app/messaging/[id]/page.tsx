@@ -4,13 +4,17 @@ import { useState, useEffect, useRef, FormEvent } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { uploadFile } from '@/lib/upload';
 import { useApi } from '@/lib/swr';
 import { useMe } from '@/lib/use-me';
+import { Paperclip, X, Download } from 'lucide-react';
 
 interface Person { userId: string; name: string; email: string; role: string; roleLabel: string; }
+interface Attachment { fileId: string; name: string; mime: string; size: number; }
 interface Message {
   id: string; body: string; createdAt: string;
   senderId: string; senderName: string; senderRoleLabel: string;
+  attachments?: Attachment[];
   sender: { id: string; email: string } | null;
 }
 interface Thread {
@@ -24,6 +28,12 @@ export default function ThreadPage() {
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState('');
+  // Photos and short videos, uploaded straight to storage before the message is
+  // posted. Available to everyone in the thread — a parent sending the teacher
+  // a recording of the week's practice is the whole point.
+  const [pending, setPending] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
@@ -42,13 +52,41 @@ export default function ThreadPage() {
     if (thread) setTimeout(() => bottomRef.current?.scrollIntoView(), 50);
   }, [thread]);
 
+  async function pickFiles(files: FileList | null) {
+    if (!files?.length) return;
+    setUploading(true); setSendError('');
+    try {
+      for (const f of Array.from(files).slice(0, 10)) {
+        const up = await uploadFile(f, tok(), { expiring: false });
+        setPending(p => [...p, { fileId: up.fileId, name: up.name, mime: up.mime, size: up.size }]);
+      }
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Upload failed.');
+    } finally {
+      setUploading(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  }
+
+  async function openAttachment(fileId: string) {
+    try {
+      const { downloadUrl } = await apiFetch<{ downloadUrl: string }>(
+        `/threads/${params.id}/attachments/${fileId}`, { token: tok() });
+      window.open(downloadUrl, '_blank', 'noopener');
+    } catch { /* ignore — the link simply won't open */ }
+  }
+
   async function handleReply(e: FormEvent) {
     e.preventDefault();
-    if (!reply.trim()) return;
+    // A message with only an attachment is legitimate — "here's the recording".
+    if (!reply.trim() && pending.length === 0) return;
     setSending(true); setSendError('');
     try {
-      await apiFetch(`/threads/${params.id}/messages`, { method: 'POST', token: tok(), body: JSON.stringify({ body: reply }) });
-      setReply('');
+      await apiFetch(`/threads/${params.id}/messages`, {
+        method: 'POST', token: tok(),
+        body: JSON.stringify({ body: reply, attachments: pending.map(a => ({ fileId: a.fileId })) }),
+      });
+      setReply(''); setPending([]);
       load();
     } catch (err) {
       // A failed send used to go to console.error only: the button flickered,
@@ -102,7 +140,19 @@ export default function ThreadPage() {
                     {msg.senderRoleLabel ? <span className="font-normal text-gray-400"> · {msg.senderRoleLabel}</span> : null}
                   </p>
                 )}
-                <p className="text-sm whitespace-pre-wrap">{msg.body}</p>
+                {msg.body && <p className="text-sm whitespace-pre-wrap">{msg.body}</p>}
+                {(msg.attachments ?? []).length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {(msg.attachments ?? []).map(a => (
+                      <button key={a.fileId} onClick={() => openAttachment(a.fileId)}
+                        className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border ${
+                          isMe ? 'border-white/40 hover:bg-white/15' : 'hover:bg-gray-50'
+                        }`}>
+                        <Download size={12} /> <span className="truncate max-w-[160px]">{a.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <p className={`text-xs mt-1 ${isMe ? 'text-[var(--sage-md)]' : 'text-gray-400'}`}>{new Date(msg.createdAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</p>
               </div>
             </div>
@@ -112,13 +162,34 @@ export default function ThreadPage() {
       </div>
 
       {sendError && <p className="shrink-0 mt-2 text-sm text-red-600">{sendError}</p>}
+      {pending.length > 0 && (
+        <div className="shrink-0 mt-2 flex flex-wrap gap-1.5">
+          {pending.map(a => (
+            <span key={a.fileId} className="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 rounded-full pl-2.5 pr-1 py-0.5">
+              <span className="truncate max-w-[160px]">{a.name}</span>
+              <button type="button" onClick={() => setPending(p => p.filter(x => x.fileId !== a.fileId))}
+                aria-label={`Remove ${a.name}`}
+                className="rounded-full w-4 h-4 flex items-center justify-center hover:bg-gray-200">
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
       <form onSubmit={handleReply} className="shrink-0 flex gap-2 bg-white border rounded-lg p-2 mt-2">
+        <input ref={fileInput} type="file" multiple accept="image/*,video/*,audio/*,.pdf"
+          className="hidden" onChange={e => pickFiles(e.target.files)} />
+        <button type="button" onClick={() => fileInput.current?.click()} disabled={uploading}
+          title="Attach a photo, video or recording"
+          className="self-end rounded-lg border px-2.5 py-2 text-gray-500 hover:bg-gray-50 disabled:opacity-50">
+          <Paperclip size={15} />
+        </button>
         <textarea value={reply} onChange={e => setReply(e.target.value)} placeholder="Write a reply…" rows={2}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleReply(e); }}}
           className="flex-1 resize-none text-sm focus:outline-none px-2 py-1" />
-        <button type="submit" disabled={sending || !reply.trim()}
+        <button type="submit" disabled={sending || uploading || (!reply.trim() && pending.length === 0)}
           className="self-end bg-[var(--sage)] text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-[var(--sage-dk)] disabled:opacity-50">
-          {sending ? '…' : 'Send'}
+          {sending ? '…' : uploading ? 'Uploading…' : 'Send'}
         </button>
       </form>
     </div>

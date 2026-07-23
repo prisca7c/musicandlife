@@ -40,6 +40,11 @@ export const messages = pgTable(
     threadId: uuid('thread_id').notNull().references(() => threads.id, { onDelete: 'cascade' }),
     senderId: uuid('sender_id').notNull().references(() => users.id),
     body: text('body').notNull(),
+    // [{ fileId, name, mime, size }] — photos and short videos shared in the
+    // conversation. Families had no way to send a teacher a recording of the
+    // week's practice; staff could only share media through a lesson note,
+    // which is one-directional.
+    attachments: jsonb('attachments').notNull().default([]),
     readBy: jsonb('read_by').notNull().default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

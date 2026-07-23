@@ -134,6 +134,13 @@
       "when": 1784766039459,
       "tag": "0018_wandering_lockheed",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1784775734705,
+      "tag": "0019_lying_rockslide",
+      "breakpoints": true
     }
   ]
 }

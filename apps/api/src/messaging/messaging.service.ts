@@ -1,11 +1,12 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { eq, and, ne, inArray, sql, count } from 'drizzle-orm';
 import {
-  threads, threadParticipants, messages, memberships,
+  threads, threadParticipants, messages, memberships, files,
   staffMembers, students, guardians, enrollments, teacherAssignments,
 } from '@music-life/db';
 import type { BaseRole } from '@music-life/types';
 import { DbService } from '../db/db.service';
+import { FilesService } from '../files/files.service';
 import type { CreateThreadDto } from './dto/create-thread.dto';
 
 const NON_STAFF_ROLES: BaseRole[] = ['guardian', 'student'];
@@ -18,7 +19,10 @@ const ROLE_LABEL: Record<string, string> = {
 
 @Injectable()
 export class MessagingService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly files: FilesService,
+  ) {}
 
   // The set of guardian/student user-ids a teacher is allowed to message: the
   // families of students they actually teach (via enrollment or assignment) plus
@@ -341,6 +345,8 @@ export class MessagingService {
       }
     }
 
+    const openingAttachments = await this.resolveAttachments(orgId, dto.attachments);
+
     const [thread] = await this.db.db.insert(threads).values({
       organizationId: orgId, subject: dto.subject, createdBy: userId,
     }).returning();
@@ -356,7 +362,7 @@ export class MessagingService {
     // Post opening message
     await this.db.db.insert(messages).values({
       organizationId: orgId, threadId: thread!.id, senderId: userId,
-      body: dto.body, readBy: [userId],
+      body: dto.body, attachments: openingAttachments, readBy: [userId],
     });
 
     return thread!;
@@ -457,11 +463,58 @@ export class MessagingService {
     };
   }
 
-  async sendMessage(orgId: string, threadId: string, userId: string, body: string) {
+  /**
+   * Validate caller-supplied attachments against the files table.
+   *
+   * The client sends {fileId, name, mime, size}; only the id is trusted. A file
+   * id from another studio would otherwise be pinned into this org's thread,
+   * and a spoofed name/mime would be rendered to the recipient as fact.
+   */
+  private async resolveAttachments(orgId: string, input?: { fileId: string }[]) {
+    if (!input?.length) return [];
+    const ids = [...new Set(input.map(a => a.fileId))];
+    const rows = await this.db.db.query.files.findMany({
+      where: and(eq(files.organizationId, orgId), inArray(files.id, ids)),
+      columns: { id: true, originalName: true, mime: true, size: true },
+    });
+    if (rows.length !== ids.length) {
+      throw new NotFoundException('One or more attachments could not be found');
+    }
+    return rows.map(f => ({ fileId: f.id, name: f.originalName, mime: f.mime, size: f.size }));
+  }
+
+  /**
+   * A signed download for a file attached to a thread the caller is in.
+   *
+   * Files are otherwise owner-or-management only (files.service enforces that,
+   * closing an IDOR). A parent must be able to open a video their teacher sent
+   * them without owning the file, so authorisation happens here instead: the
+   * caller must be a participant, and the id must actually appear on a message
+   * in that thread — not merely exist in the org.
+   */
+  async signThreadAttachment(orgId: string, threadId: string, userId: string, fileId: string) {
+    const thread = await this.loadThread(orgId, threadId, userId);
+    const attached = thread.messages.some(m =>
+      ((m.attachments ?? []) as { fileId: string }[]).some(a => a.fileId === fileId),
+    );
+    if (!attached) throw new NotFoundException('Attachment not found');
+    return this.files.signDownloadForOrg(fileId, orgId);
+  }
+
+  async sendMessage(
+    orgId: string, threadId: string, userId: string, body: string,
+    attachments?: { fileId: string }[],
+  ) {
     await this.loadThread(orgId, threadId, userId);
 
+    const resolved = await this.resolveAttachments(orgId, attachments);
+    if (!body.trim() && resolved.length === 0) {
+      throw new BadRequestException('Write a message or attach a file.');
+    }
+
     const [msg] = await this.db.db.insert(messages).values({
-      organizationId: orgId, threadId, senderId: userId, body, readBy: [userId],
+      organizationId: orgId, threadId, senderId: userId, body,
+      attachments: resolved, readBy: [userId],
     }).returning();
 
     await this.db.db.update(threads)
