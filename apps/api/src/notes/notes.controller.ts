@@ -76,9 +76,19 @@ export class NotesController {
         })
       : [];
     const byUser = new Map(staff.filter(s => s.userId).map(s => [s.userId!, `${s.firstName} ${s.lastName}`.trim()]));
+
+    // Matches resolveDisplayName() in auth.service: an account with no staff
+    // record (an owner or admin who writes notes) becomes "Prisca", not the raw
+    // "prisca.meredith.chien". Same person, same name, everywhere in the app.
+    const fromEmail = (email?: string | null) => {
+      const prefix = email?.split('@')[0] ?? '';
+      const cleaned = prefix.split(/[._-]/)[0] ?? prefix;
+      return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : '';
+    };
+
     return rows.map(r => ({
       ...r,
-      authorName: (r.authorId && byUser.get(r.authorId)) || r.author?.email?.split('@')[0] || 'Studio',
+      authorName: (r.authorId && byUser.get(r.authorId)) || fromEmail(r.author?.email) || 'Studio',
     }));
   }
 
