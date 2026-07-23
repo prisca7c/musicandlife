@@ -6,6 +6,7 @@ import { Badge } from '@/components/badge';
 import { PrivilegeMatrix } from '@/components/privilege-matrix';
 import { StaffAvailability } from '@/components/staff-availability';
 import { StaffInstruments } from '@/components/staff-instruments';
+import { StaffPayrollEditor } from '@/components/staff-payroll-editor';
 import { AssignStudentsButton } from '@/components/assign-students-button';
 import { BackButton } from '@/components/back-button';
 
@@ -65,23 +66,12 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
             </dl>
           </div>
 
-          <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
-            <h2 className="font-bold mb-4 text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Payroll</h2>
-            <dl className="space-y-3 text-sm">
-              <div className="flex justify-between gap-3">
-                <dt style={{ color: 'var(--txt3)' }}>Type</dt>
-                <dd className="font-medium capitalize">{member.payrollType}</dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt style={{ color: 'var(--txt3)' }}>Rate</dt>
-                <dd className="font-medium">£{(member.hourlyRate / 100).toFixed(2)}/hr</dd>
-              </div>
-              <div className="flex justify-between gap-3">
-                <dt style={{ color: 'var(--txt3)' }}>Default duration</dt>
-                <dd className="font-medium">{member.defaultDuration} min</dd>
-              </div>
-            </dl>
-          </div>
+          <StaffPayrollEditor
+            staffId={member.id}
+            payrollType={member.payrollType}
+            hourlyRate={member.hourlyRate}
+            defaultDuration={member.defaultDuration}
+          />
 
           <StaffInstruments staffId={member.id} instruments={member.instruments} />
         </div>
