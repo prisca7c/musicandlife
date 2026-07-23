@@ -23,7 +23,7 @@ import { hash } from 'argon2';
 import {
   createDb,
   organizations, users, memberships,
-  staffMembers, staffAvailability, families, guardians, students, enrollments,
+  staffMembers, availability, families, guardians, students, enrollments,
 } from './index';
 
 const db = createDb(process.env.DATABASE_URL!);
@@ -45,7 +45,7 @@ async function upsertUser(email: string) {
   return u!.id;
 }
 
-async function upsertMembership(userId: string, orgId: string, baseRole: 'teacher' | 'guardian' | 'student') {
+async function upsertMembership(userId: string, orgId: string, baseRole: 'admin' | 'teacher' | 'guardian' | 'student') {
   const existing = await db.query.memberships.findFirst({
     where: and(eq(memberships.userId, userId), eq(memberships.organizationId, orgId)),
   });
@@ -81,15 +81,19 @@ async function upsertTeacher(orgId: string, opts: {
   }
 
   for (const w of opts.availability) {
-    const existing = await db.query.staffAvailability.findFirst({
+    // `availability` (schema/scheduling.ts), NOT `staff_availability`. The two
+    // tables are identical in shape but only this one is read — by the slot
+    // generator, the booking conflict check and every availability endpoint.
+    // Seeding the other one gave these teachers no bookable hours at all.
+    const existing = await db.query.availability.findFirst({
       where: and(
-        eq(staffAvailability.staffId, staff.id),
-        eq(staffAvailability.weekday, w.weekday),
-        eq(staffAvailability.startTime, w.startTime),
+        eq(availability.staffId, staff.id),
+        eq(availability.weekday, w.weekday),
+        eq(availability.startTime, w.startTime),
       ),
     });
     if (!existing) {
-      await db.insert(staffAvailability).values({
+      await db.insert(availability).values({
         organizationId: orgId, staffId: staff.id,
         weekday: w.weekday, startTime: w.startTime, endTime: w.endTime,
       });
@@ -215,7 +219,10 @@ async function main() {
   console.log('\nFamily 1 — two children, different instruments, different teachers, one group class…');
   const nakamura = await upsertFamily(orgId, 'Nakamura QA Family (TEST)', 'Aiko Nakamura (TEST)', 'qa2.parent@lirico.test');
 
-  const hana = await upsertStudent(orgId, nakamura.id, 'Hana', 'Nakamura (TEST)');
+  // Hana gets her own login on purpose: this family carries a balance and has
+  // two children, so it's the only fixture that can prove the student portal
+  // hides the family's money AND shows one child rather than both.
+  const hana = await upsertStudent(orgId, nakamura.id, 'Hana', 'Nakamura (TEST)', 'qa2.student@lirico.test');
   // Two instruments, two different teachers — the multi-teacher family case.
   await upsertEnrollment(orgId, hana.id, {
     instrument: 'piano', lessonType: 'private', teacherId: mari.id,
@@ -236,6 +243,13 @@ async function main() {
     teacherId: tom.id, rate: 2500, duration: 60, weekday: 'tuesday', startTime: '17:00',
   });
 
+  console.log('\nQA admin…');
+  // A throwaway admin so the admin-only surfaces (message oversight, payroll,
+  // reconciliation) can be exercised without using the owner's real account.
+  const adminUserId = await upsertUser('qa.admin@lirico.test');
+  await upsertMembership(adminUserId, orgId, 'admin');
+  console.log('  admin login qa.admin@lirico.test');
+
   console.log('\nFamily 2 — one child with their own student login…');
   const adeyemi = await upsertFamily(orgId, 'Adeyemi QA Family (TEST)', 'Femi Adeyemi (TEST)', 'qa3.parent@lirico.test');
   const tunde = await upsertStudent(orgId, adeyemi.id, 'Tunde', 'Adeyemi (TEST)', 'qa3.student@lirico.test');
@@ -255,7 +269,9 @@ async function main() {
   console.log('  qa3.teacher@lirico.test   Tom Beck (TEST)      violin, cello, suzuki violin');
   console.log('  qa2.parent@lirico.test    Nakamura family      Hana (piano+violin), Kenji (guitar+suzuki group)');
   console.log('  qa3.parent@lirico.test    Adeyemi family       Tunde (cello+piano)');
-  console.log('  qa3.student@lirico.test   Tunde Adeyemi (TEST) student-portal login\n');
+  console.log('  qa2.student@lirico.test   Hana Nakamura (TEST)  student login in a family WITH a balance');
+  console.log('  qa3.student@lirico.test   Tunde Adeyemi (TEST) student-portal login');
+  console.log('  qa.admin@lirico.test      QA admin             admin-only surfaces\n');
   console.log('  Delete all of these before launch.\n');
   process.exit(0);
 }
