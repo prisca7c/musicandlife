@@ -8,7 +8,7 @@ import { fmtTime } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
-import { Check, X, AlertTriangle, Calendar, RefreshCw } from 'lucide-react';
+import { Check, X, AlertTriangle, Calendar, RefreshCw, Search } from 'lucide-react';
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string;
@@ -38,6 +38,7 @@ export default function AttendancePage() {
   const [pending, setPending] = useState<Record<string, AttendanceStatus>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]!);
+  const [search, setSearch] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   const mon = new Date(date);
@@ -96,8 +97,14 @@ export default function AttendancePage() {
     load();
   }
 
-  const unmarked = lessons.filter(l => !l.attendance);
-  const marked = lessons.filter(l => l.attendance);
+  // Search by student or teacher name. On a busy day this page is a long list
+  // of similar-looking rows and finding one pupil meant scrolling for them.
+  const q = search.trim().toLowerCase();
+  const matches = (l: Lesson) => !q || [
+    l.student?.firstName, l.student?.lastName, l.teacher?.firstName, l.teacher?.lastName,
+  ].filter(Boolean).join(' ').toLowerCase().includes(q);
+  const unmarked = lessons.filter(l => !l.attendance).filter(matches);
+  const marked = lessons.filter(l => l.attendance).filter(matches);
 
   return (
     <div>
@@ -123,6 +130,14 @@ export default function AttendancePage() {
             <Check size={14} /> Confirm all as present ({unmarked.length})
           </button>
         )}
+        <div className="relative flex-1 min-w-[12rem]">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--txt4)' }}>
+            <Search size={15} />
+          </span>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search student or teacher…"
+            className="w-full pl-9 border-[1.5px] border-[var(--bd2)] rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-[var(--sage)] focus:shadow-[0_0_0_3px_var(--sage-lt)]" />
+        </div>
         <button onClick={load} className="flex items-center gap-1 text-sm border border-[var(--bd2)] rounded-xl px-3 py-2 hover:bg-[var(--surf)]">
           <RefreshCw size={14} /> Refresh
         </button>

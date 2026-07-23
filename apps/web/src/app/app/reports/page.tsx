@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { pdf } from '@react-pdf/renderer';
 import { apiFetch, apiFetchBlob } from '@/lib/api';
 import { useApi } from '@/lib/swr';
+import { LoadState } from '@/components/load-state';
 import { PageHeader } from '@/components/page-header';
 import { InvoicePDF, type OrgPDFData } from '@/components/invoice-pdf';
 import { PayrollPDF, type PayrollPDFData } from '@/components/payroll-pdf';
@@ -50,10 +51,10 @@ export default function ReportsPage() {
 
   // Report data — attendance/revenue re-key on the date range; all cached so
   // flipping back to a range you've already viewed is instant.
-  const { data: attendance = null } = useApi<AttendanceReport>(`/reports/attendance?from=${from}&to=${to}`);
-  const { data: revenue = null } = useApi<RevenueReport>(`/reports/revenue?from=${from}&to=${to}`);
-  const { data: enrollments = null } = useApi<EnrollmentReport>('/reports/enrollments');
-  const { data: retention = null } = useApi<RetentionReport>('/reports/retention');
+  const { data: attendance = null, error: attendanceErr, isLoading: attendanceLoading, mutate: reloadAttendance } = useApi<AttendanceReport>(`/reports/attendance?from=${from}&to=${to}`);
+  const { data: revenue = null, error: revenueErr, isLoading: revenueLoading, mutate: reloadRevenue } = useApi<RevenueReport>(`/reports/revenue?from=${from}&to=${to}`);
+  const { data: enrollments = null, error: enrollmentsErr, isLoading: enrollmentsLoading, mutate: reloadEnrollments } = useApi<EnrollmentReport>('/reports/enrollments');
+  const { data: retention = null, error: retentionErr, isLoading: retentionLoading, mutate: reloadRetention } = useApi<RetentionReport>('/reports/retention');
 
   async function downloadCsv(path: string, filename: string) {
     setGenerating(filename);
@@ -193,7 +194,7 @@ export default function ReportsPage() {
             </button>
           </div>
           <div className="p-5">
-            {!attendance ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>Loading…</p> : (
+            {!attendance ? <LoadState error={attendanceErr} loading={attendanceLoading} onRetry={() => reloadAttendance()} /> : (
               <div className="space-y-3">
                 {attendance.byStatus.length === 0 && <p className="text-sm" style={{ color: 'var(--txt4)' }}>No lessons in this period.</p>}
                 {attendance.byStatus.map(row => (
@@ -227,7 +228,7 @@ export default function ReportsPage() {
             </button>
           </div>
           <div className="p-5">
-            {!revenue ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>Loading…</p> : (
+            {!revenue ? <LoadState error={revenueErr} loading={revenueLoading} onRetry={() => reloadRevenue()} /> : (
               <div className="space-y-3">
                 {/* Earned from completed lessons — the figure that matches the
                     "lessons completed" count, so the two cards reconcile. */}
@@ -265,7 +266,7 @@ export default function ReportsPage() {
             </button>
           </div>
           <div className="p-5">
-            {!enrollments ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>Loading…</p> : (
+            {!enrollments ? <LoadState error={enrollmentsErr} loading={enrollmentsLoading} onRetry={() => reloadEnrollments()} /> : (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {enrollments.byInstrument.length === 0 && <p className="text-sm col-span-3" style={{ color: 'var(--txt4)' }}>No active enrollments.</p>}
                 {enrollments.byInstrument.map(row => (
@@ -292,7 +293,7 @@ export default function ReportsPage() {
             </button>
           </div>
           <div className="p-5">
-            {!retention ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>Loading…</p> : (
+            {!retention ? <LoadState error={retentionErr} loading={retentionLoading} onRetry={() => reloadRetention()} /> : (
               <div className="overflow-x-auto">
                 {retention.byMonth.length === 0 ? <p className="text-sm" style={{ color: 'var(--txt4)' }}>No enrollment history yet.</p> : (
                   <table className="w-full text-sm">
