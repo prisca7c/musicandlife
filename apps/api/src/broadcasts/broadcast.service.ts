@@ -1,5 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { and, eq, inArray, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import {
   memberships, users, enrollments, students, families, guardians, staffMembers,
 } from '@music-life/db';
@@ -109,8 +109,25 @@ export class BroadcastService {
         })
       : [];
 
+    // Instruments were entered inconsistently over time — imported rows use
+    // "Piano" while the registration form writes "piano" — so the same
+    // instrument appears twice. Fold them case-insensitively (keeping the
+    // nicest-looking spelling) or the studio would have to send the same email
+    // once per capitalisation. Matching below is case-insensitive to suit.
+    const byLower = new Map<string, string>();
+    for (const r of rows) {
+      const name = r.instrument?.trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      const seen = byLower.get(key);
+      // Prefer a capitalised spelling for display.
+      if (!seen || (seen[0] === seen[0]?.toLowerCase() && name[0] !== name[0]?.toLowerCase())) {
+        byLower.set(key, name);
+      }
+    }
+
     return {
-      instruments: [...new Set(rows.map((r) => r.instrument).filter(Boolean))].sort(),
+      instruments: [...byLower.values()].sort((a, b) => a.localeCompare(b)),
       groupNames: [...new Set(rows.map((r) => r.groupName).filter((g): g is string => !!g))].sort(),
       teachers: teacherRows
         .map((t) => ({ id: t.id, name: `${t.firstName} ${t.lastName}` }))
@@ -130,9 +147,17 @@ export class BroadcastService {
     const clauses: (SQL | undefined)[] = [
       eq(enrollments.organizationId, orgId),
       inArray(enrollments.status, ['trial', 'active', 'paused']),
-      filter.instrument ? eq(enrollments.instrument, filter.instrument) : undefined,
+      // Case-insensitive: the same instrument is stored as both "Piano" and
+      // "piano" depending on whether the row came from an import or the
+      // registration form. An exact match would silently reach only half the
+      // families who study it.
+      filter.instrument
+        ? sql`lower(${enrollments.instrument}) = ${filter.instrument.trim().toLowerCase()}`
+        : undefined,
       filter.lessonType ? eq(enrollments.lessonType, filter.lessonType) : undefined,
-      filter.groupName ? eq(enrollments.groupName, filter.groupName) : undefined,
+      filter.groupName
+        ? sql`lower(${enrollments.groupName}) = ${filter.groupName.trim().toLowerCase()}`
+        : undefined,
       filter.teacherId ? eq(enrollments.teacherId, filter.teacherId) : undefined,
     ];
 
