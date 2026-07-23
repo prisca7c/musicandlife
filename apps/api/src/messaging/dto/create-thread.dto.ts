@@ -1,4 +1,6 @@
-import { IsString, IsArray, IsUUID, IsOptional } from 'class-validator';
+import { IsString, IsArray, IsUUID, IsOptional, ValidateNested, ArrayMaxSize } from 'class-validator';
+import { Type } from 'class-transformer';
+import { MessageAttachmentDto } from './attachment.dto';
 
 export class CreateThreadDto {
   @IsString()
@@ -11,4 +13,11 @@ export class CreateThreadDto {
 
   @IsString()
   body!: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => MessageAttachmentDto)
+  attachments?: MessageAttachmentDto[];
 }

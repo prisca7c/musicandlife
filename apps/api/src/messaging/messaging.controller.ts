@@ -65,6 +65,20 @@ export class MessagingController {
     @Param('id') id: string,
     @Body() body: SendMessageDto,
   ) {
-    return this.messaging.sendMessage(user.orgId, id, user.userId, body.body);
+    return this.messaging.sendMessage(user.orgId, id, user.userId, body.body, body.attachments);
+  }
+
+  // Signed download for a file attached to a thread the caller participates in.
+  // Deliberately NOT /files/:id/sign-download, which is owner-or-management only
+  // — a parent must be able to open a video their teacher sent without owning
+  // the file. The thread membership check is the authorisation.
+  @Get(':id/attachments/:fileId')
+  @Roles('guardian')
+  signAttachment(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Param('fileId') fileId: string,
+  ) {
+    return this.messaging.signThreadAttachment(user.orgId, id, user.userId, fileId);
   }
 }
