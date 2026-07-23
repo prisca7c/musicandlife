@@ -57,6 +57,31 @@ export class NotesController {
     return [...new Set([...assignments.map((a) => a.studentId), ...enrolled.map((e) => e.studentId)])];
   }
 
+  /**
+   * Attach the author's real name to each note.
+   *
+   * Notes were rendered from `author.email`, so the studio's record of a pupil
+   * said "prisca.meredith.chien" wrote it. These are part of a student's
+   * permanent record and get read back months later — a name matters.
+   */
+  private async withAuthorNames<T extends { authorId: string | null; author?: { id: string; email: string } | null }>(
+    orgId: string,
+    rows: T[],
+  ) {
+    const ids = [...new Set(rows.map(r => r.authorId).filter((v): v is string => !!v))];
+    const staff = ids.length
+      ? await this.db.db.query.staffMembers.findMany({
+          where: and(eq(staffMembers.organizationId, orgId), inArray(staffMembers.userId, ids)),
+          columns: { userId: true, firstName: true, lastName: true },
+        })
+      : [];
+    const byUser = new Map(staff.filter(s => s.userId).map(s => [s.userId!, `${s.firstName} ${s.lastName}`.trim()]));
+    return rows.map(r => ({
+      ...r,
+      authorName: (r.authorId && byUser.get(r.authorId)) || r.author?.email?.split('@')[0] || 'Studio',
+    }));
+  }
+
   @Get()
   @Roles('teacher')
   async findAll(@CurrentUser() user: RequestUser, @Query('studentId') studentId?: string) {
@@ -67,7 +92,7 @@ export class NotesController {
       if (studentId && !assignedIds.includes(studentId)) return [];
       if (assignedIds.length === 0) return [];
 
-      return this.db.db.query.notes.findMany({
+      const own = await this.db.db.query.notes.findMany({
         where: and(
           eq(notes.organizationId, user.orgId),
           inArray(notes.studentId, studentId ? [studentId] : assignedIds),
@@ -75,15 +100,17 @@ export class NotesController {
         with: { student: { columns: { id: true, firstName: true, lastName: true } }, author: { columns: { id: true, email: true } } },
         orderBy: (n, { desc }) => [desc(n.createdAt)],
       });
+      return this.withAuthorNames(user.orgId, own);
     }
 
-    return this.db.db.query.notes.findMany({
+    const all = await this.db.db.query.notes.findMany({
       where: studentId
         ? and(eq(notes.organizationId, user.orgId), eq(notes.studentId, studentId))
         : eq(notes.organizationId, user.orgId),
       with: { student: { columns: { id: true, firstName: true, lastName: true } }, author: { columns: { id: true, email: true } } },
       orderBy: (n, { desc }) => [desc(n.createdAt)],
     });
+    return this.withAuthorNames(user.orgId, all);
   }
 
   @Post()

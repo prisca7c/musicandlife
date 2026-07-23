@@ -5,7 +5,6 @@ import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
-import { Badge } from '@/components/badge';
 import { SearchableSelect } from '@/components/searchable-select';
 import { linkify } from '@/lib/linkify';
 import { uploadFile } from '@/lib/upload';
@@ -16,6 +15,7 @@ interface Lesson { id: string; startsAt: string; duration: number; enrollment: {
 interface NoteAttachment { fileId: string; name: string; mime: string; size?: number }
 interface Note {
   id: string; body: string; visibility: 'internal' | 'family'; createdAt: string; lessonId: string | null;
+  authorName?: string;
   attachments?: NoteAttachment[] | null;
   student: { id: string; firstName: string; lastName: string } | null;
   author: { id: string; email: string } | null;
@@ -227,39 +227,57 @@ export default function NotesPage() {
               </div>
             </div>
 
-            <div>
-              <p className="text-xs font-bold uppercase tracking-widest text-[var(--txt4)] mb-3">
-                History ({notes.length})
-              </p>
-              {notes.length === 0 ? (
-                <p className="text-sm" style={{ color: 'var(--txt4)' }}>No notes yet for this student.</p>
-              ) : (
-                <div className="space-y-2">
-                  {notes.map(n => (
-                    <div key={n.id} className="bg-white rounded-xl border border-[var(--bd)] p-4">
-                      <div className="flex items-center justify-between gap-3 mb-1.5">
-                        <Badge variant={n.visibility}>{n.visibility === 'family' ? 'Family' : 'Private'}</Badge>
-                        <span className="text-xs" style={{ color: 'var(--txt4)' }}>
-                          {new Date(n.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          {n.author?.email && ` · ${n.author.email}`}
-                        </span>
+            {/* Two columns, not one interleaved list with a badge. What the
+                family can read and what stays inside the studio are different
+                kinds of record, and mixing them made it easy to skim the badge
+                and write the wrong thing in the wrong place. */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {([
+                { key: 'family' as const, title: 'Shared with the family', hint: 'Visible to parents, and to the student in their own portal.' },
+                { key: 'internal' as const, title: 'Staff only', hint: 'Never leaves the studio. Not visible to families or students.' },
+              ]).map(col => {
+                const rows = notes.filter(n => n.visibility === col.key);
+                return (
+                  <div key={col.key}>
+                    <p className="text-xs font-bold uppercase tracking-widest text-[var(--txt4)] mb-1">
+                      {col.title} ({rows.length})
+                    </p>
+                    <p className="text-[11px] mb-3" style={{ color: 'var(--txt4)' }}>{col.hint}</p>
+                    {rows.length === 0 ? (
+                      <p className="text-sm" style={{ color: 'var(--txt4)' }}>
+                        {col.key === 'family' ? 'Nothing shared with this family yet.' : 'No staff-only notes for this student.'}
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {rows.map(n => (
+                          <div key={n.id} className="bg-white rounded-xl border border-[var(--bd)] p-4">
+                            <div className="flex items-center justify-between gap-3 mb-1.5">
+                              <span className="text-xs font-semibold" style={{ color: 'var(--txt3)' }}>
+                                {n.authorName ?? n.author?.email?.split('@')[0] ?? 'Studio'}
+                              </span>
+                              <span className="text-xs" style={{ color: 'var(--txt4)' }}>
+                                {new Date(n.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                              </span>
+                            </div>
+                            <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--txt)' }}>{linkify(n.body)}</p>
+                            {n.attachments && n.attachments.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                {n.attachments.map(a => (
+                                  <button key={a.fileId} onClick={() => downloadAttachment(a.fileId)}
+                                    className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border hover:bg-[var(--surf)]"
+                                    style={{ borderColor: 'var(--bd2)', color: 'var(--txt3)' }}>
+                                    <Download size={12} /> <span className="truncate max-w-[160px]">{a.name}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                      <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--txt)' }}>{linkify(n.body)}</p>
-                      {n.attachments && n.attachments.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {n.attachments.map(a => (
-                            <button key={a.fileId} onClick={() => downloadAttachment(a.fileId)}
-                              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border hover:bg-[var(--surf)]"
-                              style={{ borderColor: 'var(--bd2)', color: 'var(--txt3)' }}>
-                              <Download size={12} /> <span className="truncate max-w-[160px]">{a.name}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
