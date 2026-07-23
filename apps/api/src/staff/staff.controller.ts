@@ -1,18 +1,30 @@
 import { Controller, Get, Post, Patch, Delete, Body, Param, UseGuards, HttpCode } from '@nestjs/common';
-import { IsIn, IsString, Matches } from 'class-validator';
+import { IsIn, IsString, Matches, IsArray, ArrayNotEmpty, IsDateString, IsOptional, MaxLength } from 'class-validator';
 
 // 24-hour HH:MM. The previous /^\d{2}:\d{2}$/ let through out-of-range values
 // like "25:00" or "08:70", which slipped past the service's end>start check and
 // poisoned the availability/slot calculations downstream.
 const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+const WEEKDAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'] as const;
+
 class AddAvailabilityDto {
-  @IsIn(['monday','tuesday','wednesday','thursday','friday','saturday','sunday'])
-  weekday!: string;
+  // Single-day form, kept for the existing caller.
+  @IsOptional() @IsIn(WEEKDAYS as unknown as string[])
+  weekday?: string;
+  // Multi-day form: the same window applied to several days in one submit.
+  @IsOptional() @IsArray() @ArrayNotEmpty() @IsIn(WEEKDAYS as unknown as string[], { each: true })
+  weekdays?: string[];
   @IsString() @Matches(HH_MM)
   startTime!: string;
   @IsString() @Matches(HH_MM)
   endTime!: string;
+}
+
+class AddTimeOffDto {
+  @IsDateString() startsAt!: string;
+  @IsDateString() endsAt!: string;
+  @IsOptional() @IsString() @MaxLength(200) reason?: string;
 }
 import { StaffService } from './staff.service';
 import { CreateStaffDto } from './dto/create-staff.dto';
@@ -60,7 +72,8 @@ export class StaffController {
   @Post('me/availability')
   @Roles('teacher')
   addMyAvailability(@CurrentUser() user: RequestUser, @Body() dto: AddAvailabilityDto) {
-    return this.staff.addMyAvailability(user.orgId, user.userId, dto.weekday, dto.startTime, dto.endTime);
+    const days = dto.weekdays ?? (dto.weekday ? [dto.weekday] : []);
+    return this.staff.addMyAvailabilityDays(user.orgId, user.userId, days, dto.startTime, dto.endTime);
   }
 
   @Delete('me/availability/:windowId')
@@ -68,6 +81,27 @@ export class StaffController {
   @HttpCode(200)
   removeMyAvailability(@CurrentUser() user: RequestUser, @Param('windowId') windowId: string) {
     return this.staff.removeMyAvailability(user.orgId, user.userId, windowId);
+  }
+
+  // ─── My time off (teacher self-service) ─────────────────────────────────────
+  // Declared before `:id/...` so `me` is not captured by the id param.
+  @Get('me/time-off')
+  @Roles('teacher')
+  getMyTimeOff(@CurrentUser() user: RequestUser) {
+    return this.staff.getMyTimeOff(user.orgId, user.userId);
+  }
+
+  @Post('me/time-off')
+  @Roles('teacher')
+  addMyTimeOff(@CurrentUser() user: RequestUser, @Body() dto: AddTimeOffDto) {
+    return this.staff.addMyTimeOff(user.orgId, user.userId, dto.startsAt, dto.endsAt, dto.reason);
+  }
+
+  @Delete('me/time-off/:id')
+  @Roles('teacher')
+  @HttpCode(200)
+  removeMyTimeOff(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.staff.removeMyTimeOff(user.orgId, user.userId, id);
   }
 
   @Post()
@@ -132,7 +166,32 @@ export class StaffController {
     @Param('id') id: string,
     @Body() dto: AddAvailabilityDto,
   ) {
-    return this.staff.addAvailability(user.orgId, id, dto.weekday, dto.startTime, dto.endTime);
+    const days = dto.weekdays ?? (dto.weekday ? [dto.weekday] : []);
+    return this.staff.addAvailabilityDays(user.orgId, id, days, dto.startTime, dto.endTime);
+  }
+
+  // ─── A teacher's time off (manager view) ───────────────────────────────────
+  @Get(':id/time-off')
+  @Roles('manager')
+  getTimeOff(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.staff.getTimeOff(user.orgId, id);
+  }
+
+  @Post(':id/time-off')
+  @Roles('manager')
+  addTimeOff(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: AddTimeOffDto) {
+    return this.staff.addTimeOff(user.orgId, id, dto.startsAt, dto.endsAt, dto.reason);
+  }
+
+  @Delete(':id/time-off/:timeOffId')
+  @Roles('manager')
+  @HttpCode(200)
+  removeTimeOff(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Param('timeOffId') timeOffId: string,
+  ) {
+    return this.staff.removeTimeOff(user.orgId, id, timeOffId);
   }
 
   @Delete(':id/availability/:windowId')
