@@ -34,6 +34,9 @@ const NAV: NavItem[] = [
   { label: 'Families',     href: '/app/families',          roles: ['system_admin','admin','manager','receptionist'],          icon: <Home size={16} /> },
   { label: 'Staff',        href: '/app/staff',             roles: ['system_admin','admin'],                                   icon: <Briefcase size={16} /> },
   { label: 'Payroll',      href: '/app/staff/payroll',     roles: ['system_admin','admin','manager'],                        icon: <PoundSterling size={16} /> },
+  // Separate from Payroll on purpose: "what am I owed" and "run the studio's
+  // payroll" are different jobs, and the Payroll page is manager-only.
+  { label: 'My pay',       href: '/app/my-pay',            roles: ['teacher'],                                                icon: <PoundSterling size={16} /> },
   { label: 'Billing',      href: '/app/billing',           roles: ['system_admin','admin','manager','receptionist','guardian'], icon: <CreditCard size={16} /> },
   { label: 'Payments',     href: '/app/billing/reconciliation', roles: ['system_admin','admin','manager','receptionist'],      icon: <Landmark size={16} /> },
   { label: 'New students', href: '/app/intake',            roles: ['system_admin','admin','manager','receptionist'],          icon: <ClipboardCheck size={16} /> },
@@ -49,7 +52,7 @@ const NAV: NavItem[] = [
 const GROUPS = [
   { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History','Lesson notes'] },
   { label: 'Studio',   items: ['Calendar','Attendance','Booking requests','Reschedules','My availability','Notes','New students','Messages'] },
-  { label: 'People',   items: ['Students','Families','Staff','Payroll'] },
+  { label: 'People',   items: ['Students','Families','Staff','Payroll','My pay'] },
   { label: 'Finance',  items: ['Billing','Payments'] },
   { label: 'Content',  items: ['Resources','Content','Studio News'] },
   { label: 'Admin',    items: ['Reports','Settings'] },

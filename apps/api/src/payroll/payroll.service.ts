@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
-import { eq, and, gte, lte } from 'drizzle-orm';
+import { eq, and, gte, lte, inArray } from 'drizzle-orm';
 import { payrollRuns, payrollItems, expenses, rateChangeRequests, lessons, attendance, staffMembers, files } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreatePayrollRunDto } from './dto/create-payroll-run.dto';
@@ -44,6 +44,56 @@ export class PayrollService {
       with: { staff: { columns: { id: true, firstName: true, lastName: true } } },
       orderBy: (r, { desc }) => [desc(r.periodStart)],
     });
+  }
+
+  /**
+   * A teacher's own pay history.
+   *
+   * Payroll was manager-only end to end, so a teacher had no way to see what
+   * they had been paid — despite `payroll.view_own` existing in the privilege
+   * set and defaulting to true for teachers. Nothing honoured it.
+   *
+   * Deliberately excludes DRAFT runs. A draft is a working figure the office is
+   * still checking; showing it to the teacher turns every later correction into
+   * an argument about a number they were shown. Approved and paid runs only,
+   * with each run's lesson-by-lesson breakdown so the figure can be checked.
+   */
+  async getMyPayrollRuns(orgId: string, userId: string) {
+    const own = await this.db.db.query.staffMembers.findFirst({
+      where: and(eq(staffMembers.userId, userId), eq(staffMembers.organizationId, orgId)),
+      columns: { id: true },
+    });
+    if (!own) throw new NotFoundException('No staff record for this user');
+
+    const runs = await this.db.db.query.payrollRuns.findMany({
+      where: and(
+        eq(payrollRuns.organizationId, orgId),
+        eq(payrollRuns.staffId, own.id),
+        inArray(payrollRuns.status, ['approved', 'paid']),
+      ),
+      with: {
+        items: { with: { lesson: { columns: { id: true, startsAt: true, duration: true } } } },
+      },
+      orderBy: (r, { desc }) => [desc(r.periodStart)],
+    });
+
+    return runs.map(r => ({
+      id: r.id,
+      periodStart: r.periodStart,
+      periodEnd: r.periodEnd,
+      hoursElapsed: r.hoursElapsed,
+      hourlyRate: r.hourlyRate,
+      gross: r.gross,
+      status: r.status,
+      approvedAt: r.approvedAt,
+      items: r.items.map(i => ({
+        id: i.id,
+        type: i.type,
+        minutesElapsed: i.minutesElapsed,
+        amount: i.amount,
+        startsAt: i.lesson?.startsAt ?? null,
+      })),
+    }));
   }
 
   // Compute payable items for one teacher over a period from their completed
