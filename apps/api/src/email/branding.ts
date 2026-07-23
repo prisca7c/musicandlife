@@ -70,12 +70,17 @@ export function brandedEmail(opts: BrandedEmailOptions): string {
     : '';
 
   return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light">
+<!--[if mso]><style>table,td{border-collapse:collapse}</style><![endif]--></head>
 <body style="margin:0;padding:0;background:${BRAND.paper}">
 ${preview}
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BRAND.paper};padding:24px 12px">
-  <tr><td align="center">
-    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border:1px solid ${BRAND.line};border-radius:16px;overflow:hidden">
+<!-- Full-width background row. text-align:center centres the card in clients
+     that honour it; align="center" on the inner table and margin:0 auto below
+     are backstops for the ones that don't (Gmail web, some Outlooks). -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BRAND.paper};padding:24px 12px;text-align:center">
+  <tr><td align="center" style="text-align:center">
+    <!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" align="center"><tr><td><![endif]-->
+    <table role="presentation" width="600" align="center" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;margin:0 auto;background:#ffffff;border:1px solid ${BRAND.line};border-radius:16px;overflow:hidden;text-align:left">
       <!-- header: the real wordmark, centred. The alt text carries the studio
            name for the many clients that block images by default. -->
       <tr><td align="center" style="background:#ffffff;padding:30px 24px 22px;text-align:center">
@@ -113,6 +118,7 @@ ${preview}
         </p>
       </td></tr>
     </table>
+    <!--[if mso]></td></tr></table><![endif]-->
   </td></tr>
 </table>
 </body></html>`;
