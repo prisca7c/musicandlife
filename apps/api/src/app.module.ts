@@ -26,6 +26,7 @@ import { FilesModule } from './files/files.module';
 import { ResourcesModule } from './resources/resources.module';
 import { ReportsModule } from './reports/reports.module';
 import { NotesModule } from './notes/notes.module';
+import { RepertoireModule } from './repertoire/repertoire.module';
 import { NewsModule } from './news/news.module';
 import { FamilyPortalModule } from './family-portal/family-portal.module';
 
@@ -51,7 +52,7 @@ import { FamilyPortalModule } from './family-portal/family-portal.module';
     SchedulingModule, AttendanceModule,
     MessagingModule, RegistrationModule, LeadsModule,
     ResourcesModule, ReportsModule,
-    NotesModule, NewsModule, FamilyPortalModule,
+    NotesModule, RepertoireModule, NewsModule, FamilyPortalModule,
     HealthModule,
   ],
   providers: [
