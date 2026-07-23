@@ -10,7 +10,7 @@ import {
   FileText, BarChart3, Settings,
   Briefcase, CreditCard, UserCheck, BookOpen, Landmark,
   Clock, History, ChevronLeft, ChevronRight, ChevronDown,
-  LogOut, PanelLeftClose, PanelLeftOpen, Megaphone, CalendarClock, CalendarPlus,
+  LogOut, PanelLeftClose, PanelLeftOpen, Megaphone, CalendarClock, CalendarPlus, Send,
 } from 'lucide-react';
 import type { BaseRole } from '@music-life/types';
 import { apiFetch } from '@/lib/api';
@@ -44,6 +44,7 @@ const NAV: NavItem[] = [
   { label: 'Resources',    href: '/app/resources',         roles: ['system_admin','admin','manager','teacher','guardian','student'], icon: <FileText size={16} /> },
   { label: 'Repertoire',   href: '/app/content',           roles: ['system_admin','admin','manager','teacher'],               icon: <BookOpen size={16} /> },
   { label: 'Studio News',  href: '/app/news',              roles: ['system_admin','admin'],                                   icon: <Megaphone size={16} /> },
+  { label: 'Email everyone', href: '/app/broadcasts',      roles: ['system_admin','admin','manager'],                         icon: <Send size={16} /> },
   { label: 'Reports',      href: '/app/reports',           roles: ['system_admin','admin','manager'],                        icon: <BarChart3 size={16} /> },
   { label: 'Settings',     href: '/app/settings',          roles: ['system_admin','admin'],                                   icon: <Settings size={16} /> },
 ];
@@ -54,7 +55,7 @@ const GROUPS = [
   { label: 'Studio',   items: ['Calendar','Attendance','Booking requests','Reschedules','My availability','Notes','New students','Messages'] },
   { label: 'People',   items: ['Students','Families','Staff','Payroll','My pay'] },
   { label: 'Finance',  items: ['Billing','Payments'] },
-  { label: 'Content',  items: ['Resources','Repertoire','Studio News'] },
+  { label: 'Content',  items: ['Resources','Repertoire','Studio News','Email everyone'] },
   { label: 'Admin',    items: ['Reports','Settings'] },
 ];
 
