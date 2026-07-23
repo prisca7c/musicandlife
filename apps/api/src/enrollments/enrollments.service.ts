@@ -58,9 +58,17 @@ export class EnrollmentsService {
 
     await this.assertTeacherAndTermInOrg(orgId, dto.teacherId, dto.termId);
 
+    // The DTO carries the lesson length as `duration`; the column is
+    // `defaultDuration`. create() maps this, but update() spread the DTO raw, so
+    // a changed duration was silently dropped. Map it here the same way.
+    const { duration, ...rest } = dto;
     const [updated] = await this.db.db
       .update(enrollments)
-      .set({ ...dto, updatedAt: new Date() })
+      .set({
+        ...rest,
+        ...(duration != null ? { defaultDuration: duration } : {}),
+        updatedAt: new Date(),
+      })
       .where(and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)))
       .returning();
     return updated!;

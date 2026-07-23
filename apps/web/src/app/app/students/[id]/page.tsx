@@ -19,6 +19,7 @@ interface StudentDetail {
   family: { id: string; name: string; phone: string | null; email: string | null } | null;
   enrollments: {
     id: string; instrument: string; lessonType: string; status: string; rate: number;
+    defaultDuration: number;
     teacher: { id: string; firstName: string; lastName: string } | null;
     term: { id: string; name: string; status: string } | null;
     scheduleRule: { weekday: string; startTime: string } | null;
@@ -218,6 +219,84 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
   );
 }
 
+type EnrollmentRow = StudentDetail['enrollments'][number];
+
+// Edit an EXISTING enrollment's teacher, rate and lesson length. Registration
+// creates enrollments with a flat £45 and no teacher, and the row itself only
+// let you change status — so this is the one place to fix the rate, assign or
+// change the teacher, and set a group's price/duration after the fact.
+function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
+  open: boolean; onClose: () => void; enrollment: EnrollmentRow | null; onSaved: () => void;
+}) {
+  const [teacherId, setTeacherId] = useState('');
+  const [rateText, setRateText] = useState('');
+  const [duration, setDuration] = useState(60);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  const { data: staff = [] } = useApi<StaffMember[]>(open ? '/staff' : null);
+
+  // Load the enrollment's current values whenever the modal opens on a row.
+  useEffect(() => {
+    if (!open || !enrollment) return;
+    setTeacherId(enrollment.teacher?.id ?? '');
+    setRateText((enrollment.rate / 100).toFixed(2));
+    setDuration(enrollment.defaultDuration ?? 60);
+    setError('');
+  }, [open, enrollment]);
+
+  async function save() {
+    const pence = Math.round(parseFloat(rateText) * 100);
+    if (!Number.isFinite(pence) || pence < 0) { setError('Enter a valid rate.'); return; }
+    if (!Number.isInteger(duration) || duration < 5 || duration > 240) { setError('Duration must be 5–240 minutes.'); return; }
+    if (!enrollment) return;
+    setSaving(true); setError('');
+    try {
+      await apiFetch(`/enrollments/${enrollment.id}`, {
+        method: 'PATCH', token: tok(),
+        body: JSON.stringify({ teacherId: teacherId || null, rate: pence, duration }),
+      });
+      onSaved(); onClose();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Could not save'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={enrollment ? `Edit ${enrollment.instrument} enrollment` : 'Edit enrollment'}>
+      {error && <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
+      <div className="space-y-4">
+        <div>
+          <label className="ui-label">Teacher</label>
+          <SearchableSelect
+            options={staff.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+            value={teacherId} onChange={setTeacherId} emptyLabel="Unassigned" placeholder="Unassigned"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="ui-label">Rate (£)</label>
+            <input type="number" step="0.01" min="0" value={rateText}
+              onChange={e => setRateText(e.target.value)} className="ui-input w-full" />
+          </div>
+          <div>
+            <label className="ui-label">Duration (min)</label>
+            <input type="number" step="5" min="5" max="240" value={duration}
+              onChange={e => setDuration(parseInt(e.target.value || '0', 10))} className="ui-input w-full" />
+          </div>
+        </div>
+        <p className="text-xs" style={{ color: 'var(--txt4)' }}>
+          The rate is what the family is charged for this enrollment; a lesson of a different length is prorated against the duration.
+          {enrollment?.lessonType === 'group' && ' For a group class, this is the set price and length.'}
+        </p>
+        <div className="flex gap-3 pt-1">
+          <button onClick={save} disabled={saving} className="ui-btn-primary">{saving ? 'Saving…' : 'Save changes'}</button>
+          <button onClick={onClose} className="ui-btn-ghost">Cancel</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function LessonNotes({ studentId }: { studentId: string }) {
   const [showAdd, setShowAdd] = useState(false);
   const [familyNote, setFamilyNote] = useState('');
@@ -300,6 +379,7 @@ export default function StudentDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [showEnroll, setShowEnroll] = useState(false);
+  const [editEnrollment, setEditEnrollment] = useState<EnrollmentRow | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   // Cached read — instant on revisit. load() refreshes after an edit/enrollment.
@@ -325,6 +405,7 @@ export default function StudentDetailPage() {
   return (
     <div>
       <AddEnrollmentModal open={showEnroll} onClose={() => setShowEnroll(false)} studentId={id} onCreated={load} />
+      <EditEnrollmentModal open={!!editEnrollment} onClose={() => setEditEnrollment(null)} enrollment={editEnrollment} onSaved={load} />
 
       <div className="mb-5">
         <BackButton label="Students" fallbackHref="/app/students" />
@@ -433,6 +514,11 @@ export default function StudentDetailPage() {
                     <td><Badge variant={e.status}>{e.status}</Badge></td>
                     <td>
                       <div className="flex items-center gap-2">
+                        <button onClick={() => setEditEnrollment(e)}
+                          className="text-xs font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}
+                          title="Edit teacher, rate and duration">
+                          Edit
+                        </button>
                         <select value={e.status} onChange={ev => changeEnrollmentStatus(e.id, ev.target.value)}
                           className="text-xs border rounded-lg px-2 py-1" style={{ borderColor: 'var(--bd2)' }}
                           title="Change enrollment status">
