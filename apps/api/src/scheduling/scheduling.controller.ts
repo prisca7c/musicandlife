@@ -24,10 +24,12 @@ export class SchedulingController {
   getLessons(
     @CurrentUser() user: RequestUser,
     @Query('weekStart') weekStart?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
     @Query('teacherId') teacherId?: string,
     @Query('studentId') studentId?: string,
   ) {
-    return this.scheduling.getLessons(user.orgId, { weekStart, teacherId, studentId }, { role: user.role, userId: user.userId });
+    return this.scheduling.getLessons(user.orgId, { weekStart, from, to, teacherId, studentId }, { role: user.role, userId: user.userId });
   }
 
   @Post('lessons')

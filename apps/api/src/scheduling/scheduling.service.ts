@@ -118,10 +118,29 @@ export class SchedulingService {
   }
 
   // ─── Lessons ──────────────────────────────────────────────────────────────
-  async getLessons(orgId: string, params: { weekStart?: string; teacherId?: string; studentId?: string }, actor?: Actor) {
+  async getLessons(
+    orgId: string,
+    params: { weekStart?: string; from?: string; to?: string; teacherId?: string; studentId?: string },
+    actor?: Actor,
+  ) {
     const base = eq(lessons.organizationId, orgId);
+
+    // An explicit from/to window, for views wider than a week (the monthly
+    // attendance grid). Bounded in SQL rather than fetched and filtered: with
+    // neither weekStart nor a range this query returns EVERY lesson the studio
+    // has ever run, which is fine at today's size and won't stay fine.
+    const range = params.from || params.to
+      ? and(
+          base,
+          params.from ? gte(lessons.startsAt, new Date(`${params.from}T00:00:00`)) : undefined,
+          params.to ? lte(lessons.startsAt, new Date(`${params.to}T23:59:59.999`)) : undefined,
+        )
+      : null;
+
     const rows = await this.db.db.query.lessons.findMany({
-      where: params.weekStart
+      where: range
+        ? range
+        : params.weekStart
         ? and(base,
             gte(lessons.startsAt, new Date(params.weekStart)),
             lte(lessons.startsAt, new Date(new Date(params.weekStart).getTime() + 7 * 86400 * 1000)))
