@@ -226,18 +226,8 @@ export const notes = pgTable(
   ],
 );
 
-// ─── Staff availability windows ───────────────────────────────────────────────
-export const staffAvailability = pgTable(
-  'staff_availability',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
-    staffId: uuid('staff_id').notNull().references(() => staffMembers.id, { onDelete: 'cascade' }),
-    weekday: text('weekday', { enum: ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'] }).notNull(),
-    startTime: text('start_time').notNull(),
-    endTime: text('end_time').notNull(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [index('staff_availability_staff_idx').on(t.staffId)],
-);
+// NOTE: `staff_availability` used to live here — an exact duplicate of
+// `availability` in schema/scheduling.ts. Nothing in the API ever read it: the
+// slot generator, the booking conflict check and every availability endpoint
+// all use `availability`. Its only writer was the QA seed, which meant those
+// teachers had no bookable hours at all. Dropped in migration 0018.

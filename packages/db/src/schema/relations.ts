@@ -3,7 +3,7 @@ import { organizations, users, memberships } from './auth';
 import {
   terms, families, guardians, students,
   staffMembers, staffPrivileges, teacherAssignments, enrollments,
-  notes, staffAvailability,
+  notes,
 } from './domain';
 import { lessons, attendance, rescheduleRequests, lessonRequests, availability, blockedTime } from './scheduling';
 import { invoices, invoiceLineItems, ledgerEntries, payments, paymentClaims, bankTransactions, payrollRuns, payrollItems, expenses, rateChangeRequests, lessonCredits } from './billing';
@@ -197,10 +197,6 @@ export const newsPostsRelations = relations(newsPosts, ({ one }) => ({
 export const notesRelations = relations(notes, ({ one }) => ({
   student: one(students, { fields: [notes.studentId], references: [students.id] }),
   author: one(users, { fields: [notes.authorId], references: [users.id] }),
-}));
-
-export const staffAvailabilityRelations = relations(staffAvailability, ({ one }) => ({
-  staff: one(staffMembers, { fields: [staffAvailability.staffId], references: [staffMembers.id] }),
 }));
 
 export const resourcesRelations = relations(resources, ({ one }) => ({

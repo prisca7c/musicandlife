@@ -127,6 +127,13 @@
       "when": 1784760713459,
       "tag": "0017_big_black_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784766039459,
+      "tag": "0018_wandering_lockheed",
+      "breakpoints": true
     }
   ]
 }
