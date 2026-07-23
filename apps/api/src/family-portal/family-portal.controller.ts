@@ -353,6 +353,33 @@ export class FamilyPortalController {
     };
   }
 
+  // ─── Resource-library subscription ──────────────────────────────────────────
+  // Guardians can see the terms and buy access; students never see money, so the
+  // subscribe flow is guardian-only (a student who isn't covered just sees the
+  // locked resources page telling them to ask a parent).
+  @Get('resource-subscription')
+  @Roles('guardian')
+  async getResourceSubscription(@CurrentUser() user: RequestUser) {
+    const family = await this.requireFamily(user.userId, user.orgId);
+    const terms = await this.billing.getResourceSubscriptionTerms(user.orgId);
+    const today = new Date().toISOString().split('T')[0]!;
+    const paidUntil = family.resourceAccessPaidUntil;
+    return {
+      active: !!paidUntil && paidUntil >= today,
+      paidUntil: paidUntil ?? null,
+      price: terms.price,
+      months: terms.months,
+    };
+  }
+
+  @Post('resource-subscription/subscribe')
+  @Roles('guardian')
+  async subscribeResources(@CurrentUser() user: RequestUser) {
+    const family = await this.requireFamily(user.userId, user.orgId);
+    const result = await this.billing.chargeResourceSubscription(user.orgId, family.id);
+    return { ok: true, ...result };
+  }
+
   // ─── This family's invoices (read-only) ─────────────────────────────────────
   // Parents RECEIVE invoices — they never create them — so this list is view-only
   // and scoped to the caller's own family (staff use the admin /invoices route).
