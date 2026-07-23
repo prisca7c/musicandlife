@@ -1,10 +1,12 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { and, eq, inArray } from 'drizzle-orm';
-import { memberships, users } from '@music-life/db';
+import { and, eq, inArray, type SQL } from 'drizzle-orm';
+import {
+  memberships, users, enrollments, students, families, guardians, staffMembers,
+} from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
 import { TEMPLATES } from '../notifications/notifications.service';
-import type { BroadcastAudience } from './dto/broadcast.dto';
+import type { BroadcastAudience, BroadcastFilterDto } from './dto/broadcast.dto';
 
 // The roles that make up each audience. "Families" means the parents/guardians
 // who receive studio communications; children (students) are addressed on their
@@ -74,6 +76,150 @@ export class BroadcastService {
     };
   }
 
+  // ─── Subgroup targeting ─────────────────────────────────────────────────────
+  // A subgroup is defined by what people study, which lives on enrollments, not
+  // on memberships — so a filtered send resolves recipients through enrollments
+  // instead of the membership path above.
+
+  static hasFilter(f?: BroadcastFilterDto): boolean {
+    return !!(f && (f.instrument || f.lessonType || f.groupName || f.teacherId));
+  }
+
+  private static dedupe(emails: (string | null | undefined)[]): string[] {
+    return [...new Set(
+      emails.map((e) => e?.trim().toLowerCase()).filter((e): e is string => !!e),
+    )];
+  }
+
+  /** The distinct values the compose screen offers as subgroup options. */
+  async segments(orgId: string) {
+    const rows = await this.db.db.query.enrollments.findMany({
+      where: and(
+        eq(enrollments.organizationId, orgId),
+        inArray(enrollments.status, ['trial', 'active', 'paused']),
+      ),
+      columns: { instrument: true, groupName: true, teacherId: true },
+    });
+
+    const teacherIds = [...new Set(rows.map((r) => r.teacherId).filter((t): t is string => !!t))];
+    const teacherRows = teacherIds.length
+      ? await this.db.db.query.staffMembers.findMany({
+          where: and(eq(staffMembers.organizationId, orgId), inArray(staffMembers.id, teacherIds)),
+          columns: { id: true, firstName: true, lastName: true },
+        })
+      : [];
+
+    return {
+      instruments: [...new Set(rows.map((r) => r.instrument).filter(Boolean))].sort(),
+      groupNames: [...new Set(rows.map((r) => r.groupName).filter((g): g is string => !!g))].sort(),
+      teachers: teacherRows
+        .map((t) => ({ id: t.id, name: `${t.firstName} ${t.lastName}` }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }
+
+  /**
+   * Recipients for a subgroup. Withdrawn enrollments are excluded so a family
+   * that stopped piano isn't emailed about the piano recital.
+   */
+  private async filteredEmails(
+    orgId: string,
+    audience: BroadcastAudience,
+    filter: BroadcastFilterDto,
+  ): Promise<string[]> {
+    const clauses: (SQL | undefined)[] = [
+      eq(enrollments.organizationId, orgId),
+      inArray(enrollments.status, ['trial', 'active', 'paused']),
+      filter.instrument ? eq(enrollments.instrument, filter.instrument) : undefined,
+      filter.lessonType ? eq(enrollments.lessonType, filter.lessonType) : undefined,
+      filter.groupName ? eq(enrollments.groupName, filter.groupName) : undefined,
+      filter.teacherId ? eq(enrollments.teacherId, filter.teacherId) : undefined,
+    ];
+
+    const matched = await this.db.db.query.enrollments.findMany({
+      where: and(...clauses),
+      columns: { studentId: true, teacherId: true },
+    });
+    if (matched.length === 0) return [];
+
+    const studentIds = [...new Set(matched.map((m) => m.studentId))];
+    const wantsFamilies = audience === 'families' || audience === 'everyone';
+    const wantsStudents = audience === 'students' || audience === 'everyone';
+    const wantsTeachers = audience === 'teachers' || audience === 'everyone';
+
+    const out: (string | null | undefined)[] = [];
+
+    if (wantsFamilies || wantsStudents) {
+      const studentRows = await this.db.db.query.students.findMany({
+        where: and(eq(students.organizationId, orgId), inArray(students.id, studentIds)),
+        columns: { id: true, email: true, familyId: true, studentUserId: true },
+      });
+
+      if (wantsStudents) {
+        out.push(...studentRows.map((s) => s.email));
+        // A student who logs in may have registered a different address there.
+        const studentUserIds = studentRows.map((s) => s.studentUserId).filter((u): u is string => !!u);
+        if (studentUserIds.length) {
+          const rows = await this.db.db.query.users.findMany({
+            where: inArray(users.id, studentUserIds),
+            columns: { email: true },
+          });
+          out.push(...rows.map((r) => r.email));
+        }
+      }
+
+      if (wantsFamilies) {
+        const familyIds = [...new Set(studentRows.map((s) => s.familyId).filter(Boolean))];
+        if (familyIds.length) {
+          // The family contact address and any guardian login are both valid
+          // ways to reach a family, and plenty of families have only one.
+          const [famRows, guardianRows] = await Promise.all([
+            this.db.db.query.families.findMany({
+              where: and(eq(families.organizationId, orgId), inArray(families.id, familyIds)),
+              columns: { email: true },
+            }),
+            this.db.db.query.guardians.findMany({
+              where: and(eq(guardians.organizationId, orgId), inArray(guardians.familyId, familyIds)),
+              with: { user: { columns: { email: true } } },
+            }),
+          ]);
+          out.push(...famRows.map((f) => f.email));
+          out.push(...guardianRows.map((g) => (g as { user?: { email: string | null } }).user?.email));
+        }
+      }
+    }
+
+    if (wantsTeachers) {
+      const teacherIds = [...new Set(matched.map((m) => m.teacherId).filter((t): t is string => !!t))];
+      if (teacherIds.length) {
+        const rows = await this.db.db.query.staffMembers.findMany({
+          where: and(eq(staffMembers.organizationId, orgId), inArray(staffMembers.id, teacherIds)),
+          with: { user: { columns: { email: true } } },
+        });
+        out.push(...rows.map((r) => (r as { user?: { email: string | null } }).user?.email));
+      }
+    }
+
+    return BroadcastService.dedupe(out);
+  }
+
+  /** Recipients for a send: the subgroup when filtered, else the whole audience. */
+  private async resolveRecipients(
+    orgId: string,
+    audience: BroadcastAudience,
+    filter?: BroadcastFilterDto,
+  ): Promise<string[]> {
+    return BroadcastService.hasFilter(filter)
+      ? this.filteredEmails(orgId, audience, filter!)
+      : this.audienceEmails(orgId, audience);
+  }
+
+  /** Headcount for the composed selection, so nothing is sent blind. */
+  async preview(orgId: string, audience: BroadcastAudience, filter?: BroadcastFilterDto) {
+    const recipients = await this.resolveRecipients(orgId, audience, filter);
+    return { total: recipients.length, filtered: BroadcastService.hasFilter(filter) };
+  }
+
   private render(subject: string, body: string) {
     return TEMPLATES['newsletter.event']!({
       orgId: '',
@@ -100,8 +246,14 @@ export class BroadcastService {
    * tolerated and counted rather than aborting the run, so one bad address
    * can't stop everyone else from being reached.
    */
-  async send(orgId: string, audience: BroadcastAudience, subject: string, body: string) {
-    const recipients = await this.audienceEmails(orgId, audience);
+  async send(
+    orgId: string,
+    audience: BroadcastAudience,
+    subject: string,
+    body: string,
+    filter?: BroadcastFilterDto,
+  ) {
+    const recipients = await this.resolveRecipients(orgId, audience, filter);
     const { subject: subj, html } = this.render(subject, body);
 
     let sent = 0;
