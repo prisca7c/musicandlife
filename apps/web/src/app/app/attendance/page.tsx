@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
 import { LoadState } from '@/components/load-state';
+import { AutomatedHint } from '@/components/automated-hint';
 import { Check, X, AlertTriangle, Calendar, RefreshCw, Search } from 'lucide-react';
 
 interface Lesson {
@@ -302,6 +303,9 @@ export default function AttendancePage() {
             className="flex items-center gap-1.5 bg-[var(--sage)] text-white rounded-xl px-4 py-2 text-sm font-bold hover:bg-[var(--sage-dk)] disabled:opacity-50">
             <Check size={14} /> Confirm all as present ({unmarked.length})
           </button>
+        )}
+        {view === 'day' && unmarked.length > 0 && (
+          <AutomatedHint by="attendanceAutocomplete" />
         )}
         <div className="relative flex-1 min-w-[12rem]">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--txt4)' }}>
