@@ -42,7 +42,7 @@ const NAV: NavItem[] = [
   { label: 'New students', href: '/app/intake',            roles: ['system_admin','admin','manager','receptionist'],          icon: <ClipboardCheck size={16} /> },
   { label: 'Messages',     href: '/app/messaging',         roles: ['system_admin','admin','manager','teacher','guardian'],    icon: <MessageSquare size={16} /> },
   { label: 'Resources',    href: '/app/resources',         roles: ['system_admin','admin','manager','teacher','guardian','student'], icon: <FileText size={16} /> },
-  { label: 'Content',      href: '/app/content',           roles: ['system_admin','admin','manager','teacher'],               icon: <BookOpen size={16} /> },
+  { label: 'Repertoire',   href: '/app/content',           roles: ['system_admin','admin','manager','teacher'],               icon: <BookOpen size={16} /> },
   { label: 'Studio News',  href: '/app/news',              roles: ['system_admin','admin'],                                   icon: <Megaphone size={16} /> },
   { label: 'Reports',      href: '/app/reports',           roles: ['system_admin','admin','manager'],                        icon: <BarChart3 size={16} /> },
   { label: 'Settings',     href: '/app/settings',          roles: ['system_admin','admin'],                                   icon: <Settings size={16} /> },
@@ -54,7 +54,7 @@ const GROUPS = [
   { label: 'Studio',   items: ['Calendar','Attendance','Booking requests','Reschedules','My availability','Notes','New students','Messages'] },
   { label: 'People',   items: ['Students','Families','Staff','Payroll','My pay'] },
   { label: 'Finance',  items: ['Billing','Payments'] },
-  { label: 'Content',  items: ['Resources','Content','Studio News'] },
+  { label: 'Content',  items: ['Resources','Repertoire','Studio News'] },
   { label: 'Admin',    items: ['Reports','Settings'] },
 ];
 
