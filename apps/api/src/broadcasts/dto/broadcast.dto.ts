@@ -1,6 +1,29 @@
-import { IsIn, IsString, MaxLength, MinLength, Equals, IsBoolean } from 'class-validator';
+import {
+  IsIn, IsString, MaxLength, MinLength, Equals, IsBoolean, IsOptional, IsUUID, ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
 export type BroadcastAudience = 'families' | 'teachers' | 'students' | 'everyone';
+
+/**
+ * Narrows a broadcast to a subgroup defined by what people actually study.
+ * Every field is ANDed, so instrument=piano + lessonType=group reaches only the
+ * group piano class. All empty means "the whole audience" and the original
+ * membership-based path is used.
+ */
+export class BroadcastFilterDto {
+  @IsOptional() @IsString() @MaxLength(80)
+  instrument?: string;
+
+  @IsOptional() @IsIn(['private', 'group'])
+  lessonType?: 'private' | 'group';
+
+  @IsOptional() @IsString() @MaxLength(200)
+  groupName?: string;
+
+  @IsOptional() @IsUUID()
+  teacherId?: string;
+}
 
 export class BroadcastTestDto {
   @IsString() @MinLength(1) @MaxLength(200)
@@ -10,9 +33,20 @@ export class BroadcastTestDto {
   body!: string;
 }
 
+export class BroadcastPreviewDto {
+  @IsIn(['families', 'teachers', 'students', 'everyone'])
+  audience!: BroadcastAudience;
+
+  @IsOptional() @ValidateNested() @Type(() => BroadcastFilterDto)
+  filter?: BroadcastFilterDto;
+}
+
 export class BroadcastSendDto extends BroadcastTestDto {
   @IsIn(['families', 'teachers', 'students', 'everyone'])
   audience!: BroadcastAudience;
+
+  @IsOptional() @ValidateNested() @Type(() => BroadcastFilterDto)
+  filter?: BroadcastFilterDto;
 
   // Belt-and-braces: the client must send an explicit confirm so a stray POST
   // can never fan an email out to the whole studio by accident.
