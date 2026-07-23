@@ -8,10 +8,11 @@ export interface AutomationFlags {
   recurringLessons: boolean;
   attendanceAutocomplete: boolean;
   lessonReminders: boolean;
+  autoInvoicing: boolean;
 }
 
 /** Which background job a manual button duplicates. */
-export type AutomatedBy = keyof AutomationFlags | 'signups' | 'autoInvoicing' | 'bankMatching';
+export type AutomatedBy = keyof AutomationFlags | 'signups' | 'bankMatching';
 
 // What each job does, in the words a person at the front desk would use.
 const JOBS: Record<AutomatedBy, { on: string; off?: string }> = {
@@ -31,6 +32,7 @@ const JOBS: Record<AutomatedBy, { on: string; off?: string }> = {
   },
   autoInvoicing: {
     on: 'Families with auto-invoicing switched on are invoiced on schedule, itemised from their lessons. This is only for a one-off or manual bill.',
+    off: 'Scheduled invoicing is currently switched OFF for this studio, so no invoice goes out unless you raise it here — even for families set to auto-invoice. Ask your administrator to enable it.',
   },
   bankMatching: {
     on: 'Imported bank payments match themselves to a family by reference or amount. This is only for the ones that couldn’t be matched.',
@@ -49,7 +51,8 @@ const JOBS: Record<AutomatedBy, { on: string; off?: string }> = {
 export function AutomatedHint({ by }: { by: AutomatedBy }) {
   const { data: org } = useApi<{ automation?: AutomationFlags }>('/organizations/me');
 
-  const isWorkerFlag = by === 'recurringLessons' || by === 'attendanceAutocomplete' || by === 'lessonReminders';
+  const isWorkerFlag = by === 'recurringLessons' || by === 'attendanceAutocomplete'
+    || by === 'lessonReminders' || by === 'autoInvoicing';
   // Assume on until we know otherwise, so the hint never flickers to a scary
   // warning while the request is in flight.
   const enabled = !isWorkerFlag || (org?.automation ? org.automation[by as keyof AutomationFlags] : true);
