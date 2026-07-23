@@ -10,7 +10,7 @@ import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
 import { eq, and, gt, gte, lte, ne, inArray } from 'drizzle-orm';
 import {
-  lessons, lessonCredits, notes, families, memberships, guardians,
+  lessons, lessonCredits, notes, families, memberships, guardians, organizations,
   students, availability, enrollments, staffMembers,
   teacherAssignments, attendance, paymentClaims,
 } from '@music-life/db';
@@ -323,7 +323,34 @@ export class FamilyPortalController {
       ),
       columns: { id: true, amount: true, invoiceId: true, createdAt: true },
     });
-    return { reference, pendingClaims: pending };
+
+    // Where to actually send the money. The portal told families to "send £X by
+    // bank transfer, quoting this reference" and never said which account — the
+    // details existed (Settings → Invoice defaults) and reached the invoice PDF
+    // and the public pay page, but not the in-app flow. A reference with no
+    // account is half an instruction.
+    //
+    // These are the studio's own RECEIVING details, which exist to be given to
+    // payers, so a family reading them is the point.
+    const org = await this.db.db.query.organizations.findFirst({
+      where: eq(organizations.id, user.orgId),
+      columns: { settings: true },
+    });
+    const cfg = (org?.settings ?? {}) as Record<string, unknown>;
+    const bank = {
+      accountName: (cfg.bankAccountName as string) || null,
+      sortCode: (cfg.bankSortCode as string) || null,
+      accountNumber: (cfg.bankAccountNumber as string) || null,
+    };
+
+    return {
+      reference,
+      pendingClaims: pending,
+      bank,
+      // Lets the portal say "ask the studio for the account details" instead of
+      // showing an instruction the family cannot act on.
+      bankConfigured: !!(bank.sortCode && bank.accountNumber),
+    };
   }
 
   // ─── This family's invoices (read-only) ─────────────────────────────────────

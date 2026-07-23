@@ -78,7 +78,11 @@ export default function FamilyDashboardPage() {
   // "due" until the money is actually seen on the statement, so the card has to
   // say something other than "pay this" in the meantime.
   const [claimed, setClaimed] = useState(false);
-  const { data: paymentDetails } = useApi<{ reference: string }>('/family/payment-details');
+  const { data: paymentDetails } = useApi<{
+    reference: string;
+    bank: { accountName: string | null; sortCode: string | null; accountNumber: string | null };
+    bankConfigured: boolean;
+  }>('/family/payment-details');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   function openReschedule(lessonId: string) {
@@ -316,8 +320,34 @@ export default function FamilyDashboardPage() {
               ) : (
                 <div className="mt-3">
                   <p className="text-xs mb-2" style={{ color: 'var(--txt3)' }}>
-                    Send £{(outstandingInvoice.total / 100).toFixed(2)} by bank transfer, quoting
-                    this reference so we can match your payment:
+                    Send £{(outstandingInvoice.total / 100).toFixed(2)} by bank transfer to:
+                  </p>
+                  {/* Where the money actually goes. This card used to give the
+                      reference and nothing else — half an instruction. */}
+                  {paymentDetails?.bankConfigured ? (
+                    <dl className="mb-2 rounded-lg px-2.5 py-2 text-xs" style={{ background: 'var(--bg)' }}>
+                      {paymentDetails.bank.accountName && (
+                        <div className="flex justify-between gap-3">
+                          <dt style={{ color: 'var(--txt3)' }}>Account name</dt>
+                          <dd className="font-semibold" style={{ color: 'var(--txt)' }}>{paymentDetails.bank.accountName}</dd>
+                        </div>
+                      )}
+                      <div className="flex justify-between gap-3">
+                        <dt style={{ color: 'var(--txt3)' }}>Sort code</dt>
+                        <dd className="font-semibold tabular-nums" style={{ color: 'var(--txt)' }}>{paymentDetails.bank.sortCode}</dd>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <dt style={{ color: 'var(--txt3)' }}>Account number</dt>
+                        <dd className="font-semibold tabular-nums" style={{ color: 'var(--txt)' }}>{paymentDetails.bank.accountNumber}</dd>
+                      </div>
+                    </dl>
+                  ) : paymentDetails ? (
+                    <p className="mb-2 rounded-lg px-2.5 py-2 text-xs" style={{ background: 'var(--bg)', color: 'var(--txt3)' }}>
+                      Please contact the studio for the account details.
+                    </p>
+                  ) : null}
+                  <p className="text-xs mb-1" style={{ color: 'var(--txt3)' }}>
+                    Quote this reference so we can match your payment:
                   </p>
                   {/* The reference is the whole mechanism — without it an incoming
                       transfer can't be tied to a family automatically. */}

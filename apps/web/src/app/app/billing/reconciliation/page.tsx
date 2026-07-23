@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useRef } from 'react';
+import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { SearchableSelect } from '@/components/searchable-select';
-import { Upload, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Upload, AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 interface Claim {
   id: string; amount: number; reference: string; status: string; createdAt: string;
@@ -32,6 +33,11 @@ export default function ReconciliationPage() {
   const { data: claims = [], mutate: mutateClaims } = useApi<Claim[]>('/reconciliation/claims?status=pending');
   const { data: unmatched = [], mutate: mutateUnmatched } = useApi<BankTxn[]>('/reconciliation/unmatched');
   const { data: families = [] } = useApi<FamilyOption[]>('/families');
+  // Without receiving details, families are told to transfer money and never
+  // told where. Surfaced here because this is the page where someone notices
+  // payments aren't arriving.
+  const { data: org } = useApi<{ settings?: Record<string, string> }>('/organizations/me');
+  const bankSet = !!(org?.settings?.bankSortCode && org?.settings?.bankAccountNumber);
 
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [importing, setImporting] = useState(false);
@@ -69,6 +75,21 @@ export default function ReconciliationPage() {
         title="Payments &amp; reconciliation"
         subtitle="Import your bank statement — matched payments post themselves"
       />
+
+      {org && !bankSet && (
+        <div className="rounded-2xl border px-4 py-3 mb-6 flex items-start gap-2.5"
+          style={{ borderColor: 'var(--amber-md)', background: 'var(--amber-lt)' }}>
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" style={{ color: 'var(--amber)' }} />
+          <div className="text-sm">
+            <p className="font-bold" style={{ color: 'var(--amber)' }}>No bank details set</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--txt3)' }}>
+              Families are asked to pay by transfer, but the portal and your invoices can&apos;t tell
+              them which account to send it to. Add them in{' '}
+              <Link href="/app/settings" className="underline font-semibold">Settings → Invoice defaults</Link>.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── Import ─────────────────────────────────────────────────────────── */}
       <div className="rounded-2xl border p-4 mb-6" style={{ borderColor: 'var(--bd)' }}>
