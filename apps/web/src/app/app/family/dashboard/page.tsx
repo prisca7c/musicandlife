@@ -278,8 +278,14 @@ export default function FamilyDashboardPage() {
             <p className={`text-2xl font-black ${balance >= 0 ? 'text-[var(--sage-dk)]' : 'text-[var(--coral)]'}`}>
               {balance >= 0 ? '+' : ''}£{Math.abs(balance / 100).toFixed(2)}
             </p>
+            {/* "Nothing to pay" on its own read as an error to families. Say
+                what the number means and what, if anything, they should do. */}
             <p className="text-xs mt-1" style={{ color: 'var(--txt4)' }}>
-              {balance >= 0 ? 'credit on account' : 'outstanding balance'}
+              {balance > 0
+                ? 'in credit — nothing to pay right now'
+                : balance === 0
+                  ? 'all settled — nothing to pay right now'
+                  : 'owing — we’ll invoice you for this'}
             </p>
           </div>
 

@@ -403,8 +403,13 @@ export default function BillingPage() {
                 <td style={{ color: 'var(--txt3)' }}>{i.dueDate}</td>
                 <td className="font-semibold" style={{ textAlign: 'right' }}>
                   <span className="inline-flex items-center gap-2 justify-end">
-                    £{(i.total / 100).toFixed(2)}
-                    {i.status !== 'void' && i.status !== 'draft' && (
+                    {/* A negative total is a credit note, not money owed —
+                        showing "£-4.00" alongside an "awaiting payment" dot
+                        read as a debt nobody could ever collect. */}
+                    {i.total < 0
+                      ? <span title="Credit note — money owed to the family, not by them">−£{Math.abs(i.total / 100).toFixed(2)} credit</span>
+                      : `£${(i.total / 100).toFixed(2)}`}
+                    {i.total > 0 && i.status !== 'void' && i.status !== 'draft' && (
                       <PaidDot paid={i.status === 'paid'} title={i.status === 'paid' ? 'Paid' : 'Awaiting payment'} />
                     )}
                   </span>
