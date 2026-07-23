@@ -154,6 +154,28 @@ export default function ResourcesPage() {
   const locked = !!resourcesError;
   const load = () => mutate();
 
+  // Subscription terms — only guardians can see the price and buy access, so
+  // only they fetch it (students get a 403 on this route by design).
+  const isGuardian = role === 'guardian';
+  const { data: sub, mutate: mutateSub } = useApi<{ active: boolean; paidUntil: string | null; price: number; months: number }>(
+    isGuardian ? '/family/resource-subscription' : null,
+  );
+  const [subscribing, setSubscribing] = useState(false);
+  const [subError, setSubError] = useState('');
+  const money = (pence: number) => `£${(pence / 100).toFixed(2)}`;
+  const period = (m: number) => (m === 1 ? 'month' : `${m} months`);
+
+  async function subscribe() {
+    setSubscribing(true); setSubError('');
+    try {
+      await apiFetch('/family/resource-subscription/subscribe', { method: 'POST', token: tok() });
+      await mutateSub();
+      await mutate();
+    } catch (err) {
+      setSubError(err instanceof Error ? err.message : 'Could not start your subscription. Please try again.');
+    } finally { setSubscribing(false); }
+  }
+
   // Unfiltered lists for the filter dropdowns / add modal.
   const { data: allResources = [] } = useApi<Resource[]>('/resources');
   const { data: staff = [] } = useApi<Staff[]>('/staff');
@@ -180,10 +202,27 @@ export default function ResourcesPage() {
         <PageHeader title="Resources" />
         <div className="bg-white rounded-lg border px-6 py-16 text-center">
           <Lock size={28} className="mx-auto mb-3 text-gray-300" />
-          <p className="text-gray-700 font-medium mb-1">Resource access required</p>
-          <p className="text-sm text-gray-400 max-w-sm mx-auto">
-            This studio&apos;s resource library requires an active subscription. Please contact the studio to renew access.
-          </p>
+          <p className="text-gray-700 font-medium mb-1">Unlock the resource library</p>
+          {isGuardian && sub ? (
+            <>
+              <p className="text-sm text-gray-500 max-w-sm mx-auto mb-5">
+                Sheet music, practice tracks and teaching materials your family can use at home.
+                A subscription is <strong>{money(sub.price)}</strong> per {period(sub.months)}.
+              </p>
+              {subError && <p className="mb-3 text-sm text-red-600">{subError}</p>}
+              <button onClick={subscribe} disabled={subscribing}
+                className="bg-[var(--sage)] text-white rounded px-5 py-2.5 text-sm font-medium hover:bg-[var(--sage-dk)] disabled:opacity-50">
+                {subscribing ? 'Setting up…' : `Subscribe — ${money(sub.price)} / ${period(sub.months)}`}
+              </button>
+              <p className="text-xs text-gray-400 mt-3 max-w-sm mx-auto">
+                We&apos;ll add this to your account as an invoice you can pay by bank transfer, and unlock the library straight away.
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-gray-400 max-w-sm mx-auto">
+              This studio&apos;s resource library requires an active subscription. Please ask a parent or the studio to set up access.
+            </p>
+          )}
         </div>
       </div>
     );

@@ -401,6 +401,69 @@ export class BillingService {
     return item!;
   }
 
+  // ─── Resource-library subscription ──────────────────────────────────────────
+  // The studio sells access to the shared resource library as a subscription,
+  // billed separately from lessons. Price (pence) and period (months) live in
+  // org settings so the studio can change them; these are the defaults if unset.
+  static readonly RESOURCE_SUB_DEFAULT_PRICE = 600; // £6.00 per period
+  static readonly RESOURCE_SUB_DEFAULT_MONTHS = 1;
+
+  async getResourceSubscriptionTerms(orgId: string): Promise<{ price: number; months: number }> {
+    const org = await this.db.db.query.organizations.findFirst({
+      where: eq(organizations.id, orgId),
+      columns: { settings: true },
+    });
+    const cfg = (org?.settings ?? {}) as Record<string, unknown>;
+    const rawPrice = Number(cfg.resourceSubscriptionPrice);
+    const rawMonths = Number(cfg.resourceSubscriptionMonths);
+    // A configured value wins; anything missing or nonsensical falls back to the
+    // default so a family is never quoted £0 or a negative period.
+    const price = Number.isFinite(rawPrice) && rawPrice > 0
+      ? Math.round(rawPrice) : BillingService.RESOURCE_SUB_DEFAULT_PRICE;
+    const months = Number.isInteger(rawMonths) && rawMonths > 0
+      ? rawMonths : BillingService.RESOURCE_SUB_DEFAULT_MONTHS;
+    return { price, months };
+  }
+
+  /**
+   * Charge a family for a resource-library subscription and extend their access.
+   *
+   * Mirrors how lessons are billed: the service is granted now and an invoice is
+   * raised for it, which the family settles by the usual bank-transfer + claim
+   * flow. Renewing part-way through stacks the new period onto whatever time is
+   * left rather than throwing it away.
+   */
+  async chargeResourceSubscription(orgId: string, familyId: string) {
+    const family = await this.db.db.query.families.findFirst({
+      where: and(eq(families.id, familyId), eq(families.organizationId, orgId)),
+      columns: { id: true, resourceAccessPaidUntil: true },
+    });
+    if (!family) throw new NotFoundException('Family not found');
+
+    const { price, months } = await this.getResourceSubscriptionTerms(orgId);
+
+    // One manual invoice, one line, issued so it lands on the family's account.
+    const inv = await this.createInvoice(orgId, {
+      familyId, mode: 'monthly_statement', itemizeLessons: false,
+    });
+    const label = `Resource library access — ${months} month${months === 1 ? '' : 's'}`;
+    await this.addLineItem(orgId, inv.id, label, price);
+    await this.sendInvoice(orgId, inv.id);
+
+    // Extend from the later of today or the current expiry.
+    const todayStr = new Date().toISOString().split('T')[0]!;
+    const stillActive = family.resourceAccessPaidUntil && family.resourceAccessPaidUntil >= todayStr;
+    const base = stillActive ? new Date(family.resourceAccessPaidUntil!) : new Date(todayStr);
+    base.setMonth(base.getMonth() + months);
+    const paidUntil = base.toISOString().split('T')[0]!;
+
+    await this.db.db.update(families)
+      .set({ resourceAccessPaidUntil: paidUntil, updatedAt: new Date() })
+      .where(and(eq(families.id, familyId), eq(families.organizationId, orgId)));
+
+    return { paidUntil, invoiceId: inv.id, invoiceNumber: inv.number, price, months };
+  }
+
   // ─── Ledger ────────────────────────────────────────────────────────────────
   async getLedger(orgId: string, familyId: string) {
     const family = await this.db.db.query.families.findFirst({
