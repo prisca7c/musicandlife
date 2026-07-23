@@ -19,6 +19,7 @@ type CreationPayload = {
   studentFirstName: string; studentLastName: string; studentDob?: string; studentEmail?: string;
   familyName: string; contactName: string; contactEmail?: string; contactPhone?: string; address?: string;
   instruments: { instrument: string; lessonType: 'private' | 'group' }[];
+  emailReminders?: boolean;
 };
 
 @Injectable()
@@ -102,6 +103,8 @@ export class RegistrationService {
       email: payload.contactEmail,
       phone: payload.contactPhone,
       address: payload.address,
+      // Honour the reminder consent checkbox from the form (defaults on).
+      emailRemindersEnabled: payload.emailReminders ?? true,
     }).returning();
 
     // Create student
