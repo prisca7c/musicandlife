@@ -14,7 +14,8 @@ interface Student { id: string; firstName: string; lastName: string; }
 interface Lesson { id: string; startsAt: string; duration: number; enrollment: { instrument: string } | null; }
 interface NoteAttachment { fileId: string; name: string; mime: string; size?: number }
 interface Note {
-  id: string; body: string; visibility: 'internal' | 'family'; createdAt: string; lessonId: string | null;
+  // Widened from the enum on purpose — see the fail-closed filter below.
+  id: string; body: string; visibility: string; createdAt: string; lessonId: string | null;
   authorName?: string;
   attachments?: NoteAttachment[] | null;
   student: { id: string; firstName: string; lastName: string } | null;
@@ -236,7 +237,15 @@ export default function NotesPage() {
                 { key: 'family' as const, title: 'Shared with the family', hint: 'Visible to parents, and to the student in their own portal.' },
                 { key: 'internal' as const, title: 'Staff only', hint: 'Never leaves the studio. Not visible to families or students.' },
               ]).map(col => {
-                const rows = notes.filter(n => n.visibility === col.key);
+                // Fail CLOSED on an unexpected visibility. Prod has a note
+                // stored as "PUBLIC_EVERYONE" — outside the ['internal','family']
+                // enum, written outside the API (the DTO validates it). With a
+                // strict equality check on both columns that note appeared in
+                // neither and looked deleted. Anything that isn't exactly
+                // 'family' is treated as staff-only, never the reverse.
+                const rows = col.key === 'family'
+                  ? notes.filter(n => n.visibility === 'family')
+                  : notes.filter(n => n.visibility !== 'family');
                 return (
                   <div key={col.key}>
                     <p className="text-xs font-bold uppercase tracking-widest text-[var(--txt4)] mb-1">
