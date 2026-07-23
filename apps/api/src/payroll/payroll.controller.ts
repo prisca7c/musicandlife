@@ -33,6 +33,15 @@ export class PayrollController {
     return this.payroll.createPayrollRunsForAll(u.orgId, dto.periodStart, dto.periodEnd);
   }
 
+  // A teacher's own pay. Declared before `staff/payroll/:id` so "me" isn't
+  // captured as a run id. Teacher-level on purpose: the studio-wide payroll
+  // routes above stay manager+, this returns only the caller's own runs.
+  @Get('staff/payroll/me')
+  @Roles('teacher')
+  getMyRuns(@CurrentUser() u: RequestUser) {
+    return this.payroll.getMyPayrollRuns(u.orgId, u.userId);
+  }
+
   @Get('staff/payroll/:id')
   @Roles('manager')
   getRun(@CurrentUser() u: RequestUser, @Param('id') id: string) {
