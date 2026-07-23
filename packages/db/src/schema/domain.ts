@@ -209,6 +209,32 @@ export const enrollments = pgTable(
   ],
 );
 
+// ─── Instruments ──────────────────────────────────────────────────────────────
+// The list offered on the public registration form, editable from Settings so
+// adding an instrument doesn't need a code change. Enrollments store the
+// instrument as free text, so renaming or removing a row here never orphans
+// existing enrollments — it only changes what new registrants can pick.
+// An org with no rows falls back to the built-in defaults (see InstrumentsService).
+export const instruments = pgTable(
+  'instruments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    name: text('name').notNull(),
+    // An instrument can be offered as private, group, or both — guitar is both
+    // today — so these are two independent flags rather than one lesson type.
+    availablePrivate: boolean('available_private').notNull().default(true),
+    availableGroup: boolean('available_group').notNull().default(false),
+    // Controls the order of the chips on the registration form.
+    sortOrder: integer('sort_order').notNull().default(0),
+    // Soft-hide: retires an instrument from the form without deleting the row.
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('instruments_org_name_idx').on(t.organizationId, t.name)],
+);
+
 // ─── Lesson notes ─────────────────────────────────────────────────────────────
 export const notes = pgTable(
   'notes',

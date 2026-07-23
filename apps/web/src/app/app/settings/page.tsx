@@ -7,7 +7,8 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { InfoTooltip } from '@/components/info-tooltip';
-import { Building2, Receipt, Calendar, Plus, Check, Bell, Mail } from 'lucide-react';
+import { Building2, Receipt, Calendar, Plus, Check, Bell, Mail, Music } from 'lucide-react';
+import { InstrumentsEditor } from '@/components/instruments-editor';
 
 interface NotificationRule {
   id: string; triggerEvent: string; channels: string[]; templateId: string; enabled: boolean;
@@ -281,6 +282,11 @@ export default function SettingsPage() {
           </table>
         </div>
         <p className="mt-3 text-xs" style={{ color: 'var(--txt4)' }}>Lesson reminders run hourly via a background job. SMS requires a provider configured in settings.</p>
+      </Section>
+
+      {/* Instruments */}
+      <Section title="Instruments &amp; lessons offered" icon={<Music size={18} />}>
+        <InstrumentsEditor />
       </Section>
 
       {/* Email templates */}
