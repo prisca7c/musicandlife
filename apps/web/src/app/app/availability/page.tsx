@@ -11,10 +11,10 @@ export default function MyAvailabilityPage() {
         title={
           <span className="inline-flex items-center gap-2">
             My availability
-            <InfoTooltip text="Set the days and times you're free to teach. Families can only book you inside these windows. Add as many windows per day as you like — for example a morning and an evening slot on the same day." />
+            <InfoTooltip text="Set the days and times you're free to teach. Families can only book you inside these windows. Add as many windows per day as you like — for example a morning and an evening slot on the same day. For holidays, use Time off below: it blocks those dates without touching your weekly hours." />
           </span>
         }
-        subtitle="Set your weekly teaching hours — families can only book inside these windows"
+        subtitle="Your weekly teaching hours, plus any time off — families can only book inside these windows"
       />
       <StaffAvailability self />
     </div>

@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ConflictException, Logger } from '@nestj
 import { eq, and } from 'drizzle-orm';
 import {
   staffMembers, staffPrivileges, teacherAssignments,
-  users, memberships, passwordResetTokens, availability, students,
+  users, memberships, passwordResetTokens, availability, blockedTime, students,
 } from '@music-life/db';
 import { DEFAULT_TEACHER_PRIVILEGES } from '@music-life/types';
 import { randomBytes, createHash } from 'crypto';
@@ -229,13 +229,93 @@ export class StaffService {
   }
 
   async addAvailability(orgId: string, staffId: string, weekday: string, startTime: string, endTime: string) {
+    return (await this.addAvailabilityDays(orgId, staffId, [weekday], startTime, endTime))[0]!;
+  }
+
+  /**
+   * Add the same window to several days at once.
+   *
+   * A teacher who works 4–8pm Monday to Friday had to open the dialog, choose a
+   * day and re-enter the same two times, five times over. Days already covering
+   * that exact window are skipped, so re-submitting is harmless.
+   */
+  async addAvailabilityDays(orgId: string, staffId: string, weekdays: string[], startTime: string, endTime: string) {
     if (endTime <= startTime) {
       throw new ConflictException('End time must be after start time');
     }
-    const [row] = await this.db.db.insert(availability).values({
-      organizationId: orgId, staffId, weekday: weekday as typeof availability.$inferInsert['weekday'], startTime, endTime,
+    const days = [...new Set(weekdays)];
+    if (days.length === 0) throw new ConflictException('Choose at least one day');
+
+    const existing = await this.db.db.query.availability.findMany({
+      where: and(eq(availability.staffId, staffId), eq(availability.organizationId, orgId)),
+      columns: { weekday: true, startTime: true, endTime: true },
+    });
+    const already = new Set(existing.map(w => `${w.weekday}|${w.startTime}|${w.endTime}`));
+    const toAdd = days.filter(d => !already.has(`${d}|${startTime}|${endTime}`));
+    if (toAdd.length === 0) return [];
+
+    return this.db.db.insert(availability).values(
+      toAdd.map(d => ({
+        organizationId: orgId, staffId,
+        weekday: d as typeof availability.$inferInsert['weekday'],
+        startTime, endTime,
+      })),
+    ).returning();
+  }
+
+  // ─── Time off ─────────────────────────────────────────────────────────────
+  // The blocked_time table has always been honoured by the slot generator and
+  // the booking conflict check (scheduling.service.ts) — there was simply no way
+  // to create a row. A teacher going on holiday had to delete their weekly
+  // windows and remember to put them back. Time off is a dated exception that
+  // leaves the weekly pattern alone.
+  async getTimeOff(orgId: string, staffId: string) {
+    return this.db.db.query.blockedTime.findMany({
+      where: and(eq(blockedTime.staffId, staffId), eq(blockedTime.organizationId, orgId)),
+      orderBy: (b, { asc }) => [asc(b.startsAt)],
+    });
+  }
+
+  async addTimeOff(orgId: string, staffId: string, startsAt: string, endsAt: string, reason?: string) {
+    const from = new Date(startsAt);
+    const to = new Date(endsAt);
+    if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+      throw new ConflictException('Invalid dates');
+    }
+    if (to <= from) throw new ConflictException('The end must be after the start');
+
+    const [row] = await this.db.db.insert(blockedTime).values({
+      organizationId: orgId, staffId, startsAt: from, endsAt: to, reason: reason ?? null,
     }).returning();
     return row!;
+  }
+
+  async removeTimeOff(orgId: string, staffId: string, id: string) {
+    const [removed] = await this.db.db.delete(blockedTime)
+      .where(and(
+        eq(blockedTime.id, id),
+        eq(blockedTime.staffId, staffId),
+        eq(blockedTime.organizationId, orgId),
+      ))
+      .returning();
+    if (!removed) throw new NotFoundException('Time off not found');
+    return { id };
+  }
+
+  async getMyTimeOff(orgId: string, userId: string) {
+    return this.getTimeOff(orgId, await this.resolveOwnStaffId(orgId, userId));
+  }
+
+  async addMyTimeOff(orgId: string, userId: string, startsAt: string, endsAt: string, reason?: string) {
+    return this.addTimeOff(orgId, await this.resolveOwnStaffId(orgId, userId), startsAt, endsAt, reason);
+  }
+
+  async removeMyTimeOff(orgId: string, userId: string, id: string) {
+    return this.removeTimeOff(orgId, await this.resolveOwnStaffId(orgId, userId), id);
+  }
+
+  async addMyAvailabilityDays(orgId: string, userId: string, weekdays: string[], startTime: string, endTime: string) {
+    return this.addAvailabilityDays(orgId, await this.resolveOwnStaffId(orgId, userId), weekdays, startTime, endTime);
   }
 
   async removeAvailability(orgId: string, staffId: string, windowId: string) {
