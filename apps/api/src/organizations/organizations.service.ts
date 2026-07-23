@@ -34,6 +34,9 @@ export class OrganizationsService {
       attendanceAutocomplete: process.env.ATTENDANCE_AUTOCOMPLETE_ENABLED === 'true',
       // 24h lesson reminders, hourly. Idempotent and read-only, always on.
       lessonReminders: true,
+      // Raises (and optionally emails) invoices for auto-invoice families on
+      // their billing anchor day. Writes real money movements, hence opt-in.
+      autoInvoicing: process.env.INVOICE_SCHEDULER_ENABLED === 'true',
     };
   }
 
