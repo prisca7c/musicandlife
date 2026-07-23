@@ -86,6 +86,13 @@ export class ReconciliationService {
    * line backs it up (or staff confirm it by hand).
    */
   async createClaim(orgId: string, familyId: string, invoiceId: string | null, amount: number) {
+    // Defence in depth behind the caller's own check. A claim for £0 or a
+    // negative amount would sit in the exceptions queue forever — no bank line
+    // can ever match it — and a negative claim would try to match a debit,
+    // which the importer deliberately skips.
+    if (amount <= 0) {
+      throw new BadRequestException('A payment claim must be for a positive amount.');
+    }
     const reference = await this.ensureReference(orgId, familyId);
 
     if (invoiceId) {

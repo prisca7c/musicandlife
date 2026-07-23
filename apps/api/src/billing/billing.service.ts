@@ -236,6 +236,15 @@ export class BillingService {
 
   async sendInvoice(orgId: string, id: string) {
     const inv = await this.getInvoice(orgId, id);
+    // An invoice with nothing on it is not a bill. Issuing one put a £0.00
+    // "Invoice due" in front of a family with no way to act on it, and left
+    // staff wondering why the balance never moved. Say so at the point of
+    // issue rather than shipping the confusion downstream.
+    if (inv.total === 0) {
+      throw new BadRequestException(
+        'This invoice totals £0.00. Add at least one line item before issuing it.',
+      );
+    }
     const [updated] = await this.db.db.update(invoices)
       .set({ status: 'sent', updatedAt: new Date() })
       .where(and(eq(invoices.id, id), eq(invoices.organizationId, orgId)))

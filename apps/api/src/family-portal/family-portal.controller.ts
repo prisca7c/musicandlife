@@ -8,7 +8,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
-import { eq, and, gte, lte, ne, inArray } from 'drizzle-orm';
+import { eq, and, gt, gte, lte, ne, inArray } from 'drizzle-orm';
 import {
   lessons, lessonCredits, notes, families, memberships, guardians,
   students, availability, enrollments, staffMembers,
@@ -214,11 +214,18 @@ export class FamilyPortalController {
     }
 
     // Outstanding invoice — parents only. Never surfaced to a child.
+    //
+    // `total > 0` because an issued invoice can be zero or negative: a credit
+    // note, or one raised before any line items were added. INV-0008 (−£4.00)
+    // was being shown to the family as "Invoice due" with an "I've sent the
+    // transfer" button that dead-ended on "This invoice has nothing to pay."
+    // There is nothing for a family to do about a credit, so it isn't a bill.
     const outstandingInvoice = viewerIsStudent ? null : await this.db.db.query.invoices.findFirst({
       where: and(
         eq(invoices.familyId, family.id),
         eq(invoices.organizationId, user.orgId),
         eq(invoices.status, 'sent'),
+        gt(invoices.total, 0),
       ),
       orderBy: (i, { asc }) => [asc(i.dueDate)],
     });
