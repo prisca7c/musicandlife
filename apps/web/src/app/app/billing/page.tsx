@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
+import { AutomatedHint } from '@/components/automated-hint';
 import { Badge } from '@/components/badge';
 import { PaidDot } from '@/components/paid-dot';
 import { Modal } from '@/components/modal';
@@ -352,7 +353,7 @@ export default function BillingPage() {
               <button onClick={() => setShowCreate(true)} className="ui-btn-primary">
                 <Plus size={15} /> Create invoice
               </button>
-              <InfoTooltip text="You usually don't need to create invoices by hand. Switch on auto-invoicing for a family (Families → Invoicing settings) and the studio drafts and emails their invoice on schedule, itemised from their lessons. 'Create invoice' is just for one-off or manual bills." />
+              <AutomatedHint by="autoInvoicing" />
             </div>
           )
         }

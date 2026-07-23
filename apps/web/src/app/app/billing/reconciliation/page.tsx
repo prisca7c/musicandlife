@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
+import { AutomatedHint } from '@/components/automated-hint';
 import { Badge } from '@/components/badge';
 import { SearchableSelect } from '@/components/searchable-select';
 import { Upload, AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
@@ -141,6 +142,7 @@ export default function ReconciliationPage() {
       {/* ── Exceptions: the only list that normally needs a human ──────────── */}
       <h2 className="text-sm font-bold mb-2">
         Unidentified payments {unmatched.length > 0 && <Badge variant="pending">{unmatched.length}</Badge>}
+        {' '}<AutomatedHint by="bankMatching" />
       </h2>
       <p className="text-xs mb-3" style={{ color: 'var(--txt3)' }}>
         Money arrived but no family reference was quoted. Assign it to a family and it posts to

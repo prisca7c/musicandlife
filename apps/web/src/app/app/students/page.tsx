@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
+import { AutomatedHint } from '@/components/automated-hint';
 import { LoadState } from '@/components/load-state';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
@@ -59,16 +60,17 @@ export default function StudentsPage() {
       <AddStudentModal open={showAdd} onClose={() => setShowAdd(false)} onCreated={() => mutate()} />
       <PageHeader
         title={
-          <span className="inline-flex items-center gap-2">
-            Students
-            <InfoTooltip text="Most students land here automatically — when a family registers online and you approve them under New students, their student record, enrollment and portal login are all created for you. 'Add student' is only for someone who signs up in person." />
-          </span>
+          <span className="inline-flex items-center gap-2">Students</span>
         }
         subtitle={`${total} student${total !== 1 ? 's' : ''}`}
         action={
-          <button onClick={() => setShowAdd(true)} className="ui-btn-primary">
-            <UserPlus size={15} /> Add student
-          </button>
+          // Kept, but marked optional — students normally arrive via Sign-ups.
+          <span className="inline-flex items-center gap-1.5">
+            <button onClick={() => setShowAdd(true)} className="ui-btn-primary">
+              <UserPlus size={15} /> Add student
+            </button>
+            <AutomatedHint by="signups" />
+          </span>
         }
       />
 
