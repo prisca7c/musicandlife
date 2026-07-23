@@ -372,8 +372,8 @@ export default function IntakePage() {
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">
-            Intake
-            <InfoTooltip text="Intake is your pipeline of new interest: 'Leads' are enquiries you're following up, and 'Registrations' are families who signed up and are waiting for you to review and approve them into full student accounts." />
+            New students
+            <InfoTooltip text="Everyone on their way to becoming a student. 'Enquiries' are people you're following up; 'Sign-ups' are families who completed the form and are waiting for you to approve them into full student accounts. Existing students live under Students." />
           </span>
         }
         subtitle={
@@ -396,7 +396,7 @@ export default function IntakePage() {
               borderColor: tab === t ? 'var(--sage)' : 'transparent',
               color: tab === t ? 'var(--sage)' : 'var(--txt3)',
             }}>
-            {t === 'registrations' ? 'Registrations' : t === 'leads' ? 'Leads & Waitlist' : 'Import (CSV)'}
+            {t === 'registrations' ? 'Sign-ups' : t === 'leads' ? 'Enquiries & Waitlist' : 'Import (CSV)'}
           </button>
         ))}
       </div>

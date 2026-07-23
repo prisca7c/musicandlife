@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
+import { LoadState } from '@/components/load-state';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
@@ -34,7 +35,7 @@ export default function StudentsPage() {
   const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
   if (search) params.set('search', search);
   const key = `/students?${params.toString()}`;
-  const { data, mutate } = useApi<{ data: Student[]; total: number }>(key);
+  const { data, error, isLoading, mutate } = useApi<{ data: Student[]; total: number }>(key);
   const students = data?.data ?? [];
   const total = data?.total ?? 0;
 
@@ -60,7 +61,7 @@ export default function StudentsPage() {
         title={
           <span className="inline-flex items-center gap-2">
             Students
-            <InfoTooltip text="Most students land here automatically — when a family registers online and you approve them in Intake, their student record, enrollment and portal login are all created for you. 'Add student' is only for someone who signs up in person." />
+            <InfoTooltip text="Most students land here automatically — when a family registers online and you approve them under New students, their student record, enrollment and portal login are all created for you. 'Add student' is only for someone who signs up in person." />
           </span>
         }
         subtitle={`${total} student${total !== 1 ? 's' : ''}`}
@@ -97,7 +98,12 @@ export default function StudentsPage() {
           <tbody>
             {students.length === 0 && (
               <tr><td colSpan={4} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
-                No students yet.
+                {/* A failed load used to render as "No students yet." — an
+                    empty studio, rather than a request that didn't come back. */}
+                {error || isLoading
+                  ? <LoadState error={error} loading={isLoading} onRetry={() => mutate()}
+                      failedLabel="Couldn't load students." />
+                  : search ? 'No students match that search.' : 'No students yet.'}
               </td></tr>
             )}
             {students.map(s => (
