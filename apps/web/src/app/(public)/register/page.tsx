@@ -134,6 +134,25 @@ export default function RegisterPage() {
   const [submitError, setSubmitError] = useState('');
   const [tcAccepted, setTcAccepted] = useState(false);
 
+  // The instruments offered are editable from Settings, so they're fetched
+  // rather than compiled in. The build-time constants stay as the fallback: if
+  // this call fails the form still renders a usable list instead of nothing.
+  const [offered, setOffered] = useState<{ private: string[]; group: string[] }>({
+    private: [...PRIVATE_INSTRUMENTS],
+    group: [...GROUP_INSTRUMENTS],
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch<{ private: string[]; group: string[] }>('/public/instruments');
+        if (!cancelled && (res.private?.length || res.group?.length)) setOffered(res);
+      } catch { /* keep the built-in defaults */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Existing family search
   const [familySearch, setFamilySearch] = useState('');
   const [familyResults, setFamilyResults] = useState<{ email: string; name: string }[]>([]);
@@ -502,7 +521,7 @@ export default function RegisterPage() {
                 </div>
                 <p className="text-[11px] text-[var(--txt3)] mb-3">Individual lessons tailored to your student&apos;s pace and goals.</p>
                 <div className="grid grid-cols-4 gap-2">
-                  {PRIVATE_INSTRUMENTS.map(inst => <Chip key={inst} instrument={inst} lessonType="private" />)}
+                  {offered.private.map(inst => <Chip key={inst} instrument={inst} lessonType="private" />)}
                 </div>
                 {data.instruments.filter(i=>i.lessonType==='private').length > 0 && (
                   <p className="text-[11px] text-[var(--sage)] font-bold mt-2">
@@ -519,7 +538,7 @@ export default function RegisterPage() {
                 </div>
                 <p className="text-[11px] text-[var(--txt3)] mb-3">Learn alongside other students in a fun, collaborative setting.</p>
                 <div className="grid grid-cols-2 gap-2">
-                  {GROUP_INSTRUMENTS.map(inst => <Chip key={inst} instrument={inst} lessonType="group" groupStyle />)}
+                  {offered.group.map(inst => <Chip key={inst} instrument={inst} lessonType="group" groupStyle />)}
                 </div>
                 {data.instruments.filter(i=>i.lessonType==='group').length > 0 && (
                   <p className="text-[11px] text-[var(--plum)] font-bold mt-2">
