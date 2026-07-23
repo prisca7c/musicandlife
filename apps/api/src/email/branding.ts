@@ -12,6 +12,9 @@ export const BRAND = {
   name: 'Music & Life',
   locality: 'London',
   portalUrl: 'https://lirico.uk/login',
+  // The real wordmark, served from the portal's public folder. Emails can't use
+  // a bundled asset, so this has to be an absolute URL on a host that's up.
+  logoUrl: 'https://lirico.uk/logo-full-transparent.png',
   website: 'https://www.musicandlife.co.uk',
   supportEmail: 'office@musicandlife.co.uk',
   phone: '+44 7848 115 447',
@@ -27,7 +30,6 @@ export const BRAND = {
 } as const;
 
 const FONT = "'Lexend', 'Helvetica Neue', Helvetica, Arial, sans-serif";
-const SERIF = "Georgia, 'Times New Roman', serif";
 
 export interface BrandedEmailOptions {
   /** Hidden preview/snippet text shown in the inbox list. */
@@ -74,32 +76,40 @@ ${preview}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BRAND.paper};padding:24px 12px">
   <tr><td align="center">
     <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border:1px solid ${BRAND.line};border-radius:16px;overflow:hidden">
-      <!-- header (real logo + note image swapped in at send time; text wordmark is the fallback) -->
-      <tr><td align="center" style="background:${BRAND.paper};padding:30px 24px 26px;border-bottom:1px solid ${BRAND.line}">
-        <span style="font-family:${SERIF};font-size:26px;font-weight:700;letter-spacing:1px;color:${BRAND.pine}">MUSIC &amp; LIFE</span>
-        <span style="font-family:${SERIF};font-size:18px;color:${BRAND.pine}">&nbsp;&#9834;</span>
-        <div style="margin-top:6px;font-family:${FONT};font-size:12px;font-weight:600;letter-spacing:4px;color:${BRAND.moss}">LONDON</div>
+      <!-- header: the real wordmark, centred. The alt text carries the studio
+           name for the many clients that block images by default. -->
+      <tr><td align="center" style="background:#ffffff;padding:30px 24px 22px;text-align:center">
+        <img src="${BRAND.logoUrl}" width="260" alt="Music &amp; Life London"
+             style="display:block;margin:0 auto;width:260px;max-width:70%;height:auto;border:0;outline:none;text-decoration:none" />
       </td></tr>
+      <!-- green rule under the wordmark -->
+      <tr><td style="padding:0 36px"><div style="height:3px;background:${BRAND.pine};border-radius:2px"></div></td></tr>
       <!-- card body -->
       <tr><td style="padding:34px 36px 30px">
-        <h1 style="margin:0 0 16px;font-family:${FONT};font-size:24px;line-height:31px;font-weight:700;color:${BRAND.pine}">${heading}</h1>
+        <h1 style="margin:0 0 18px;font-family:${FONT};font-size:24px;line-height:31px;font-weight:700;color:${BRAND.pine};text-align:center">${heading}</h1>
         <div style="font-family:${FONT};font-size:15px;line-height:24px;color:${BRAND.ink}">${bodyHtml}</div>
         ${button}
         ${foot}
         ${signature}
       </td></tr>
       <!-- footer -->
-      <tr><td align="center" style="background:${BRAND.paper};padding:24px 24px 26px;border-top:1px solid ${BRAND.line}">
-        <p style="margin:0 0 6px;font-family:${FONT};font-size:13px;line-height:21px;color:${BRAND.muted}">
-          &#9993;&nbsp; <a href="mailto:${BRAND.supportEmail}" style="color:${BRAND.moss};text-decoration:none">${BRAND.supportEmail}</a>
-          &nbsp;&nbsp;&#9742;&nbsp; ${BRAND.phone}
+      <!-- footer: solid pine, so the email reads green even in a client that
+           blocks the logo image -->
+      <tr><td align="center" style="background:${BRAND.pine};padding:26px 24px 28px;text-align:center">
+        <p style="margin:0 0 8px;font-family:${FONT};font-size:15px;line-height:22px;font-weight:700;letter-spacing:.5px;color:#ffffff">
+          Music &amp; Life London
         </p>
-        <p style="margin:0 0 12px;font-family:${FONT};font-size:13px;line-height:21px;color:${BRAND.muted}">
-          &#9679;&nbsp; ${BRAND.address}
+        <p style="margin:0 0 6px;font-family:${FONT};font-size:13px;line-height:21px;color:rgba(255,255,255,0.82)">
+          <a href="mailto:${BRAND.supportEmail}" style="color:#ffffff;text-decoration:none">${BRAND.supportEmail}</a>
+          &nbsp;&nbsp;&middot;&nbsp;&nbsp; ${BRAND.phone}
         </p>
-        <p style="margin:0;font-family:${FONT};font-size:12px;line-height:20px;color:${BRAND.muted}">
-          <strong style="color:${BRAND.pine}">Music &amp; Life London</strong>
-          &nbsp;&middot;&nbsp; <a href="${BRAND.website}" style="color:${BRAND.moss};text-decoration:none">musicandlife.co.uk</a>
+        <p style="margin:0 0 12px;font-family:${FONT};font-size:13px;line-height:21px;color:rgba(255,255,255,0.82)">
+          ${BRAND.address}
+        </p>
+        <p style="margin:0;font-family:${FONT};font-size:12px;line-height:20px">
+          <a href="${BRAND.website}" style="color:#ffffff;text-decoration:underline">musicandlife.co.uk</a>
+          &nbsp;&middot;&nbsp;
+          <a href="${BRAND.portalUrl}" style="color:#ffffff;text-decoration:underline">Your portal</a>
         </p>
       </td></tr>
     </table>
@@ -118,7 +128,7 @@ export function detailsBlock(rows: { label: string; value: string }[]): string {
       </tr>`,
     )
     .join('');
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:22px 0 4px;background:${BRAND.panel};border-radius:12px">
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:22px 0 4px;background:${BRAND.panel};border-left:3px solid ${BRAND.pine};border-radius:12px">
     <tr><td style="padding:16px 20px">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0">${trs}</table>
     </td></tr>
