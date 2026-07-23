@@ -1,14 +1,29 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Modal } from '@/components/modal';
-import { Send, Check, AlertTriangle } from 'lucide-react';
+import { Send, Check, AlertTriangle, Filter } from 'lucide-react';
 
 type Audience = 'families' | 'teachers' | 'students' | 'everyone';
 type Counts = Record<Audience, number>;
+
+interface Segments {
+  instruments: string[];
+  groupNames: string[];
+  teachers: { id: string; name: string }[];
+}
+
+interface Filters {
+  instrument: string;
+  lessonType: '' | 'private' | 'group';
+  groupName: string;
+  teacherId: string;
+}
+
+const NO_FILTERS: Filters = { instrument: '', lessonType: '', groupName: '', teacherId: '' };
 
 const AUDIENCE_LABEL: Record<Audience, string> = {
   families: 'Families (parents & guardians)',
@@ -20,10 +35,12 @@ const AUDIENCE_LABEL: Record<Audience, string> = {
 export default function BroadcastsPage() {
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
   const { data: counts } = useApi<Counts>('/broadcasts/audiences');
+  const { data: segments } = useApi<Segments>('/broadcasts/segments');
 
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [audience, setAudience] = useState<Audience>('families');
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const [testing, setTesting] = useState(false);
@@ -31,7 +48,38 @@ export default function BroadcastsPage() {
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   const ready = subject.trim().length > 0 && body.trim().length > 0;
-  const recipientCount = counts?.[audience] ?? 0;
+  const hasFilters = Object.values(filters).some(Boolean);
+
+  // Strip the empty strings — the API treats "no key" as "don't filter on it".
+  function activeFilter() {
+    const f: Record<string, string> = {};
+    if (filters.instrument) f.instrument = filters.instrument;
+    if (filters.lessonType) f.lessonType = filters.lessonType;
+    if (filters.groupName) f.groupName = filters.groupName;
+    if (filters.teacherId) f.teacherId = filters.teacherId;
+    return f;
+  }
+
+  // A filtered headcount can't be read off the static audience counts, so ask
+  // the API. Unfiltered, the cached counts answer it for free.
+  const [filteredCount, setFilteredCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (!hasFilters) { setFilteredCount(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch<{ total: number }>('/broadcasts/preview', {
+          method: 'POST', token: tok(),
+          body: JSON.stringify({ audience, filter: activeFilter() }),
+        });
+        if (!cancelled) setFilteredCount(res.total);
+      } catch { if (!cancelled) setFilteredCount(0); }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audience, filters.instrument, filters.lessonType, filters.groupName, filters.teacherId, hasFilters]);
+
+  const recipientCount = hasFilters ? (filteredCount ?? 0) : (counts?.[audience] ?? 0);
 
   async function sendTest() {
     setTesting(true); setNotice(null);
@@ -51,7 +99,7 @@ export default function BroadcastsPage() {
     try {
       const res = await apiFetch<{ sent: number; failed: number; total: number }>('/broadcasts/send', {
         method: 'POST', token: tok(),
-        body: JSON.stringify({ subject, body, audience, confirm: true }),
+        body: JSON.stringify({ subject, body, audience, filter: activeFilter(), confirm: true }),
       });
       setConfirmOpen(false);
       const failedNote = res.failed > 0 ? ` ${res.failed} could not be delivered.` : '';
@@ -107,6 +155,72 @@ export default function BroadcastsPage() {
               ))}
             </div>
           </div>
+
+          {/* Subgroup targeting — narrows the audience by what people study. */}
+          <div className="border-t pt-4">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <label className="flex items-center gap-1.5 text-sm font-medium">
+                <Filter size={14} /> Narrow to a group <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              {hasFilters && (
+                <button onClick={() => setFilters(NO_FILTERS)}
+                  className="text-xs text-gray-500 underline hover:text-gray-700">Clear</button>
+              )}
+            </div>
+            <p className="text-xs text-gray-400 mb-3">
+              Leave blank to email the whole group. Choices combine — e.g. piano + group lessons reaches only the group piano class.
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Instrument</label>
+                <select value={filters.instrument} onChange={e => setFilters({ ...filters, instrument: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm capitalize focus:outline-none focus:ring-2 focus:ring-[var(--sage)]">
+                  <option value="">Any instrument</option>
+                  {segments?.instruments.map(i => <option key={i} value={i}>{i}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Lesson type</label>
+                <select value={filters.lessonType} onChange={e => setFilters({ ...filters, lessonType: e.target.value as Filters['lessonType'] })}
+                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]">
+                  <option value="">Any type</option>
+                  <option value="private">Private (one-on-one)</option>
+                  <option value="group">Group</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Group class</label>
+                <select value={filters.groupName} onChange={e => setFilters({ ...filters, groupName: e.target.value })}
+                  disabled={!segments?.groupNames.length}
+                  className="w-full border rounded px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[var(--sage)]">
+                  <option value="">{segments?.groupNames.length ? 'Any class' : 'No named classes yet'}</option>
+                  {segments?.groupNames.map(g => <option key={g} value={g}>{g}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Teacher</label>
+                <select value={filters.teacherId} onChange={e => setFilters({ ...filters, teacherId: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]">
+                  <option value="">Any teacher</option>
+                  {segments?.teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {hasFilters && (
+              <p className="text-xs mt-3 font-medium" style={{ color: recipientCount === 0 ? 'var(--coral)' : 'var(--sage)' }}>
+                {filteredCount === null
+                  ? 'Counting recipients…'
+                  : recipientCount === 0
+                    ? 'No one matches this combination — nothing would be sent.'
+                    : `${recipientCount} ${recipientCount === 1 ? 'recipient matches' : 'recipients match'} this group.`}
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -125,7 +239,21 @@ export default function BroadcastsPage() {
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="Send this email?">
         <p className="text-sm text-gray-600 mb-2">
           This will email <strong>{recipientCount}</strong> {recipientCount === 1 ? 'recipient' : 'recipients'} in
-          the <strong>{AUDIENCE_LABEL[audience].toLowerCase()}</strong> group. This can&apos;t be undone.
+          the <strong>{AUDIENCE_LABEL[audience].toLowerCase()}</strong> group
+          {hasFilters && (
+            <>
+              , narrowed to{' '}
+              <strong>
+                {[
+                  filters.instrument,
+                  filters.lessonType && `${filters.lessonType} lessons`,
+                  filters.groupName,
+                  filters.teacherId && segments?.teachers.find(t => t.id === filters.teacherId)?.name,
+                ].filter(Boolean).join(' · ')}
+              </strong>
+            </>
+          )}
+          . This can&apos;t be undone.
         </p>
         <div className="bg-gray-50 border rounded px-3 py-2 text-sm mb-4">
           <div className="text-gray-400 text-xs mb-0.5">Subject</div>
