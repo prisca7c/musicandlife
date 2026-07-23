@@ -464,7 +464,8 @@ export default function FamilyDashboardPage() {
           {cancelModal && cancelModal.hoursUntil >= 24 ? (
             <>
               <p className="text-sm" style={{ color: 'var(--txt3)' }}>
-                You have given more than 24 hours notice. Choose an option:
+                You have given more than 24 hours&apos; notice, so there is no charge either way.
+                Which is it?
               </p>
               <button
                 onClick={() => cancelLesson('absent_makeup')}
@@ -472,9 +473,11 @@ export default function FamilyDashboardPage() {
                 className="w-full flex items-start gap-3 p-4 rounded-xl border-2 border-[var(--sage-md)] bg-[var(--sage-lt)] hover:bg-[var(--sage-lt)] text-left disabled:opacity-50">
                 <Check size={18} className="text-[var(--sage-dk)] mt-0.5 shrink-0" />
                 <div>
-                  <p className="font-bold text-sm text-[var(--sage-dk)]">Get a makeup lesson</p>
+                  <p className="font-bold text-sm text-[var(--sage-dk)]">I&apos;d like to rebook it</p>
+                  {/* This used to read "your lesson fee is still charged" — it
+                      isn't, with this much notice. */}
                   <p className="text-xs mt-0.5" style={{ color: 'var(--txt3)' }}>
-                    Your lesson fee is still charged, but you receive a lesson you can book again, free of charge.
+                    No charge for this lesson. We&apos;ll arrange another time with your teacher.
                   </p>
                 </div>
               </button>
@@ -486,7 +489,7 @@ export default function FamilyDashboardPage() {
                 <div>
                   <p className="font-bold text-sm" style={{ color: 'var(--txt)' }}>No lesson needed</p>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--txt3)' }}>
-                    No charge and no makeup lesson. The lesson slot is freed.
+                    No charge, and we won&apos;t chase you for a new time. The slot is freed.
                   </p>
                 </div>
               </button>

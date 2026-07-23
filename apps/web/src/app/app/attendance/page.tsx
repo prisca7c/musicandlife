@@ -23,9 +23,10 @@ type AttendanceStatus = 'present' | 'absent_makeup' | 'absent_no_makeup' | 'abse
 
 const PRIVATE_ACTIONS: { status: AttendanceStatus; label: string; color: string; bg: string; border: string }[] = [
   { status: 'present',          label: 'Present',           color: 'text-[var(--sage-dk)]',  bg: 'bg-[var(--sage-lt)]',  border: 'border-[var(--sage-md)]' },
-  { status: 'absent_makeup',    label: 'Makeup (≥24h)',      color: 'text-[var(--amber)]',    bg: 'bg-[var(--amber-lt)]', border: 'border-[var(--amber-md)]' },
-  { status: 'absent_no_makeup', label: 'No makeup (<24h)',   color: 'text-[var(--coral)]',    bg: 'bg-[var(--coral-lt)]', border: 'border-[var(--coral)]' },
-  { status: 'absent_no_pay',    label: 'No class, no pay',   color: 'text-[var(--sky)]',      bg: 'bg-[var(--sky-lt)]',   border: 'border-[var(--sky-md)]' },
+  // Labels say what happens to the money, because that is what these buttons do.
+  { status: 'absent_makeup',    label: 'Cancelled ≥24h — no charge, rebook',  color: 'text-[var(--amber)]',    bg: 'bg-[var(--amber-lt)]', border: 'border-[var(--amber-md)]' },
+  { status: 'absent_no_makeup', label: 'Cancelled <24h — charged',            color: 'text-[var(--coral)]',    bg: 'bg-[var(--coral-lt)]', border: 'border-[var(--coral)]' },
+  { status: 'absent_no_pay',    label: 'Absent — no charge',                  color: 'text-[var(--sky)]',      bg: 'bg-[var(--sky-lt)]',   border: 'border-[var(--sky-md)]' },
   { status: 'cancelled_teacher',label: 'Teacher cancel',     color: 'text-[var(--txt3)]',     bg: 'bg-[var(--surf)]',     border: 'border-[var(--bd2)]' },
 ];
 
@@ -40,8 +41,8 @@ const GROUP_ACTIONS: { status: AttendanceStatus; label: string; color: string; b
 // share of people, and this grid is the studio's record of who turned up.
 const MONTH_CELL: Record<string, { ch: string; bg: string; fg: string; label: string }> = {
   present:           { ch: 'P', bg: 'var(--sage-lt)',  fg: 'var(--sage-dk)', label: 'Present' },
-  absent_makeup:     { ch: 'M', bg: 'var(--amber-lt)', fg: 'var(--amber)',   label: 'Absent — makeup given' },
-  absent_no_makeup:  { ch: 'A', bg: 'var(--coral-lt)', fg: 'var(--coral)',   label: 'Absent — late notice, no makeup' },
+  absent_makeup:     { ch: 'M', bg: 'var(--amber-lt)', fg: 'var(--amber)',   label: 'Cancelled in good time — no charge, to be rebooked' },
+  absent_no_makeup:  { ch: 'A', bg: 'var(--coral-lt)', fg: 'var(--coral)',   label: 'Cancelled late — charged, teacher paid' },
   absent_no_pay:     { ch: 'N', bg: 'var(--sky-lt)',   fg: 'var(--sky)',     label: 'Absent — no charge' },
   cancelled_teacher: { ch: 'T', bg: 'var(--surf)',     fg: 'var(--txt3)',    label: 'Cancelled by teacher' },
   unmarked:          { ch: '·', bg: 'transparent',     fg: 'var(--txt4)',    label: 'Lesson scheduled, not yet marked' },
@@ -271,7 +272,7 @@ export default function AttendancePage() {
         title={
           <span className="inline-flex items-center gap-2">
             Attendance
-            <InfoTooltip text="Mark whether each student attended. This updates the family's records and feeds teacher payroll, so try to mark today's lessons before you leave. Marking a lesson absent may issue the family a makeup credit." />
+            <InfoTooltip text="Mark whether each student attended. This moves money: a lesson cancelled with 24 hours' notice or more costs the family nothing and the teacher isn't paid for it; cancelled with less notice, the family is charged and the teacher is paid. Try to mark the day before you leave." />
           </span>
         }
         subtitle="Quick-mark today's lessons"

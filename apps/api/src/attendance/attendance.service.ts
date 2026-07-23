@@ -20,12 +20,26 @@ const LESSON_STATUS_MAP = {
   cancelled_teacher: 'cancelled_teacher',
 } as const;
 
-// Teacher is paid only when lesson happened OR student cancelled with <24h notice
+// Teacher is paid only when the lesson happened OR the family cancelled with
+// less than 24 hours' notice.
 const TEACHER_PAID_STATUSES = new Set<string>(['present', 'absent_no_makeup']);
 
-// Student credit is consumed when lesson happened, late-cancelled, OR absent with makeup
-// (absent_makeup: consume 1 existing credit + issue 1 makeup credit = net 0 for prepaid)
-const CONSUMES_CREDIT_STATUSES = new Set<string>(['present', 'absent_no_makeup', 'absent_makeup']);
+// Studio cancellation policy:
+//
+//   ≥24h notice  → the family pays nothing, may rebook, and the teacher is not
+//                  paid. Nothing is consumed and nothing is charged.
+//   <24h notice  → the family pays, there is no makeup, and the teacher IS paid.
+//
+// `absent_makeup` used to sit in this set AND issue a makeup credit: a prepaid
+// family had one credit taken and one given back (net zero), but a pay-as-you-go
+// family was CHARGED for a lesson they cancelled a week early and handed a
+// credit in return. The stated policy is that cancelling in good time costs
+// nothing, so a ≥24h cancellation now consumes nothing and charges nothing —
+// which lands both models in the same place: one lesson owed, one lesson's fee.
+const CONSUMES_CREDIT_STATUSES = new Set<string>(['present', 'absent_no_makeup']);
+
+// Only these attendance states put money on the family's account.
+const CHARGEABLE_STATUSES = new Set<string>(['present', 'absent_no_makeup']);
 
 @Injectable()
 export class AttendanceService {
@@ -171,6 +185,10 @@ export class AttendanceService {
     lesson: { id: string; enrollmentId: string | null; studentId: string; duration: number; enrollment: { id: string; lessonType: string } | null },
     status: string,
   ) {
+    // A cancellation with ≥24h notice (absent_makeup) and a no-charge absence
+    // (absent_no_pay) both leave the account untouched: no credit consumed, no
+    // charge posted. The lesson's status records which it was so the office
+    // knows whether the family still wants the slot rebooked.
     if (!CONSUMES_CREDIT_STATUSES.has(status)) return;
     const enrollment = lesson.enrollment;
 
@@ -182,28 +200,6 @@ export class AttendanceService {
 
     // Private lessons: consume a prepaid credit if one is available…
     await this.consumeOneCredit(tx, orgId, lesson.studentId, lesson.id);
-
-    // …issue a makeup credit for an absent-with-makeup (one per lesson)…
-    if (status === 'absent_makeup') {
-      const existingMakeup = await tx.query.lessonCredits.findFirst({
-        where: and(
-          eq(lessonCredits.organizationId, orgId),
-          eq(lessonCredits.type, 'makeup'),
-          eq(lessonCredits.sourceLessonId, lesson.id),
-        ),
-        columns: { id: true },
-      });
-      if (!existingMakeup) {
-        await tx.insert(lessonCredits).values({
-          organizationId: orgId,
-          studentId: lesson.studentId,
-          enrollmentId: enrollment?.id ?? null,
-          type: 'makeup',
-          sourceLessonId: lesson.id,
-          status: 'available',
-        });
-      }
-    }
 
     // …and, when no prepaid credit covered it, charge the family (PAYG).
     if (enrollment) await this.postAutoCharge(tx, orgId, lesson);
@@ -323,7 +319,14 @@ export class AttendanceService {
       .for('update');
     if (!family) return;
 
-    const amount = -proratedAmount(enrollment.rate, enrollment.defaultDuration, lesson.duration);
+    // A GROUP class is a set price for a set length — everyone in the room pays
+    // the same whether the session ran five minutes over or not. Only private
+    // lessons are prorated, where a 30-minute lesson on a 60-minute rate really
+    // is half the fee.
+    const isGroup = enrollment.lessonType === 'group';
+    const amount = -(isGroup
+      ? (enrollment.rate ?? 0)
+      : proratedAmount(enrollment.rate, enrollment.defaultDuration, lesson.duration));
     const newBalance = family.balanceCached + amount;
 
     await tx.insert(ledgerEntries).values({
