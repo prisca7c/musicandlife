@@ -36,24 +36,48 @@ export class ReminderWorker {
         lte(lessons.startsAt, window24hEnd),
       ),
       with: {
-        student: { with: { family: { columns: { id: true, email: true, phone: true } } } },
+        student: {
+          columns: { email: true },
+          with: { family: { columns: { id: true, email: true, phone: true, emailRemindersEnabled: true } } },
+        },
         teacher: { columns: { id: true, firstName: true, lastName: true } },
       },
     });
 
+    let sent = 0;
     for (const lesson of upcomingLessons) {
       const hoursUntil = (lesson.startsAt.getTime() - now.getTime()) / 3600000;
-      const family = (lesson.student as { family?: { email: string | null; phone: string | null } })?.family;
+      if (hoursUntil < 23 || hoursUntil > 25) continue;
 
-      if (hoursUntil >= 23 && hoursUntil <= 25 && family?.email) {
+      const student = lesson.student as {
+        email: string | null;
+        family?: { email: string | null; emailRemindersEnabled: boolean } | null;
+      };
+      const family = student?.family;
+
+      // Consent gate: the family opted out of reminders on the registration form.
+      if (family && family.emailRemindersEnabled === false) continue;
+
+      // Reminders go to the family/guardian AND, when the student gave their own
+      // email (16+), to the student directly. Dedupe so a family that also uses
+      // their child's address isn't emailed twice.
+      const recipients = [...new Set(
+        [family?.email, student?.email]
+          .map((e) => e?.trim().toLowerCase())
+          .filter((e): e is string => !!e),
+      )];
+
+      const at = lesson.startsAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      for (const email of recipients) {
         await this.notifications.trigger('lesson.reminder_24h', {
           orgId: lesson.organizationId,
-          email: family.email,
-          body: `Your lesson is tomorrow at ${lesson.startsAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.`,
+          email,
+          body: `Your lesson is tomorrow at ${at}.`,
         });
+        sent++;
       }
     }
 
-    this.logger.log(`Reminder scan: ${upcomingLessons.length} upcoming lessons checked`);
+    this.logger.log(`Reminder scan: ${upcomingLessons.length} upcoming lessons, ${sent} reminders sent`);
   }
 }

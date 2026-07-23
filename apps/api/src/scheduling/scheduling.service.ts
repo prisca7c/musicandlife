@@ -353,6 +353,11 @@ export class SchedulingService {
       .set({ status: dto.reason, cancelledAt: now, notes: dto.notes, updatedAt: now })
       .where(eq(lessons.id, id));
 
+    // Best-effort: a failed notification must not fail the cancellation itself.
+    await this.notifyCancelled(orgId, lesson).catch((e) =>
+      this.logger.warn(`lesson.cancelled notify failed for ${id}: ${e}`),
+    );
+
     return { id, status: dto.reason };
   }
 
@@ -423,23 +428,56 @@ export class SchedulingService {
     });
   }
 
-  /** Emails the student's family that their lesson time changed. Best-effort. */
-  private async notifyRescheduled(orgId: string, lesson: { studentId: string; startsAt: Date }) {
+  /**
+   * The people to notify about a student's lesson: the family/guardian address
+   * plus the student's own email when they have one (16+). Deduped. Cancellation
+   * and reschedule notices are transactional, so — unlike marketing reminders —
+   * they are NOT gated by the reminder-consent flag.
+   */
+  private async lessonNotifyRecipients(studentId: string): Promise<{ firstName: string | null; emails: string[] }> {
     const student = await this.db.db.query.students.findFirst({
-      where: eq(students.id, lesson.studentId),
-      columns: { firstName: true },
+      where: eq(students.id, studentId),
+      columns: { firstName: true, email: true },
       with: { family: { columns: { email: true } } },
     });
-    const email = student?.family?.email;
-    if (!email) return;
+    const emails = [...new Set(
+      [student?.family?.email, student?.email]
+        .map((e) => e?.trim().toLowerCase())
+        .filter((e): e is string => !!e),
+    )];
+    return { firstName: student?.firstName ?? null, emails };
+  }
+
+  /** Emails the student's family (and the student) that their lesson time changed. Best-effort. */
+  private async notifyRescheduled(orgId: string, lesson: { studentId: string; startsAt: Date }) {
+    const { firstName, emails } = await this.lessonNotifyRecipients(lesson.studentId);
+    if (emails.length === 0) return;
     const when = new Date(lesson.startsAt).toLocaleString('en-GB', {
       weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
     });
-    await this.notifications.trigger('lesson.rescheduled', {
-      orgId,
-      email,
-      body: `${student.firstName ?? 'Your child'}'s lesson is now on ${when}.`,
+    for (const email of emails) {
+      await this.notifications.trigger('lesson.rescheduled', {
+        orgId,
+        email,
+        body: `${firstName ?? 'Your child'}'s lesson is now on ${when}.`,
+      });
+    }
+  }
+
+  /** Emails the student's family (and the student) that a lesson was cancelled. Best-effort. */
+  private async notifyCancelled(orgId: string, lesson: { studentId: string; startsAt: Date }) {
+    const { firstName, emails } = await this.lessonNotifyRecipients(lesson.studentId);
+    if (emails.length === 0) return;
+    const when = new Date(lesson.startsAt).toLocaleString('en-GB', {
+      weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
     });
+    for (const email of emails) {
+      await this.notifications.trigger('lesson.cancelled', {
+        orgId,
+        email,
+        body: `${firstName ?? 'Your child'}'s lesson on ${when} has been cancelled.`,
+      });
+    }
   }
 
   // ─── Teacher availability ───────────────────────────────────────────────────

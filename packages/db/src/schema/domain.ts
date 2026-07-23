@@ -42,6 +42,10 @@ export const families = pgTable(
     address: text('address'),
     phone: text('phone'),
     email: text('email'),
+    // Consent for automated lesson reminders (the checkbox on the registration
+    // form). When false, the 24h reminder worker skips this family entirely.
+    // Defaults true so existing families keep getting reminders as before.
+    emailRemindersEnabled: boolean('email_reminders_enabled').notNull().default(true),
     autoInvoice: boolean('auto_invoice').notNull().default(false),
     invoiceMode: text('invoice_mode', {
       enum: ['monthly_statement', 'per_lesson'],
