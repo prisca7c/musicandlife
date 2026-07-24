@@ -94,9 +94,10 @@ function NewThreadModal({ open, onClose, onCreated }: { open: boolean; onClose: 
                   className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--surf)] ${on ? 'bg-[var(--sage-lt)]' : ''}`}>
                   <span className="min-w-0">
                     <span className="font-medium">{r.name}</span> <span className="text-xs text-gray-400">· {r.roleLabel}</span>
-                    {/* Two people can share a name; the address is what tells them
-                        apart before you send a parent something meant for staff. */}
-                    <span className="block text-xs text-gray-400 truncate">{r.email}</span>
+                    {/* Two staff can share a name; the address tells them apart.
+                        Parents don't get staff emails from the API, so this line
+                        simply doesn't render for them (r.email is blank). */}
+                    {r.email && <span className="block text-xs text-gray-400 truncate">{r.email}</span>}
                   </span>
                   {on && <Check size={14} className="text-[var(--sage-dk)] shrink-0" />}
                 </button>

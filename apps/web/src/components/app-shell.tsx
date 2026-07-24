@@ -10,7 +10,7 @@ import {
   FileText, BarChart3, Settings,
   Briefcase, CreditCard, UserCheck, BookOpen, Landmark,
   Clock, History, ChevronLeft, ChevronRight, ChevronDown,
-  LogOut, PanelLeftClose, PanelLeftOpen, Megaphone, CalendarClock, CalendarPlus, Send,
+  LogOut, PanelLeftClose, PanelLeftOpen, Megaphone, CalendarClock, CalendarPlus, Send, Menu,
 } from 'lucide-react';
 import type { BaseRole } from '@music-life/types';
 import { apiFetch } from '@/lib/api';
@@ -133,6 +133,9 @@ export function AppShell({ role, children }: { role: BaseRole; children: React.R
   const pathname = usePathname();
   const visible = NAV.filter(item => item.roles.includes(role));
   const [collapsed, setCollapsed] = useState(false);
+  // On phones the sidebar is an off-canvas drawer rather than a fixed column —
+  // a 232px rail on a 375px screen leaves no room for the actual page.
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [me, setMe] = useState<{ name: string; email: string } | null>(null);
 
   // Unread badge on Messages. Polled rather than fetched once, so a message
@@ -151,6 +154,10 @@ export function AppShell({ role, children }: { role: BaseRole; children: React.R
     if (stored === '1') setCollapsed(true);
   }, []);
 
+  // Navigating closes the mobile drawer so the page you tapped to isn't left
+  // hidden behind it.
+  useEffect(() => { setMobileOpen(false); }, [pathname]);
+
   useEffect(() => {
     const token = document.cookie.match(/access_token=([^;]+)/)?.[1];
     apiFetch<{ user: { name: string; email: string } }>('/auth/me', { token })
@@ -167,8 +174,15 @@ export function AppShell({ role, children }: { role: BaseRole; children: React.R
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg)' }}>
-      {/* Sidebar */}
-      <aside className={`flex flex-col shrink-0 border-r border-white/10 transition-[width] duration-200 ${collapsed ? 'w-[68px]' : 'w-[232px]'}`}
+      {/* Backdrop — only on mobile when the drawer is open; tap to dismiss. */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setMobileOpen(false)} aria-hidden />
+      )}
+
+      {/* Sidebar — a static column from md up, an off-canvas drawer below it. */}
+      <aside className={`fixed md:static inset-y-0 left-0 z-40 w-[232px] flex flex-col shrink-0 border-r border-white/10 transition-[transform,width] duration-200
+        ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
+        ${collapsed ? 'md:w-[68px]' : 'md:w-[232px]'}`}
         style={{ background: 'var(--sage-dk)' }}>
 
         {/* Logo */}
@@ -197,7 +211,7 @@ export function AppShell({ role, children }: { role: BaseRole; children: React.R
             </span>
           )}
           <button onClick={toggleCollapsed} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="shrink-0 p-1.5 rounded-lg transition-colors hover:bg-white/10"
+            className="hidden md:inline-flex shrink-0 p-1.5 rounded-lg transition-colors hover:bg-white/10"
             style={{ color: 'rgba(255,255,255,0.5)' }}>
             {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
@@ -258,8 +272,22 @@ export function AppShell({ role, children }: { role: BaseRole; children: React.R
       </aside>
 
       {/* Main */}
-      <main className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-7">
+      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {/* Mobile top bar — the only way to reach the drawer on a phone. */}
+        <div className="md:hidden flex items-center gap-3 h-14 px-4 border-b border-white/10 shrink-0"
+          style={{ background: 'var(--sage-dk)' }}>
+          <button onClick={() => setMobileOpen(true)} aria-label="Open menu"
+            className="-ml-1.5 p-1.5 rounded-lg text-white transition-colors hover:bg-white/10">
+            <Menu size={20} />
+          </button>
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center shrink-0 overflow-hidden p-0.5">
+              <Image src="/logo-icon.png" alt="Music & Life" width={24} height={24} className="w-full h-full object-contain" />
+            </div>
+            <span className="text-white font-extrabold text-sm truncate">Music &amp; Life</span>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 md:p-7">
           {children}
         </div>
       </main>
