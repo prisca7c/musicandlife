@@ -256,6 +256,37 @@ export const notes = pgTable(
   ],
 );
 
+// ─── Public resource-library subscribers ───────────────────────────────────────
+// People who buy access to the studio's resource library WITHOUT a Music & Life
+// account — the no-login product. They subscribe on a public page with just an
+// email; on activation we mint an unguessable access token, emailed to them as a
+// magic link that opens the public library. Access lasts until `paidUntil`, so a
+// lapsed (unrenewed) or cancelled subscriber is revoked automatically the next
+// time they open the link. Separate from the family-linked subscription (which
+// lives on families.resourceAccessPaidUntil).
+export const resourceSubscribers = pgTable(
+  'resource_subscribers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    email: text('email').notNull(),
+    name: text('name'),
+    // Opaque bearer token for the magic access link — the only credential a
+    // no-account subscriber has. Unique so a link maps to exactly one subscriber.
+    accessToken: text('access_token').notNull().unique(),
+    status: text('status', { enum: ['pending', 'active', 'canceled'] }).notNull().default('pending'),
+    // Access is granted up to and including this date; NULL until first activated.
+    paidUntil: date('paid_until'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // One subscriber row per email per studio — re-subscribing updates it rather
+    // than creating a duplicate.
+    uniqueIndex('resource_subscribers_org_email_uidx').on(t.organizationId, t.email),
+  ],
+);
+
 // NOTE: `staff_availability` used to live here — an exact duplicate of
 // `availability` in schema/scheduling.ts. Nothing in the API ever read it: the
 // slot generator, the booking conflict check and every availability endpoint
