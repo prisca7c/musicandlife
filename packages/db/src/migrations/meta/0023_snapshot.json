@@ -1,6 +1,6 @@
 {
-  "id": "e9d44fbf-0120-4d15-8610-43b5540c62c6",
-  "prevId": "2871184b-6408-4b42-b78e-5942822d8f44",
+  "id": "04830706-daa5-4de6-9588-472c91899005",
+  "prevId": "0022a1b2-c3d4-4e5f-8a9b-0c1d2e3f4a5b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1408,6 +1408,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "sort_order": {
           "name": "sort_order",
