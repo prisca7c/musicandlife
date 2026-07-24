@@ -10,7 +10,16 @@ import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
 import { LoadState } from '@/components/load-state';
 import { AutomatedHint } from '@/components/automated-hint';
-import { Check, X, AlertTriangle, Calendar, RefreshCw, Search } from 'lucide-react';
+import { Check, X, AlertTriangle, Calendar, RefreshCw, Search, PoundSterling } from 'lucide-react';
+
+// Roles allowed to take money at the front desk. Teachers mark attendance too,
+// but they don't handle payments — so the "paid at the lesson" control is theirs
+// to see, not press.
+const CAN_TAKE_PAYMENT = ['receptionist', 'manager', 'admin', 'system_admin'];
+function roleFromToken(token?: string): string {
+  try { return token ? (JSON.parse(atob(token.split('.')[1]!)).role ?? '') : ''; }
+  catch { return ''; }
+}
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string;
@@ -189,7 +198,29 @@ export default function AttendancePage() {
   // Day view marks today's register; month view is the read-only overview the
   // office asked for — one row per student, one column per day.
   const [view, setView] = useState<'day' | 'month'>('day');
+  // Which present lesson's "paid at the lesson" method picker is open, plus a
+  // local record of lessons paid this session (id → invoice number) and any
+  // per-lesson error. The lesson feed doesn't carry payment state, so this only
+  // reflects payments taken here — the office sees the invoice under Billing.
+  const [payingId, setPayingId] = useState<string | null>(null);
+  const [paid, setPaid] = useState<Record<string, string>>({});
+  const [payErr, setPayErr] = useState<Record<string, string>>({});
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  const canTakePayment = CAN_TAKE_PAYMENT.includes(roleFromToken(tok()));
+
+  async function takePayment(lessonId: string, method: 'cash' | 'card') {
+    setSaving(lessonId);
+    setPayErr(e => { const { [lessonId]: _drop, ...rest } = e; return rest; });
+    try {
+      const res = await apiFetch<{ invoiceNumber: string | null }>(`/lessons/${lessonId}/pay-at-lesson`, {
+        method: 'POST', token: tok(), body: JSON.stringify({ method }),
+      });
+      setPaid(p => ({ ...p, [lessonId]: res.invoiceNumber ?? 'paid' }));
+      setPayingId(null);
+    } catch (e) {
+      setPayErr(err => ({ ...err, [lessonId]: e instanceof Error ? e.message : 'Could not record payment' }));
+    } finally { setSaving(null); }
+  }
 
   const mon = new Date(date);
   mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
@@ -384,18 +415,50 @@ export default function AttendancePage() {
             <Check size={13} /> Marked ({marked.length})
           </p>
           <div className="space-y-1.5">
-            {marked.map(l => (
-              <div key={l.id} className="bg-white rounded-xl border border-[var(--bd)] px-4 py-2.5 flex items-center justify-between opacity-70">
-                <p className="text-sm text-[var(--txt)]">
-                  {fmtTime(l.startsAt)}
-                  {' · '}
-                  {l.student?.firstName} {l.student?.lastName}
-                </p>
-                <Badge variant={l.attendance?.status ?? 'default'}>
-                  {l.attendance?.status?.replace(/_/g, ' ')}
-                </Badge>
-              </div>
-            ))}
+            {marked.map(l => {
+              const isPresent = l.attendance?.status === 'present';
+              const justPaid = paid[l.id];
+              const showPay = canTakePayment && isPresent;
+              return (
+                <div key={l.id} className="bg-white rounded-xl border border-[var(--bd)] px-4 py-2.5">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <p className="text-sm text-[var(--txt)]">
+                      {fmtTime(l.startsAt)}
+                      {' · '}
+                      {l.student?.firstName} {l.student?.lastName}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      {/* Take cash/card handed over at the lesson. Records a paid
+                          per-lesson invoice; the payment cancels the lesson's charge. */}
+                      {showPay && (justPaid ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold" style={{ color: 'var(--sage-dk)' }}>
+                          <Check size={13} /> Paid{justPaid !== 'paid' ? ` · ${justPaid}` : ''}
+                        </span>
+                      ) : payingId === l.id ? (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-xs text-[var(--txt3)] mr-1">Paid at lesson:</span>
+                          <button onClick={() => takePayment(l.id, 'cash')} disabled={saving === l.id}
+                            className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-[var(--bd2)] hover:bg-[var(--surf)] disabled:opacity-50">Cash</button>
+                          <button onClick={() => takePayment(l.id, 'card')} disabled={saving === l.id}
+                            className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-[var(--bd2)] hover:bg-[var(--surf)] disabled:opacity-50">Card</button>
+                          <button onClick={() => setPayingId(null)} disabled={saving === l.id}
+                            className="text-xs text-[var(--txt4)] hover:text-[var(--txt2)] px-1">Cancel</button>
+                        </span>
+                      ) : (
+                        <button onClick={() => { setPayingId(l.id); setPayErr(e => { const { [l.id]: _d, ...r } = e; return r; }); }}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--txt3)] hover:text-[var(--sage-dk)] underline decoration-dotted underline-offset-2">
+                          <PoundSterling size={12} /> Take payment
+                        </button>
+                      ))}
+                      <Badge variant={l.attendance?.status ?? 'default'}>
+                        {l.attendance?.status?.replace(/_/g, ' ')}
+                      </Badge>
+                    </div>
+                  </div>
+                  {payErr[l.id] && <p className="text-xs mt-1.5" style={{ color: 'var(--coral)' }}>{payErr[l.id]}</p>}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

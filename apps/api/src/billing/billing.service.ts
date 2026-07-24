@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, ConflictException, 
 import { eq, and, inArray } from 'drizzle-orm';
 import {
   invoices, invoiceLineItems, ledgerEntries, payments,
-  families, students, enrollments, lessonCredits, lessons, organizations,
+  families, students, enrollments, lessonCredits, lessons, organizations, attendance,
 } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateInvoiceDto } from './dto/create-invoice.dto';
@@ -426,6 +426,115 @@ export class BillingService {
     if (inv?.status === 'sent') await this.syncManualInvoiceCharge(orgId, invoiceId);
 
     return item!;
+  }
+
+  // ─── Paid at the lesson ──────────────────────────────────────────────────────
+  /**
+   * Record that a family paid for a single lesson on the spot (cash/card at the
+   * door), producing a paid per-lesson invoice as their receipt.
+   *
+   * The money model is deliberate. Attendance is the ONLY thing that charges a
+   * lesson (postAutoCharge posts the debit when it's marked present); an invoice
+   * line that carries a lessonId is documentation and never charges again. So
+   * "paid at lesson" must not raise its own charge — it records a PAYMENT that
+   * cancels the attendance charge, leaving the family's balance where it should
+   * be (charge −A + payment +A = 0) with a paid invoice to show for it.
+   *
+   * Guards: the lesson must be marked present (so the charge it pays actually
+   * exists), and a lesson already covered by a prepaid credit is refused (the
+   * family has paid for it once already — taking cash too would double-charge
+   * them). Idempotent per lesson, so a double-tap records exactly one payment.
+   */
+  async payForLesson(
+    orgId: string,
+    lessonId: string,
+    method: 'cash' | 'card' | 'bank_transfer' | 'other',
+  ) {
+    const lesson = await this.db.db.query.lessons.findFirst({
+      where: and(eq(lessons.id, lessonId), eq(lessons.organizationId, orgId)),
+      with: {
+        enrollment: { columns: { instrument: true, rate: true, defaultDuration: true, lessonType: true } },
+        student: { columns: { id: true }, with: { family: { columns: { id: true } } } },
+      },
+    });
+    if (!lesson) throw new NotFoundException('Lesson not found');
+
+    const familyId = (lesson.student as { family?: { id: string } } | null)?.family?.id;
+    if (!familyId) throw new BadRequestException('This lesson has no family to bill.');
+    if (!lesson.enrollmentId || !lesson.enrollment) {
+      throw new BadRequestException('This lesson is not linked to an enrolment, so it has no fee to take.');
+    }
+
+    // Only a lesson that actually happened is "paid at the lesson". Requiring the
+    // present mark also guarantees the matching charge exists to be cancelled.
+    const att = await this.db.db.query.attendance.findFirst({
+      where: and(eq(attendance.organizationId, orgId), eq(attendance.lessonId, lessonId)),
+      columns: { status: true },
+    });
+    if (att?.status !== 'present') {
+      throw new BadRequestException('Mark the lesson as present before recording a payment at the lesson.');
+    }
+
+    // A lesson a prepaid credit already covered has no cash to take.
+    const creditUsed = await this.db.db.query.lessonCredits.findFirst({
+      where: and(eq(lessonCredits.organizationId, orgId), eq(lessonCredits.usedInLessonId, lessonId)),
+      columns: { id: true },
+    });
+    if (creditUsed) {
+      throw new BadRequestException('This lesson was covered by a prepaid credit — there is nothing to pay.');
+    }
+
+    const isGroup = lesson.enrollment.lessonType === 'group';
+    const amount = isGroup
+      ? (lesson.enrollment.rate ?? 0)
+      : proratedAmount(lesson.enrollment.rate, lesson.enrollment.defaultDuration, lesson.duration);
+    if (amount <= 0) throw new BadRequestException('This lesson has no fee to take.');
+
+    // Idempotent per lesson: a second tap returns the invoice the first one paid,
+    // rather than raising a duplicate invoice and payment.
+    const idempotencyKey = `pal-${lessonId}`;
+    const priorPayment = await this.db.db.query.payments.findFirst({
+      where: and(eq(payments.idempotencyKey, idempotencyKey), eq(payments.organizationId, orgId)),
+      columns: { invoiceId: true },
+    });
+    if (priorPayment) {
+      const inv = priorPayment.invoiceId
+        ? await this.db.db.query.invoices.findFirst({
+            where: eq(invoices.id, priorPayment.invoiceId),
+            columns: { id: true, number: true, total: true },
+          })
+        : null;
+      return {
+        invoiceId: inv?.id ?? null,
+        invoiceNumber: inv?.number ?? null,
+        amount: inv?.total ?? amount,
+        status: 'paid' as const,
+        alreadyPaid: true,
+      };
+    }
+
+    // One per-lesson invoice, one line carrying the lessonId (documentation only —
+    // no charge is posted, since the lesson line references a real lesson).
+    const inv = await this.createInvoice(orgId, { familyId, mode: 'per_lesson', itemizeLessons: false });
+    const instrument = lesson.enrollment.instrument
+      ? lesson.enrollment.instrument.charAt(0).toUpperCase() + lesson.enrollment.instrument.slice(1)
+      : '';
+    const kind = isGroup ? 'group class' : 'lesson';
+    const description = [instrument, `${kind} · ${lesson.duration} min — paid at the lesson`].filter(Boolean).join(' ');
+    await this.addLineItem(orgId, inv.id, description, amount, lessonId);
+    await this.sendInvoice(orgId, inv.id);
+
+    // The payment cancels the attendance charge and marks the invoice paid.
+    await this.recordPayment(orgId, {
+      familyId,
+      invoiceId: inv.id,
+      method,
+      amount,
+      notes: 'Paid at the lesson',
+      idempotencyKey,
+    });
+
+    return { invoiceId: inv.id, invoiceNumber: inv.number, amount, status: 'paid' as const };
   }
 
   // ─── Resource-library subscription ──────────────────────────────────────────

@@ -3,6 +3,7 @@ import { BillingService } from './billing.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { AddLineItemDto } from './dto/add-line-item.dto';
+import { PayAtLessonDto } from './dto/pay-at-lesson.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -65,5 +66,13 @@ export class BillingController {
   @Roles('receptionist')
   recordPayment(@CurrentUser() user: RequestUser, @Body() dto: RecordPaymentDto) {
     return this.billing.recordPayment(user.orgId, dto);
+  }
+
+  // Record that a family paid for a single lesson on the spot. Produces a paid
+  // per-lesson invoice; the payment cancels the lesson's attendance charge.
+  @Post('lessons/:id/pay-at-lesson')
+  @Roles('receptionist')
+  payAtLesson(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: PayAtLessonDto) {
+    return this.billing.payForLesson(user.orgId, id, dto.method);
   }
 }
