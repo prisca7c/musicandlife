@@ -45,12 +45,13 @@ export const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: strin
   'registration.submitted.family': (ctx) => ({
     subject: 'We received your registration - Music & Life',
     html: brandedEmail({
-      previewText: "Thanks for registering - we'll be in touch within 2-3 business days.",
+      previewText: "Thanks for registering - we'll be in touch as soon as we can.",
       heading: 'Thanks for registering!',
       bodyHtml:
         `<p style="margin:0 0 12px">Thank you for registering with Music &amp; Life - we're delighted to have you.</p>` +
         `<p style="margin:0 0 12px">${ctx.body}</p>` +
-        `<p style="margin:0">Our team will review your registration within <strong>2-3 business days</strong>. Once it's approved you'll receive a welcome email with your portal login details.</p>`,
+        `<p style="margin:0 0 12px">Our team will review your registration <strong>as soon as we can</strong>. Once it's approved you'll receive a welcome email with your portal login details.</p>` +
+        `<p style="margin:0">If that welcome email doesn't arrive, please check your spam or junk folder - and marking it as "not spam" helps our messages reach you from then on.</p>`,
       footnote: 'Have a question in the meantime? Just reply to this email.',
     }),
   }),
