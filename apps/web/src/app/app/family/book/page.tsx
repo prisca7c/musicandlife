@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
 import { fmtTime, fmtDate } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
@@ -186,7 +187,7 @@ export default function BookLessonPage() {
                       {bookable.map(e => (
                         <option key={e.id} value={e.id}>
                           {e.instrument.charAt(0).toUpperCase() + e.instrument.slice(1)}
-                          {e.lessonType === 'group' ? ' (group class)' : ''} — £{(e.rate / 100).toFixed(2)} / {e.defaultDuration} min
+                          {e.lessonType === 'group' ? ' (group class)' : ''} — {formatMoney(e.rate)} / {e.defaultDuration} min
                         </option>
                       ))}
                     </select>
@@ -234,7 +235,7 @@ export default function BookLessonPage() {
                           >
                             {m} min
                             <span className="block font-bold" style={{ color: 'var(--txt)' }}>
-                              £{(priceFor(m) / 100).toFixed(2)}
+                              {formatMoney(priceFor(m))}
                             </span>
                             {m === contracted && (
                               <span className="block text-[10px] font-medium" style={{ color: 'var(--txt4)' }}>usual</span>
@@ -263,7 +264,7 @@ export default function BookLessonPage() {
               </p>
               <p className="text-sm" style={{ color: 'var(--txt3)' }}>
                 {fmtTime(selectedSlot)} · {duration} min
-                {enrollment ? ` · £${(priceFor(duration) / 100).toFixed(2)}` : ''}
+                {enrollment ? ` · ${formatMoney(priceFor(duration))}` : ''}
               </p>
               <button onClick={book} disabled={booking || !selectedEnrollment || !selectedStudent}
                 className="mt-3 w-full bg-[var(--sage)] text-white font-bold text-sm py-2.5 rounded-xl hover:bg-[var(--sage-dk)] disabled:opacity-50 flex items-center justify-center gap-2">

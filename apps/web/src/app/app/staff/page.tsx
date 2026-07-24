@@ -3,6 +3,7 @@
 import { useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
@@ -152,7 +153,7 @@ export default function StaffPage() {
                 </td>
                 <td style={{ color: 'var(--txt3)' }}>{s.title ?? '—'}</td>
                 <td className="capitalize" style={{ color: 'var(--txt3)' }}>{s.instruments.join(', ') || '—'}</td>
-                <td className="font-medium">£{(s.hourlyRate / 100).toFixed(2)}/hr</td>
+                <td className="font-medium">{formatMoney(s.hourlyRate)}/hr</td>
                 <td><Badge variant={s.status}>{s.status}</Badge></td>
               </tr>
             ))}

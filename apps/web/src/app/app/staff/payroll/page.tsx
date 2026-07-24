@@ -3,6 +3,7 @@
 import { useState, useEffect, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
@@ -153,7 +154,7 @@ function RunAllModal({ open, onClose, onCreated }: { open: boolean; onClose: () 
                 <div key={c.runId} className="flex items-center justify-between px-3.5 py-2 text-sm border-b last:border-b-0"
                   style={{ borderColor: 'var(--bd)' }}>
                   <span className="font-medium">{c.name}</span>
-                  <span style={{ color: 'var(--txt3)' }}>{c.items} lesson{c.items !== 1 ? 's' : ''} · <strong style={{ color: 'var(--txt2)' }}>£{(c.gross/100).toFixed(2)}</strong></span>
+                  <span style={{ color: 'var(--txt3)' }}>{c.items} lesson{c.items !== 1 ? 's' : ''} · <strong style={{ color: 'var(--txt2)' }}>{formatMoney(c.gross)}</strong></span>
                 </div>
               ))}
             </div>
@@ -389,8 +390,8 @@ export default function PayrollPage() {
                   <td className="font-semibold">{r.staff?.firstName} {r.staff?.lastName}</td>
                   <td className="text-xs" style={{ color: 'var(--txt3)' }}>{r.periodStart} → {r.periodEnd}</td>
                   <td style={{ textAlign: 'right' }}>{r.hoursElapsed}h</td>
-                  <td style={{ textAlign: 'right', color: 'var(--txt3)' }}>£{(r.hourlyRate/100).toFixed(2)}/hr</td>
-                  <td className="font-semibold" style={{ textAlign: 'right' }}>£{(r.gross/100).toFixed(2)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--txt3)' }}>{formatMoney(r.hourlyRate)}/hr</td>
+                  <td className="font-semibold" style={{ textAlign: 'right' }}>{formatMoney(r.gross)}</td>
                   <td><Badge variant={STATUS_COLORS[r.status]}>{r.status}</Badge></td>
                   <td style={{ textAlign: 'right' }}>
                     {r.status === 'draft' && (
@@ -435,7 +436,7 @@ export default function PayrollPage() {
                   <td className="capitalize" style={{ color: 'var(--txt3)' }}>{exp.category}</td>
                   <td style={{ color: 'var(--txt3)' }}>{exp.date}</td>
                   <td className="text-xs" style={{ color: 'var(--txt4)' }}>{exp.description ?? '—'}</td>
-                  <td className="font-semibold" style={{ textAlign: 'right' }}>£{(exp.amount/100).toFixed(2)}</td>
+                  <td className="font-semibold" style={{ textAlign: 'right' }}>{formatMoney(exp.amount)}</td>
                   <td><Badge variant={STATUS_COLORS[exp.status]}>{exp.status}</Badge></td>
                   <td>
                     {exp.receiptFile ? (

@@ -4,6 +4,7 @@ import { useState, useEffect, FormEvent } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
@@ -389,7 +390,7 @@ export default function FamilyDetailPage() {
           <div className="flex items-center gap-3">
             <span className="text-sm font-semibold"
               style={{ color: family.balanceCached < 0 ? 'var(--coral)' : 'var(--txt3)' }}>
-              Balance: £{(Math.abs(family.balanceCached) / 100).toFixed(2)}{family.balanceCached < 0 ? ' owed' : ''}
+              Balance: {formatMoney(Math.abs(family.balanceCached))}{family.balanceCached < 0 ? ' owed' : ''}
             </span>
             <button onClick={() => setShowCreateInvoice(true)} className="ui-btn-ghost text-sm">
               Create invoice
@@ -541,7 +542,7 @@ export default function FamilyDetailPage() {
                     </td>
                     <td style={{ color: 'var(--txt3)' }}>{i.issuedOn}</td>
                     <td style={{ color: 'var(--txt3)' }}>{i.dueDate}</td>
-                    <td className="font-semibold" style={{ textAlign: 'right' }}>£{(i.total / 100).toFixed(2)}</td>
+                    <td className="font-semibold" style={{ textAlign: 'right' }}>{formatMoney(i.total)}</td>
                     <td><Badge variant={INVOICE_STATUS_COLORS[i.status]}>{i.status}</Badge></td>
                   </tr>
                 ))}

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
+import { formatMoney } from '@/lib/money';
 
 const SAGE = '#2A5A3D';
 const DARK = '#3a3736';
@@ -49,7 +50,7 @@ export function PayrollPDF({ data }: { data: PayrollPDFData }) {
         <View style={s.header}>
           <View style={s.staffBlock}>
             <Text style={s.blockLabel}>{data.staff.name}</Text>
-            <Text style={s.blockLine}>Rate: £{(data.staff.hourlyRate / 100).toFixed(2)}/hr</Text>
+            <Text style={s.blockLine}>Rate: {formatMoney(data.staff.hourlyRate)}/hr</Text>
           </View>
           <View style={s.titleBlock}>
             <Text style={s.title}>PAYROLL RECORD</Text>
@@ -77,18 +78,18 @@ export function PayrollPDF({ data }: { data: PayrollPDFData }) {
             <Text style={[s.cell, s.colInstrument, { textTransform: 'capitalize' }]}>{r.instrument}</Text>
             <Text style={[s.cell, s.colType]}>{r.type}</Text>
             <Text style={[s.cell, s.colMins]}>{r.minutes}</Text>
-            <Text style={[s.cell, s.colAmount]}>£{(r.amount / 100).toFixed(2)}</Text>
+            <Text style={[s.cell, s.colAmount]}>{formatMoney(r.amount)}</Text>
           </View>
         ))}
 
         <View style={s.totalsRow}>
           <Text style={s.totalLabel}>Total: {data.totalHours} hrs ({data.totalMinutes} min)</Text>
-          <Text style={s.totalValue}>£{(data.gross / 100).toFixed(2)}</Text>
+          <Text style={s.totalValue}>{formatMoney(data.gross)}</Text>
         </View>
 
         <View style={s.grossBox}>
           <Text style={s.grossLabel}>Gross Pay</Text>
-          <Text style={s.grossValue}>£{(data.gross / 100).toLocaleString('en-GB', { minimumFractionDigits: 2 })}</Text>
+          <Text style={s.grossValue}>{formatMoney(data.gross)}</Text>
         </View>
 
         <View style={s.footer} fixed>

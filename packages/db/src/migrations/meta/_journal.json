@@ -162,6 +162,13 @@
       "when": 1784866755465,
       "tag": "0022_instrument_note",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784934079351,
+      "tag": "0023_public_resources",
+      "breakpoints": true
     }
   ]
 }

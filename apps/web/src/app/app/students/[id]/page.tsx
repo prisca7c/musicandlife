@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { useParams, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
@@ -140,8 +141,8 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
             <label className="ui-label">Duration</label>
             <SearchableSelect
               options={lessonType === 'private'
-                ? [30,45,60].map(d => ({ value: String(d), label: `${d} min — £${(lessonRate('private',d)/100).toFixed(2)}` }))
-                : [{ value: '60', label: `60 min — £${(lessonRate('group',60)/100).toFixed(2)}` }]
+                ? [30,45,60].map(d => ({ value: String(d), label: `${d} min — ${formatMoney(lessonRate('private',d))}` }))
+                : [{ value: '60', label: `60 min — ${formatMoney(lessonRate('group',60))}` }]
               }
               value={String(duration)}
               onChange={v => setDuration(parseInt(v))}
@@ -510,7 +511,7 @@ export default function StudentDetailPage() {
                         : '—'}
                     </td>
                     <td style={{ color: 'var(--txt3)' }}>{e.term?.name ?? '—'}</td>
-                    <td className="font-medium">£{(e.rate / 100).toFixed(2)}</td>
+                    <td className="font-medium">{formatMoney(e.rate)}</td>
                     <td><Badge variant={e.status}>{e.status}</Badge></td>
                     <td>
                       <div className="flex items-center gap-2">

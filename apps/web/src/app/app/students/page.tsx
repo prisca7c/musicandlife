@@ -14,10 +14,21 @@ import { AddStudentModal } from '@/components/add-student-modal';
 
 interface Student { id: string; firstName: string; lastName: string; status: string; family: { id: string; name: string } | null; enrollments?: { instrument: string; status: string }[]; }
 
-// Distinct instruments across a student's non-withdrawn enrollments.
+// Distinct instruments across a student's non-withdrawn enrollments. Instruments
+// are stored with inconsistent casing ("Piano" vs "piano" vs "suzuki violin"),
+// so we title-case for display — matching how the PDFs render them — and dedupe
+// case-insensitively so the same instrument can't show twice.
+function titleCase(s: string): string {
+  return s.replace(/\b\w/g, c => c.toUpperCase());
+}
 function instrumentsOf(s: Student): string {
   const active = (s.enrollments ?? []).filter(e => e.status !== 'withdrawn' && e.instrument);
-  return [...new Set(active.map(e => e.instrument))].join(', ') || '—';
+  const byKey = new Map<string, string>();
+  for (const e of active) {
+    const key = e.instrument.trim().toLowerCase();
+    if (key && !byKey.has(key)) byKey.set(key, titleCase(e.instrument.trim()));
+  }
+  return [...byKey.values()].join(', ') || '—';
 }
 
 const PAGE_SIZE = 50;

@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Document, Page, Text, View, Image, StyleSheet, Link,
 } from '@react-pdf/renderer';
+import { formatMoney } from '@/lib/money';
 
 const DARK  = '#3a3736';
 const SAGE  = '#2A5A3D';
@@ -279,7 +280,7 @@ export function InvoicePDF({
           <View style={s.totalBlock}>
             <Text style={s.totalDueLabel}>Total Due:</Text>
             <Text style={s.totalDueValue}>
-              £{(invoice.total / 100).toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+              {formatMoney(invoice.total)}
             </Text>
           </View>
         </View>
@@ -288,7 +289,7 @@ export function InvoicePDF({
         {!!invoice.balanceForward && (
           <View style={s.balanceForwardRow}>
             <Text style={s.balanceForwardText}>
-              Balance forward: {invoice.balanceForward < 0 ? '-' : ''}£{(Math.abs(invoice.balanceForward) / 100).toFixed(2)}
+              Balance forward: {formatMoney(invoice.balanceForward)}
             </Text>
           </View>
         )}
@@ -315,9 +316,7 @@ export function InvoicePDF({
             </View>
             <Text style={[s.cell, s.colDesc]}>{item.description}</Text>
             <Text style={[s.cell, s.colCharges]}>
-              {item.amount !== 0
-                ? (item.amount < 0 ? '-' : '') + '£' + (Math.abs(item.amount) / 100).toFixed(2)
-                : ''}
+              {item.amount !== 0 ? formatMoney(item.amount) : ''}
             </Text>
             <Text style={[s.cell, s.colPayments]} />
           </View>
@@ -331,7 +330,7 @@ export function InvoicePDF({
             </View>
             <View style={s.payRight}>
               <Text style={s.payTotal}>
-                Total Due: £{(invoice.total / 100).toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                Total Due: {formatMoney(invoice.total)}
               </Text>
               {invoice.payUrl && (
                 <Link src={invoice.payUrl} style={s.payBtn}>

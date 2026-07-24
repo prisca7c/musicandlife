@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { useMe } from '@/lib/use-me';
 import { fmtTime, fmtDate } from '@/lib/datetime';
+import { formatMoney, formatBalance } from '@/lib/money';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { PaidDot } from '@/components/paid-dot';
@@ -280,7 +281,7 @@ export default function FamilyDashboardPage() {
               <PaidDot paid={balance >= 0} title={balance >= 0 ? 'Paid up' : 'You have an outstanding balance'} />
             </p>
             <p className={`text-2xl font-black ${balance >= 0 ? 'text-[var(--sage-dk)]' : 'text-[var(--coral)]'}`}>
-              {balance >= 0 ? '+' : ''}£{Math.abs(balance / 100).toFixed(2)}
+              {formatBalance(balance)}
             </p>
             {/* "Nothing to pay" on its own read as an error to families. Say
                 what the number means and what, if anything, they should do. */}
@@ -300,7 +301,7 @@ export default function FamilyDashboardPage() {
                 <div>
                   <p className="text-sm font-bold text-[var(--amber)]">Invoice due</p>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--txt3)' }}>
-                    {outstandingInvoice.number} · £{(outstandingInvoice.total / 100).toFixed(2)} · due {outstandingInvoice.dueDate}
+                    {outstandingInvoice.number} · {formatMoney(outstandingInvoice.total)} · due {outstandingInvoice.dueDate}
                   </p>
                 </div>
               </div>
@@ -320,7 +321,7 @@ export default function FamilyDashboardPage() {
               ) : (
                 <div className="mt-3">
                   <p className="text-xs mb-2" style={{ color: 'var(--txt3)' }}>
-                    Send £{(outstandingInvoice.total / 100).toFixed(2)} by bank transfer to:
+                    Send {formatMoney(outstandingInvoice.total)} by bank transfer to:
                   </p>
                   {/* Where the money actually goes. This card used to give the
                       reference and nothing else — half an instruction. */}

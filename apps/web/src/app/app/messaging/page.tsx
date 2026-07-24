@@ -26,6 +26,11 @@ function NewThreadModal({ open, onClose, onCreated }: { open: boolean; onClose: 
   const [saving, setSaving] = useState(false);
   const [recipQuery, setRecipQuery] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  // Per-field messages, the way the registration form does it — a red border with
+  // no words leaves a less confident user unsure what went wrong.
+  const [fieldErr, setFieldErr] = useState<{ recipients?: string; subject?: string; body?: string }>({});
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   // Who the current user is allowed to message (staff→everyone, parent→staff only).
@@ -38,18 +43,23 @@ function NewThreadModal({ open, onClose, onCreated }: { open: boolean; onClose: 
 
   function toggle(id: string) {
     setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
+    setFieldErr(fe => ({ ...fe, recipients: undefined }));
   }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setError('');
-    if (selected.length === 0) { setError('Please choose at least one person to send this to.'); return; }
+    const errs: typeof fieldErr = {};
+    if (selected.length === 0) errs.recipients = 'Please choose at least one person to send this to.';
+    if (!subject.trim()) errs.subject = 'Please add a subject.';
+    if (!body.trim()) errs.body = 'Please write your message.';
+    setFieldErr(errs);
+    if (Object.keys(errs).length > 0) return;
     setSaving(true);
-    const f = new FormData(e.currentTarget);
     try {
       await apiFetch('/threads', { method: 'POST', token: tok(), body: JSON.stringify({
-        subject: f.get('subject'), body: f.get('body'), participantIds: selected,
+        subject: subject.trim(), body: body.trim(), participantIds: selected,
       })});
-      setSelected([]); setRecipQuery('');
+      setSelected([]); setRecipQuery(''); setSubject(''); setBody(''); setFieldErr({});
       onCreated(); onClose();
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
     finally { setSaving(false); }
@@ -84,20 +94,26 @@ function NewThreadModal({ open, onClose, onCreated }: { open: boolean; onClose: 
                   className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--surf)] ${on ? 'bg-[var(--sage-lt)]' : ''}`}>
                   <span className="min-w-0">
                     <span className="font-medium">{r.name}</span> <span className="text-xs text-gray-400">· {r.roleLabel}</span>
-                    {/* Two people can share a name; the address is what tells them
-                        apart before you send a parent something meant for staff. */}
-                    <span className="block text-xs text-gray-400 truncate">{r.email}</span>
+                    {/* Two staff can share a name; the address tells them apart.
+                        Parents don't get staff emails from the API, so this line
+                        simply doesn't render for them (r.email is blank). */}
+                    {r.email && <span className="block text-xs text-gray-400 truncate">{r.email}</span>}
                   </span>
                   {on && <Check size={14} className="text-[var(--sage-dk)] shrink-0" />}
                 </button>
               );
             })}
           </div>
+          {fieldErr.recipients && <p className="mt-1 text-xs text-red-600">{fieldErr.recipients}</p>}
         </div>
         <div><label className="block text-sm font-medium mb-1">Subject <span className="text-red-500">*</span></label>
-          <input name="subject" required className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]" /></div>
+          <input name="subject" value={subject} onChange={e => { setSubject(e.target.value); setFieldErr(fe => ({ ...fe, subject: undefined })); }}
+            className={`w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)] ${fieldErr.subject ? 'border-red-400' : ''}`} />
+          {fieldErr.subject && <p className="mt-1 text-xs text-red-600">{fieldErr.subject}</p>}</div>
         <div><label className="block text-sm font-medium mb-1">Message <span className="text-red-500">*</span></label>
-          <textarea name="body" required rows={4} className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]" /></div>
+          <textarea name="body" rows={4} value={body} onChange={e => { setBody(e.target.value); setFieldErr(fe => ({ ...fe, body: undefined })); }}
+            className={`w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)] ${fieldErr.body ? 'border-red-400' : ''}`} />
+          {fieldErr.body && <p className="mt-1 text-xs text-red-600">{fieldErr.body}</p>}</div>
         <div className="flex gap-3 pt-2">
           <button type="submit" disabled={saving} className="bg-[var(--sage)] text-white rounded px-4 py-2 text-sm font-medium hover:bg-[var(--sage-dk)] disabled:opacity-50">{saving ? 'Sending…' : 'Send'}</button>
           <button type="button" onClick={onClose} className="rounded px-4 py-2 text-sm border hover:bg-gray-50">Cancel</button>

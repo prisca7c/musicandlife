@@ -24,6 +24,15 @@ export class ResourcesController {
     return this.resources.findAll(user.orgId, user.role, user.userId, { search, instrument, teacherId, studentId });
   }
 
+  // Signed, time-limited URL for a file resource — an attachment for downloadable
+  // resources, inline for view-only. Kept a GET so the browser can open it
+  // directly; visibility + subscription are re-checked inside signResourceFile.
+  @Get(':id/file-url')
+  @Roles('student')
+  fileUrl(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.resources.signResourceFile(user.orgId, user.role, user.userId, id);
+  }
+
   @Post()
   @Roles('teacher')
   create(@CurrentUser() user: RequestUser, @Body() dto: CreateResourceDto) {

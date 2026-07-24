@@ -350,6 +350,17 @@ export class BillingService {
         'This invoice totals £0.00. Add at least one line item before issuing it.',
       );
     }
+    // A negative total is a credit, not a bill. Issuing it as a "sent" invoice
+    // put a payable in front of a family that owes nothing (the pay page even
+    // showed "Total due -£4.00"). Refuse it at the point of issue: adjust the
+    // line items so the invoice is zero-or-positive, or apply the credit to the
+    // family's balance instead of dressing it up as an invoice.
+    if (inv.total < 0) {
+      throw new BadRequestException(
+        'This invoice totals a credit (less than £0.00), so it cannot be issued as a bill. '
+        + 'Adjust the line items, or apply the credit to the family balance instead.',
+      );
+    }
     const [updated] = await this.db.db.update(invoices)
       .set({ status: 'sent', updatedAt: new Date() })
       .where(and(eq(invoices.id, id), eq(invoices.organizationId, orgId)))
