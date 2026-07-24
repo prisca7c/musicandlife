@@ -30,6 +30,7 @@ import { RepertoireModule } from './repertoire/repertoire.module';
 import { NewsModule } from './news/news.module';
 import { BroadcastModule } from './broadcasts/broadcast.module';
 import { InstrumentsModule } from './instruments/instruments.module';
+import { CalendarModule } from './calendar/calendar.module';
 import { FamilyPortalModule } from './family-portal/family-portal.module';
 
 @Module({
@@ -54,7 +55,7 @@ import { FamilyPortalModule } from './family-portal/family-portal.module';
     SchedulingModule, AttendanceModule,
     MessagingModule, RegistrationModule, LeadsModule,
     ResourcesModule, ReportsModule,
-    NotesModule, RepertoireModule, NewsModule, BroadcastModule, InstrumentsModule, FamilyPortalModule,
+    NotesModule, RepertoireModule, NewsModule, BroadcastModule, InstrumentsModule, CalendarModule, FamilyPortalModule,
     HealthModule,
   ],
   providers: [

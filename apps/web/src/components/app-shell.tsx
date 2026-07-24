@@ -24,6 +24,7 @@ const NAV: NavItem[] = [
   { label: 'Book lesson',  href: '/app/family/book',       roles: ['guardian','student'],                                     icon: <Clock size={16} /> },
   { label: 'History',      href: '/app/family/history',    roles: ['guardian','student'],                                     icon: <History size={16} /> },
   { label: 'Lesson notes', href: '/app/family/notes',      roles: ['guardian','student'],                                     icon: <BookOpen size={16} /> },
+  { label: 'Add to calendar', href: '/app/family/calendar', roles: ['guardian'],                                              icon: <CalendarPlus size={16} /> },
   { label: 'Calendar',     href: '/app/calendar',          roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <Calendar size={16} /> },
   { label: 'Attendance',   href: '/app/attendance',        roles: ['system_admin','admin','manager','teacher'],               icon: <ClipboardCheck size={16} /> },
   { label: 'Booking requests', href: '/app/lesson-requests', roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <CalendarPlus size={16} /> },
