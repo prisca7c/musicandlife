@@ -30,6 +30,10 @@ export const resources = pgTable(
     type: text('type', { enum: ['file', 'link', 'note'] }).notNull().default('link'),
     fileId: uuid('file_id').references(() => files.id),
     url: text('url'),
+    // How a file resource is delivered to families: sheet music is downloadable,
+    // videos are view-only (streamed inline, no download link). Ignored for
+    // link/note resources. Enforced when signing the file's URL.
+    delivery: text('delivery', { enum: ['download', 'view_only'] }).notNull().default('download'),
     scope: text('scope', { enum: ['studio', 'teacher', 'family', 'student'] }).notNull().default('studio'),
     ownerId: uuid('owner_id').references(() => users.id),
     // ─── Filter/search tags (independent of `scope`, which is the role gate) ──

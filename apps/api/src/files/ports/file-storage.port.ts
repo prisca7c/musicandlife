@@ -26,6 +26,10 @@ export abstract class FileStoragePort {
   abstract signDownload(opts: {
     fileKey: string;
     expiresInSeconds?: number;
+    /** 'attachment' forces a download; 'inline' streams in the browser (view-only). */
+    disposition?: 'inline' | 'attachment';
+    /** Filename offered to the browser when disposition is 'attachment'. */
+    fileName?: string;
   }): Promise<SignedDownloadResult>;
 
   /** Move a file to the archive tier */

@@ -19,6 +19,13 @@ export class CreateResourceDto {
   @IsString()
   url?: string;
 
+  // File resources only: 'download' (sheet music, downloadable) or 'view_only'
+  // (video, streamed inline with no download link). Omitted → derived from the
+  // file's mime type (video → view_only, everything else → download).
+  @IsOptional()
+  @IsIn(['download', 'view_only'])
+  delivery?: 'download' | 'view_only';
+
   @IsIn(['studio', 'teacher', 'family', 'student'])
   scope!: 'studio' | 'teacher' | 'family' | 'student';
 

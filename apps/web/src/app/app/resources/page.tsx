@@ -3,16 +3,17 @@
 import { useState, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
+import { uploadFile } from '@/lib/upload';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { SearchableSelect } from '@/components/searchable-select';
 import { linkify } from '@/lib/linkify';
-import { Search, Lock } from 'lucide-react';
+import { Search, Lock, Download, Play, FileText } from 'lucide-react';
 
 interface Resource {
   id: string; title: string; description: string | null; type: string; scope: string; url: string | null;
-  instrument: string | null;
+  instrument: string | null; delivery: 'download' | 'view_only';
   teacher: { id: string; firstName: string; lastName: string } | null;
   student: { id: string; firstName: string; lastName: string } | null;
   file: { id: string; mime: string; originalName: string | null } | null;
@@ -35,20 +36,39 @@ function AddResourceModal({ open, onClose, onCreated, role, staff, students }: {
   open: boolean; onClose: () => void; onCreated: () => void;
   role: string; staff: Staff[]; students: Student[];
 }) {
-  const [type, setType] = useState<'link'|'note'>('link');
+  const [type, setType] = useState<'link'|'note'|'file'>('link');
   const [teacherId, setTeacherId] = useState('');
   const [studentId, setStudentId] = useState('');
+  // File resources: the chosen file + how families get it. The delivery default
+  // follows the file type (a video is view-only, everything else downloadable),
+  // and the person publishing can override it.
+  const [file, setFile] = useState<File | null>(null);
+  const [delivery, setDelivery] = useState<'download' | 'view_only'>('download');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  function onPickFile(f: File | null) {
+    setFile(f);
+    if (f) setDelivery(f.type.startsWith('video/') ? 'view_only' : 'download');
+  }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSaving(true); setError('');
     const f = new FormData(e.currentTarget);
     try {
+      let fileId: string | undefined;
+      if (type === 'file') {
+        if (!file) { setError('Choose a file to upload.'); setSaving(false); return; }
+        // Library materials aren't ephemeral student files — keep them (expiring:false).
+        const up = await uploadFile(file, tok(), { expiring: false });
+        fileId = up.fileId;
+      }
       await apiFetch('/resources', { method: 'POST', token: tok(), body: JSON.stringify({
         title: f.get('title'), description: f.get('description') || undefined,
-        type, url: f.get('url') || undefined, scope: f.get('scope'),
+        type, url: type === 'link' ? (f.get('url') || undefined) : undefined,
+        fileId, delivery: type === 'file' ? delivery : undefined,
+        scope: f.get('scope'),
         instrument: f.get('instrument') || undefined,
         teacherId: teacherId || undefined, studentId: studentId || undefined,
       })});
@@ -65,7 +85,7 @@ function AddResourceModal({ open, onClose, onCreated, role, staff, students }: {
           <input name="title" required autoFocus className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]" /></div>
         <div><label className="block text-sm font-medium mb-1">Type</label>
           <div className="flex gap-4">
-            {(['link','note'] as const).map(t => (
+            {(['link','file','note'] as const).map(t => (
               <label key={t} className="flex items-center gap-2 cursor-pointer text-sm">
                 <input type="radio" checked={type===t} onChange={()=>setType(t)} className="text-[var(--sage)]" />
                 <span className="capitalize">{t}</span>
@@ -74,6 +94,35 @@ function AddResourceModal({ open, onClose, onCreated, role, staff, students }: {
           </div></div>
         {type === 'link' && <div><label className="block text-sm font-medium mb-1">URL</label>
           <input name="url" type="url" className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]" /></div>}
+        {type === 'file' && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium mb-1">File <span className="text-red-500">*</span></label>
+              <input type="file" onChange={e => onPickFile(e.target.files?.[0] ?? null)}
+                className="w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-[var(--sage-lt)] file:px-3 file:py-1.5 file:text-[var(--sage-dk)] file:font-medium" />
+              {file && <p className="text-xs text-gray-400 mt-1">{file.name} · {(file.size/1024/1024).toFixed(1)} MB</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">How families get it</label>
+              <div className="flex gap-2">
+                {([
+                  { v: 'download', label: 'Downloadable', hint: 'Sheet music, audio, worksheets' },
+                  { v: 'view_only', label: 'View only', hint: 'Videos — streamed, no download' },
+                ] as const).map(o => (
+                  <button key={o.v} type="button" onClick={() => setDelivery(o.v)}
+                    className="flex-1 text-left rounded-xl border px-3 py-2"
+                    style={{
+                      borderColor: delivery === o.v ? 'var(--sage)' : 'var(--bd)',
+                      background: delivery === o.v ? 'var(--sage-lt)' : 'transparent',
+                    }}>
+                    <span className="block text-sm font-semibold">{o.label}</span>
+                    <span className="block text-xs" style={{ color: 'var(--txt3)' }}>{o.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
         <div><label className="block text-sm font-medium mb-1">Description</label>
           <textarea name="description" rows={type==='note'?4:2} className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--sage)]" /></div>
         <div><label className="block text-sm font-medium mb-1">Visible to</label>
@@ -192,6 +241,23 @@ export default function ResourcesPage() {
     catch(e) { console.error(e); } finally { setDeleting(null); }
   }
 
+  // File resources are served through a signed, time-limited URL rather than a
+  // stored link: we fetch it on click so the URL is never in the page source, and
+  // a view-only item opens inline (no download control) while a downloadable one
+  // is served as an attachment. The signing endpoint re-checks visibility, so a
+  // student can only ever reach files they're allowed to see.
+  const [opening, setOpening] = useState<string | null>(null);
+  const [openError, setOpenError] = useState<{ id: string; message: string } | null>(null);
+  async function openFile(id: string) {
+    setOpening(id); setOpenError(null);
+    try {
+      const { url } = await apiFetch<{ url: string }>(`/resources/${id}/file-url`, { token: tok() });
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setOpenError({ id, message: err instanceof Error ? err.message : 'Could not open this file.' });
+    } finally { setOpening(null); }
+  }
+
   const instrumentOptions = [...new Set(allResources.map(r => r.instrument).filter((v): v is string => !!v))];
   const teacherOptions = [...new Map(allResources.filter(r => r.teacher).map(r => [r.teacher!.id, r.teacher!])).values()];
   const studentOptions = [...new Map(allResources.filter(r => r.student).map(r => [r.student!.id, r.student!])).values()];
@@ -269,6 +335,17 @@ export default function ResourcesPage() {
               </div>
               {r.description && <p className="text-sm text-gray-500 mt-0.5 break-words">{linkify(r.description)}</p>}
               {r.url && <div className="text-xs mt-0.5 truncate">{linkify(r.url)}</div>}
+              {r.type === 'file' && r.file && (
+                <button onClick={() => openFile(r.id)} disabled={opening === r.id}
+                  className="inline-flex items-center gap-1.5 text-xs mt-1 text-[var(--sage-dk)] hover:underline disabled:opacity-50">
+                  {r.delivery === 'view_only' ? <Play size={12} /> : <Download size={12} />}
+                  {opening === r.id ? 'Opening…' : r.delivery === 'view_only'
+                    ? (r.file.mime.startsWith('video/') ? 'Watch video' : 'View')
+                    : 'Download'}
+                  <span className="text-gray-400">{r.file.originalName}</span>
+                </button>
+              )}
+              {openError?.id === r.id && <p className="text-xs text-red-500 mt-1">{openError.message}</p>}
             </div>
             <button onClick={()=>remove(r.id)} disabled={deleting===r.id}
               className="text-xs text-red-500 hover:underline shrink-0 disabled:opacity-50">Remove</button>
