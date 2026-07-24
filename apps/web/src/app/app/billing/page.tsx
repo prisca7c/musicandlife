@@ -25,6 +25,7 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
   const [familyId, setFamilyId] = useState('');
   const [mode, setMode] = useState<'monthly_statement' | 'per_lesson' | 'custom'>('monthly_statement');
   const [lineItems, setLineItems] = useState<LineItem[]>([{ description: '', amount: '' }]);
+  const [splitByClass, setSplitByClass] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
@@ -33,7 +34,7 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
     if (open) {
       apiFetch<Family[]>('/families', { token: tok() }).then(setFamilies).catch(() => {});
       setFamilyId(''); setMode('monthly_statement');
-      setLineItems([{ description: '', amount: '' }]); setError('');
+      setLineItems([{ description: '', amount: '' }]); setSplitByClass(false); setError('');
     }
   }, [open]);
 
@@ -55,14 +56,29 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
     setSaving(true); setError('');
     try {
       const apiMode = mode === 'custom' ? 'per_lesson' : mode;
+      const periodStart = (e.currentTarget.elements.namedItem('periodStart') as HTMLInputElement)?.value || undefined;
+      const periodEnd = (e.currentTarget.elements.namedItem('periodEnd') as HTMLInputElement)?.value || undefined;
+
+      // "Separate invoice per class" raises one invoice per enrolment for the
+      // period instead of a single combined statement. Not available for the
+      // custom (manual line items) flow, which has no lessons to split.
+      if (splitByClass && mode !== 'custom') {
+        const res = await apiFetch<{ invoices: unknown[] }>('/invoices/split-by-class', {
+          method: 'POST', token: tok(), body: JSON.stringify({ familyId, mode: apiMode, periodStart, periodEnd }),
+        });
+        if (!res.invoices?.length) throw new Error('No unbilled lessons in this period to invoice.');
+        onCreated(); onClose();
+        return;
+      }
+
       const inv = await apiFetch<{ id: string }>('/invoices', {
         method: 'POST', token: tok(), body: JSON.stringify({
           familyId,
           mode: apiMode,
           // Custom invoices are manual-only — don't auto-pull the period's lessons.
           itemizeLessons: mode !== 'custom',
-          periodStart: (e.currentTarget.elements.namedItem('periodStart') as HTMLInputElement)?.value || undefined,
-          periodEnd: (e.currentTarget.elements.namedItem('periodEnd') as HTMLInputElement)?.value || undefined,
+          periodStart,
+          periodEnd,
           notes: (e.currentTarget.elements.namedItem('notes') as HTMLTextAreaElement)?.value || undefined,
         }),
       });
@@ -140,6 +156,20 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
               <input name="periodEnd" type="date" className="ui-input" />
             </div>
           </div>
+        )}
+
+        {mode !== 'custom' && (
+          <label className="flex items-start gap-2.5 cursor-pointer rounded-xl border border-[var(--bd)] px-3 py-2.5"
+            style={{ background: splitByClass ? 'var(--sage-lt)' : 'transparent' }}>
+            <input type="checkbox" checked={splitByClass} onChange={e => setSplitByClass(e.target.checked)}
+              className="mt-0.5 accent-[var(--sage)]" />
+            <span className="text-sm">
+              <span className="font-semibold" style={{ color: 'var(--txt)' }}>Separate invoice per class</span>
+              <span className="block text-xs mt-0.5" style={{ color: 'var(--txt3)' }}>
+                One invoice per instrument/class instead of a single combined statement — e.g. a child doing piano and cello gets two bills.
+              </span>
+            </span>
+          </label>
         )}
 
         {mode === 'custom' && (
