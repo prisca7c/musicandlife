@@ -15,39 +15,43 @@ import {
 import type { BaseRole } from '@music-life/types';
 import { apiFetch } from '@/lib/api';
 import { prefetchRoute, clearApiCache, useApi } from '@/lib/swr';
+import { canAccess } from '@/lib/nav-access';
 
-interface NavItem { label: string; href: string; roles: BaseRole[]; icon: React.ReactNode; }
+// Presentation only — which roles may see each link lives in nav-access.ts
+// (shared with the middleware route guard) so the sidebar and the URL guard can
+// never disagree about who is allowed where.
+interface NavItem { label: string; href: string; icon: React.ReactNode; }
 
 const NAV: NavItem[] = [
-  { label: 'Dashboard',    href: '/app/dashboard',         roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <LayoutDashboard size={16} /> },
-  { label: 'My lessons',   href: '/app/family/dashboard',  roles: ['guardian','student'],                                     icon: <LayoutDashboard size={16} /> },
-  { label: 'Book lesson',  href: '/app/family/book',       roles: ['guardian','student'],                                     icon: <Clock size={16} /> },
-  { label: 'History',      href: '/app/family/history',    roles: ['guardian','student'],                                     icon: <History size={16} /> },
-  { label: 'Lesson notes', href: '/app/family/notes',      roles: ['guardian','student'],                                     icon: <BookOpen size={16} /> },
-  { label: 'Calendar',     href: '/app/calendar',          roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <Calendar size={16} /> },
-  { label: 'Attendance',   href: '/app/attendance',        roles: ['system_admin','admin','manager','teacher'],               icon: <ClipboardCheck size={16} /> },
-  { label: 'Booking requests', href: '/app/lesson-requests', roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <CalendarPlus size={16} /> },
-  { label: 'Reschedules',  href: '/app/reschedule-requests', roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <CalendarClock size={16} /> },
-  { label: 'My availability', href: '/app/availability',    roles: ['teacher'],                                                icon: <Clock size={16} /> },
-  { label: 'Notes',        href: '/app/notes',             roles: ['system_admin','admin','manager','teacher'],               icon: <FileText size={16} /> },
-  { label: 'Students',     href: '/app/students',          roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <UserCheck size={16} /> },
-  { label: 'Families',     href: '/app/families',          roles: ['system_admin','admin','manager','receptionist'],          icon: <Home size={16} /> },
-  { label: 'Staff',        href: '/app/staff',             roles: ['system_admin','admin'],                                   icon: <Briefcase size={16} /> },
-  { label: 'Payroll',      href: '/app/staff/payroll',     roles: ['system_admin','admin','manager'],                        icon: <PoundSterling size={16} /> },
+  { label: 'Dashboard',    href: '/app/dashboard',         icon: <LayoutDashboard size={16} /> },
+  { label: 'My lessons',   href: '/app/family/dashboard',  icon: <LayoutDashboard size={16} /> },
+  { label: 'Book lesson',  href: '/app/family/book',       icon: <Clock size={16} /> },
+  { label: 'History',      href: '/app/family/history',    icon: <History size={16} /> },
+  { label: 'Lesson notes', href: '/app/family/notes',      icon: <BookOpen size={16} /> },
+  { label: 'Calendar',     href: '/app/calendar',          icon: <Calendar size={16} /> },
+  { label: 'Attendance',   href: '/app/attendance',        icon: <ClipboardCheck size={16} /> },
+  { label: 'Booking requests', href: '/app/lesson-requests', icon: <CalendarPlus size={16} /> },
+  { label: 'Reschedules',  href: '/app/reschedule-requests', icon: <CalendarClock size={16} /> },
+  { label: 'My availability', href: '/app/availability',    icon: <Clock size={16} /> },
+  { label: 'Notes',        href: '/app/notes',             icon: <FileText size={16} /> },
+  { label: 'Students',     href: '/app/students',          icon: <UserCheck size={16} /> },
+  { label: 'Families',     href: '/app/families',          icon: <Home size={16} /> },
+  { label: 'Staff',        href: '/app/staff',             icon: <Briefcase size={16} /> },
+  { label: 'Payroll',      href: '/app/staff/payroll',     icon: <PoundSterling size={16} /> },
   // Separate from Payroll on purpose: "what am I owed" and "run the studio's
   // payroll" are different jobs, and the Payroll page is manager-only.
-  { label: 'My pay',       href: '/app/my-pay',            roles: ['teacher'],                                                icon: <PoundSterling size={16} /> },
-  { label: 'Billing',      href: '/app/billing',           roles: ['system_admin','admin','manager','receptionist','guardian'], icon: <CreditCard size={16} /> },
-  { label: 'Payments',     href: '/app/billing/reconciliation', roles: ['system_admin','admin','manager','receptionist'],      icon: <Landmark size={16} /> },
-  { label: 'New students', href: '/app/intake',            roles: ['system_admin','admin','manager','receptionist'],          icon: <ClipboardCheck size={16} /> },
-  { label: 'Messages',     href: '/app/messaging',         roles: ['system_admin','admin','manager','teacher','guardian'],    icon: <MessageSquare size={16} /> },
-  { label: 'Resources',    href: '/app/resources',         roles: ['system_admin','admin','manager','teacher','guardian','student'], icon: <FileText size={16} /> },
-  { label: 'Library subscribers', href: '/app/resource-subscribers', roles: ['system_admin','admin','manager','receptionist'],    icon: <Users size={16} /> },
-  { label: 'Repertoire',   href: '/app/content',           roles: ['system_admin','admin','manager','teacher'],               icon: <BookOpen size={16} /> },
-  { label: 'Studio News',  href: '/app/news',              roles: ['system_admin','admin'],                                   icon: <Megaphone size={16} /> },
-  { label: 'Email everyone', href: '/app/broadcasts',      roles: ['system_admin','admin','manager'],                         icon: <Send size={16} /> },
-  { label: 'Reports',      href: '/app/reports',           roles: ['system_admin','admin','manager'],                        icon: <BarChart3 size={16} /> },
-  { label: 'Settings',     href: '/app/settings',          roles: ['system_admin','admin'],                                   icon: <Settings size={16} /> },
+  { label: 'My pay',       href: '/app/my-pay',            icon: <PoundSterling size={16} /> },
+  { label: 'Billing',      href: '/app/billing',           icon: <CreditCard size={16} /> },
+  { label: 'Payments',     href: '/app/billing/reconciliation', icon: <Landmark size={16} /> },
+  { label: 'New students', href: '/app/intake',            icon: <ClipboardCheck size={16} /> },
+  { label: 'Messages',     href: '/app/messaging',         icon: <MessageSquare size={16} /> },
+  { label: 'Resources',    href: '/app/resources',         icon: <FileText size={16} /> },
+  { label: 'Library subscribers', href: '/app/resource-subscribers', icon: <Users size={16} /> },
+  { label: 'Repertoire',   href: '/app/content',           icon: <BookOpen size={16} /> },
+  { label: 'Studio News',  href: '/app/news',              icon: <Megaphone size={16} /> },
+  { label: 'Email everyone', href: '/app/broadcasts',      icon: <Send size={16} /> },
+  { label: 'Reports',      href: '/app/reports',           icon: <BarChart3 size={16} /> },
+  { label: 'Settings',     href: '/app/settings',          icon: <Settings size={16} /> },
 ];
 
 // Group nav sections
@@ -131,7 +135,7 @@ function UserMenu({ collapsed, name, email }: { collapsed: boolean; name: string
 
 export function AppShell({ role, children }: { role: BaseRole; children: React.ReactNode }) {
   const pathname = usePathname();
-  const visible = NAV.filter(item => item.roles.includes(role));
+  const visible = NAV.filter(item => canAccess(role, item.href));
   const [collapsed, setCollapsed] = useState(false);
   // On phones the sidebar is an off-canvas drawer rather than a fixed column —
   // a 232px rail on a 375px screen leaves no room for the actual page.
