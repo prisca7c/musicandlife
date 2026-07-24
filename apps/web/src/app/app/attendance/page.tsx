@@ -184,6 +184,10 @@ function MonthGrid({
 export default function AttendancePage() {
   const [pending, setPending] = useState<Record<string, AttendanceStatus>>({});
   const [saving, setSaving] = useState<string | null>(null);
+  // The already-marked lesson whose register the user is correcting, if any.
+  // Marked rows are read-only until you click "Change" — a mis-tap here moves
+  // money, so re-marking is deliberate rather than one stray click away.
+  const [correcting, setCorrecting] = useState<string | null>(null);
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]!);
   const [search, setSearch] = useState('');
   // Day view marks today's register; month view is the read-only overview the
@@ -232,6 +236,7 @@ export default function AttendancePage() {
         body: JSON.stringify({ status }),
       });
       load();
+      setCorrecting(null);
     } catch (e) { console.error(e); }
     finally { setSaving(null); }
   }
@@ -384,18 +389,56 @@ export default function AttendancePage() {
             <Check size={13} /> Marked ({marked.length})
           </p>
           <div className="space-y-1.5">
-            {marked.map(l => (
-              <div key={l.id} className="bg-white rounded-xl border border-[var(--bd)] px-4 py-2.5 flex items-center justify-between opacity-70">
-                <p className="text-sm text-[var(--txt)]">
-                  {fmtTime(l.startsAt)}
-                  {' · '}
-                  {l.student?.firstName} {l.student?.lastName}
-                </p>
-                <Badge variant={l.attendance?.status ?? 'default'}>
-                  {l.attendance?.status?.replace(/_/g, ' ')}
-                </Badge>
-              </div>
-            ))}
+            {marked.map(l => {
+              const isGroup = l.enrollment?.lessonType === 'group';
+              const actions = isGroup ? GROUP_ACTIONS : PRIVATE_ACTIONS;
+              const isOpen = correcting === l.id;
+              return (
+                <div key={l.id} className={`bg-white rounded-xl border px-4 py-2.5 ${isOpen ? 'border-[var(--sage-md)]' : 'border-[var(--bd)] opacity-70'}`}>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <p className="text-sm text-[var(--txt)]">
+                      {fmtTime(l.startsAt)}
+                      {' · '}
+                      {l.student?.firstName} {l.student?.lastName}
+                      {isGroup && <span className="ml-1.5 text-xs text-[var(--amber)] font-medium">· Group</span>}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={l.attendance?.status ?? 'default'}>
+                        {l.attendance?.status?.replace(/_/g, ' ')}
+                      </Badge>
+                      {/* Correct a mis-mark. The API reverses the previous status's
+                          charge/credit and applies the new one, so the family's
+                          balance ends up as if the correct mark had been made. */}
+                      <button
+                        onClick={() => setCorrecting(isOpen ? null : l.id)}
+                        className="text-xs font-semibold text-[var(--txt3)] hover:text-[var(--sage-dk)] underline decoration-dotted underline-offset-2">
+                        {isOpen ? 'Cancel' : 'Change'}
+                      </button>
+                    </div>
+                  </div>
+                  {isOpen && (
+                    <div className="mt-3 pt-3 border-t border-[var(--bd)]">
+                      <p className="text-xs text-[var(--txt3)] mb-2">
+                        Correct the register — this reverses the previous charge or credit and applies the new one.
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {actions.map(a => {
+                          const isCurrent = l.attendance?.status === a.status;
+                          return (
+                            <button key={a.status} onClick={() => markOne(l.id, a.status)}
+                              disabled={saving === l.id || isCurrent}
+                              className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all disabled:opacity-50
+                                ${isCurrent ? `${a.bg} ${a.border} ${a.color} cursor-default` : 'border-[var(--bd2)] text-[var(--txt3)] hover:border-[var(--bd)] hover:bg-[var(--surf)]'}`}>
+                              {a.label}{isCurrent ? ' · current' : ''}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
