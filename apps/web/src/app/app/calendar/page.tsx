@@ -87,6 +87,17 @@ function getWeekStart(date: Date) {
 }
 function formatDate(d: Date) { return d.toISOString().split('T')[0]!; }
 
+// The 6-week (42-day) grid that renders the month containing `date`: always
+// starts on the Monday on or before the 1st, so the first week's leading days
+// from the previous month fill in, and covers 42 days so any month fits.
+function getMonthGrid(date: Date): { monthStart: Date; gridStart: Date; gridEnd: Date } {
+  const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+  const gridStart = getWeekStart(monthStart);
+  const gridEnd = new Date(gridStart);
+  gridEnd.setDate(gridEnd.getDate() + 41);
+  return { monthStart, gridStart, gridEnd };
+}
+
 // Position on the day grid using the lesson's wall-clock time in the studio zone
 // (so a 16:00 lesson sits at the 16:00 row for every viewer, not the browser's zone).
 function minutesFromDayStart(iso: string): number {
@@ -794,8 +805,12 @@ const GROUP_ATTENDANCE = [
   { status: 'cancelled_teacher', label: 'Cancelled' },
 ] as const;
 
-function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
+function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false }: {
   lesson: Lesson | null; open: boolean; onClose: () => void; onUpdated: () => void;
+  // When a teacher is viewing another teacher's lesson from the whole-studio
+  // calendar: the schedule is visible but attendance/reschedule/cancel are not
+  // theirs to touch (the API would refuse anyway — this just hides dead buttons).
+  readOnly?: boolean;
 }) {
   const [saving, setSaving] = useState(false);
   const [showReschedule, setShowReschedule] = useState(false);
@@ -917,7 +932,13 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
           )}
         </div>
 
-        {lesson.status === 'scheduled' && (
+        {readOnly && (
+          <p className="text-[12px] rounded-xl px-3.5 py-2.5" style={{ background: 'var(--surf)', color: 'var(--txt3)', border: '1px solid var(--bd)' }}>
+            You&apos;re viewing another teacher&apos;s lesson. Only {lesson.teacher ? `${lesson.teacher.firstName} ${lesson.teacher.lastName}` : 'its teacher'} or the office can change it.
+          </p>
+        )}
+
+        {!readOnly && lesson.status === 'scheduled' && (
           <div>
             <p className="text-sm font-semibold mb-2" style={{ color: 'var(--txt2)' }}>Mark attendance</p>
             <div className="grid grid-cols-2 gap-2">
@@ -941,7 +962,7 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
           </div>
         )}
 
-        {lesson.status === 'scheduled' && (
+        {!readOnly && lesson.status === 'scheduled' && (
           <div>
             {showReschedule ? (
               <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
@@ -976,7 +997,7 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
           </div>
         )}
 
-        {lesson.status.startsWith('cancelled_') && !lesson.attendance && (
+        {!readOnly && lesson.status.startsWith('cancelled_') && !lesson.attendance && (
           <div>
             <button onClick={reinstateLesson} disabled={saving}
               className="text-sm w-full rounded-[9px] px-3 py-2 font-semibold transition-colors disabled:opacity-50"
@@ -1002,7 +1023,7 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated }: {
 
 // ─── Main calendar page ───────────────────────────────────────────────────────
 export default function CalendarPage() {
-  const [view, setView] = useState<'week' | 'day'>('week');
+  const [view, setView] = useState<'week' | 'day' | 'month'>('week');
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const [anchorDate, setAnchorDate] = useState(() => new Date());
@@ -1021,16 +1042,65 @@ export default function CalendarPage() {
   // roles get them. Teachers, and any parent/student who lands here, do not.
   const isManagement = ['system_admin', 'admin', 'manager', 'receptionist'].includes(role);
 
-  // Cached reads — the week's lessons re-key on weekStart (paging weeks you've
-  // already seen is instant), and staff/availability are cached too. load()
-  // refreshes the week after a create/reschedule/cancel.
-  const { data: lessons = [], mutate } = useApi<Lesson[]>(`/lessons?weekStart=${formatDate(weekStart)}`);
+  // Whole-studio view. Management always sees everyone; a teacher normally sees
+  // only their own lessons but can opt in to the full schedule (read-only for
+  // other teachers' lessons — see the `scope=all` handling on the API).
+  const [wholeStudio, setWholeStudio] = useState(false);
+  const teacherEveryone = role === 'teacher' && wholeStudio;
+  // Filters, applied client-side so the dropdowns keep their full option lists
+  // rather than collapsing to whatever is currently selected.
+  const [filterTeacherId, setFilterTeacherId] = useState<string>('');
+  const [filterStudentId, setFilterStudentId] = useState<string>('');
+
+  // The visible date range: week/day both page by week; month spans the whole
+  // 6-week grid so lessons that fall on the leading/trailing days still show.
+  const monthGrid = getMonthGrid(anchorDate);
+  const lessonsQuery = (() => {
+    const p = new URLSearchParams();
+    if (view === 'month') {
+      p.set('from', formatDate(monthGrid.gridStart));
+      p.set('to', formatDate(monthGrid.gridEnd));
+    } else {
+      p.set('weekStart', formatDate(weekStart));
+    }
+    if (teacherEveryone) p.set('scope', 'all');
+    return `/lessons?${p.toString()}`;
+  })();
+
+  // Cached reads — keyed by the query, so paging back to a week/month you've
+  // already seen is instant. load() refreshes after a create/reschedule/cancel.
+  const { data: lessonsRaw = [], mutate } = useApi<Lesson[]>(lessonsQuery);
   const load = () => mutate();
 
-  // A teacher sees only themselves + their own windows; admins see everyone.
-  const { data: staffRaw } = useApi<StaffMember | StaffMember[] | null>(role === 'teacher' ? '/staff/me' : '/staff');
+  // Staff for colours + the teacher filter. Management gets the full record;
+  // a teacher opting into the whole studio gets a names-only roster; otherwise
+  // just themselves. `/staff/me` is fetched separately so we always know the
+  // signed-in teacher's own id, which decides what they can edit vs only view.
+  const staffEndpoint = role !== 'teacher' ? '/staff' : wholeStudio ? '/staff/roster' : '/staff/me';
+  const { data: staffRaw } = useApi<StaffMember | StaffMember[] | null>(staffEndpoint);
   const staff = Array.isArray(staffRaw) ? staffRaw : staffRaw ? [staffRaw] : [];
+  const { data: meRaw } = useApi<StaffMember | null>(role === 'teacher' ? '/staff/me' : null);
+  const myStaffId = meRaw?.id ?? null;
   const { data: availability = [] } = useApi<Availability[]>(role === 'teacher' ? '/staff/me/availability' : '/staff/availability/all');
+
+  // Apply the teacher/student filters once, up front — everything downstream
+  // (day columns, week grid, month cells, counts) reads this narrowed set.
+  const lessons = lessonsRaw.filter(l =>
+    (!filterTeacherId || (l.teacher?.id ?? '') === filterTeacherId) &&
+    (!filterStudentId || (l.student?.id ?? '') === filterStudentId),
+  );
+
+  // Student options for the filter, distinct by id, taken from whatever is
+  // loaded for the current range (a student with no lessons this week simply
+  // isn't offered — there'd be nothing to show).
+  const studentOptions = (() => {
+    const seen = new Map<string, string>();
+    for (const l of lessonsRaw) {
+      if (l.student) seen.set(l.student.id, `${l.student.firstName} ${l.student.lastName}`);
+    }
+    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  })();
+  const showFilters = isManagement || teacherEveryone;
 
   // Recompute the per-teacher colour map whenever the staff set changes.
   const staffIdsKey = staff.map(s => s.id).join(',');
@@ -1047,11 +1117,21 @@ export default function CalendarPage() {
     return () => document.removeEventListener('mousedown', onDown);
   }, []);
 
-  function goToday() { setAnchorDate(new Date()); setView('day'); }
+  function goToday() { setAnchorDate(new Date()); if (view === 'month') return; setView('day'); }
   function step(deltaDays: number) {
     const d = new Date(anchorDate);
     d.setDate(d.getDate() + deltaDays);
     setAnchorDate(d);
+  }
+  // Prev/next honours the current view: a day at a time, a week, or a month.
+  function stepPeriod(dir: -1 | 1) {
+    if (view === 'month') {
+      const d = new Date(anchorDate);
+      d.setMonth(d.getMonth() + dir, 1);
+      setAnchorDate(d);
+    } else {
+      step(dir * (view === 'day' ? 1 : 7));
+    }
   }
 
   function openSlot(dayIndex: number, hour: number) {
@@ -1102,15 +1182,19 @@ export default function CalendarPage() {
 
   const weekLabel = `${weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – ${new Date(weekStart.getTime() + 6 * 86400000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
   const dayLabel = anchorDate.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const monthLabel = monthGrid.monthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
   const todayStr = formatDate(new Date());
   const anchorStr = formatDate(anchorDate);
   const isAnchorToday = anchorStr === todayStr;
 
-  // teacher columns for day view: assigned teachers + an "Unassigned" bucket if needed
+  // teacher columns for day view: assigned teachers + an "Unassigned" bucket if
+  // needed. A teacher filter narrows to that one column.
   const dayLessonsToday = lessons.filter(l => studioDayString(l.startsAt) === studioDayString(anchorDate));
-  const hasUnassigned = dayLessonsToday.some(l => !l.teacher);
+  const hasUnassigned = !filterTeacherId && dayLessonsToday.some(l => !l.teacher);
   const teacherCols: { id: string | null; name: string }[] = [
-    ...staff.map(s => ({ id: s.id, name: `${s.firstName} ${s.lastName}` })),
+    ...staff
+      .filter(s => !filterTeacherId || s.id === filterTeacherId)
+      .map(s => ({ id: s.id, name: `${s.firstName} ${s.lastName}` })),
     ...(hasUnassigned ? [{ id: null, name: 'Unassigned' }] : []),
   ];
 
@@ -1129,14 +1213,20 @@ export default function CalendarPage() {
         onCreated={load}
         defaultDate={view === 'day' ? anchorStr : formatDate(weekStart)}
       />
-      <LessonDetailModal lesson={selectedLesson} open={!!selectedLesson} onClose={() => setSelectedLesson(null)} onUpdated={load} />
+      <LessonDetailModal
+        lesson={selectedLesson}
+        open={!!selectedLesson}
+        onClose={() => setSelectedLesson(null)}
+        onUpdated={load}
+        readOnly={role === 'teacher' && !!myStaffId && !!selectedLesson?.teacher && selectedLesson.teacher.id !== myStaffId}
+      />
       <AddStudentModal open={showAddStudent} onClose={() => setShowAddStudent(false)} onCreated={load} />
       <AssignStudentsModal open={showAssign} onClose={() => setShowAssign(false)} teachers={staff} onChanged={load} />
 
       {/* Toolbar */}
       <div className="flex items-center justify-between mb-4 shrink-0 flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <button onClick={() => step(view === 'day' ? -1 : -7)} className="ui-btn-ghost px-2.5 py-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => stepPeriod(-1)} className="ui-btn-ghost px-2.5 py-1.5">
             <ChevronLeft size={16} />
           </button>
 
@@ -1151,7 +1241,7 @@ export default function CalendarPage() {
             </button>
             {viewMenuOpen && (
               <div className="absolute top-full left-0 mt-1 w-36 rounded-xl border border-[var(--bd)] bg-white shadow-lg overflow-hidden z-30">
-                {(['day', 'week'] as const).map(v => (
+                {(['day', 'week', 'month'] as const).map(v => (
                   <button key={v} onClick={() => { setView(v); setViewMenuOpen(false); }}
                     className="w-full text-left px-3.5 py-2 text-sm capitalize transition-colors hover:bg-[var(--sage-lt)]"
                     style={{ color: view === v ? 'var(--sage-dk)' : 'var(--txt2)', fontWeight: view === v ? 600 : 400 }}>
@@ -1162,16 +1252,64 @@ export default function CalendarPage() {
             )}
           </div>
 
-          <button onClick={() => step(view === 'day' ? 1 : 7)} className="ui-btn-ghost px-2.5 py-1.5">
+          <button onClick={() => stepPeriod(1)} className="ui-btn-ghost px-2.5 py-1.5">
             <ChevronRight size={16} />
           </button>
           <span className="font-bold text-sm ml-1" style={{ color: 'var(--txt)' }}>
-            {view === 'day' ? dayLabel : weekLabel}
+            {view === 'day' ? dayLabel : view === 'month' ? monthLabel : weekLabel}
           </span>
           <span className="text-[11px] font-medium ml-1" style={{ color: 'var(--txt4)' }}>
             · {(view === 'day' ? dayLessonsToday.length : lessons.length)} lesson{(view === 'day' ? dayLessonsToday.length : lessons.length) !== 1 ? 's' : ''}
             {view === 'day' && ' · all teachers'}
           </span>
+
+          {/* Whole-studio toggle — a teacher's opt-in to everyone's schedule.
+              Management already sees everyone, so it's only shown to teachers. */}
+          {role === 'teacher' && (
+            <button
+              onClick={() => { setWholeStudio(v => !v); setFilterTeacherId(''); }}
+              className="ui-btn-ghost text-xs px-2.5 py-1.5 ml-1"
+              style={wholeStudio ? { background: 'var(--sage-lt)', color: 'var(--sage-dk)', borderColor: 'var(--sage-md)' } : undefined}
+              title={wholeStudio ? 'Showing every teacher — click for just your own lessons' : 'Showing your lessons — click to see the whole studio'}
+            >
+              {wholeStudio ? 'Whole studio' : 'My lessons'}
+            </button>
+          )}
+
+          {/* Teacher + student filters. Applied on the client, so the option
+              lists stay complete regardless of what's currently selected. */}
+          {showFilters && (
+            <>
+              <select
+                value={filterTeacherId}
+                onChange={e => setFilterTeacherId(e.target.value)}
+                className="text-xs rounded-lg border px-2 py-1.5 ml-1 bg-white"
+                style={{ borderColor: 'var(--bd2)', color: filterTeacherId ? 'var(--txt)' : 'var(--txt4)' }}
+              >
+                <option value="">All teachers</option>
+                {staff.map(s => (
+                  <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>
+                ))}
+              </select>
+              <select
+                value={filterStudentId}
+                onChange={e => setFilterStudentId(e.target.value)}
+                className="text-xs rounded-lg border px-2 py-1.5 bg-white"
+                style={{ borderColor: 'var(--bd2)', color: filterStudentId ? 'var(--txt)' : 'var(--txt4)' }}
+              >
+                <option value="">All students</option>
+                {studentOptions.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              {(filterTeacherId || filterStudentId) && (
+                <button onClick={() => { setFilterTeacherId(''); setFilterStudentId(''); }}
+                  className="ui-btn-ghost text-xs px-2 py-1.5" title="Clear filters">
+                  Clear
+                </button>
+              )}
+            </>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {isManagement && (
@@ -1418,6 +1556,82 @@ export default function CalendarPage() {
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* ── Month view: a traditional 6-week grid, chips per lesson ── */}
+      {view === 'month' && (
+        <div className="flex-1 overflow-auto bg-white rounded-2xl border border-[var(--bd)]">
+          {/* Weekday header */}
+          <div className="sticky top-0 z-10 grid bg-[var(--surf)] border-b border-[var(--bd)]"
+            style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
+            {DAYS.map(d => (
+              <div key={d} className="px-2 py-2 text-center text-[11px] font-bold uppercase tracking-wider border-r border-[var(--bd)] last:border-r-0"
+                style={{ color: 'var(--txt4)' }}>{d}</div>
+            ))}
+          </div>
+
+          {/* 6 rows × 7 days */}
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(7, 1fr)', minWidth: 700 }}>
+            {Array.from({ length: 42 }, (_, i) => {
+              const d = new Date(monthGrid.gridStart);
+              d.setDate(d.getDate() + i);
+              const dStr = formatDate(d);
+              const inMonth = d.getMonth() === monthGrid.monthStart.getMonth();
+              const isToday = dStr === todayStr;
+              const dayStr = studioDayString(d);
+              const dayList = lessons
+                .filter(l => studioDayString(l.startsAt) === dayStr)
+                .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+              const shown = dayList.slice(0, 4);
+              const extra = dayList.length - shown.length;
+              return (
+                <button
+                  key={i}
+                  onClick={() => { setAnchorDate(d); setView('day'); }}
+                  className="text-left border-r border-b border-[var(--bd)] last:border-r-0 p-1.5 align-top transition-colors hover:bg-[var(--sage-lt)]/20"
+                  style={{ minHeight: 108, background: inMonth ? '#fff' : 'var(--surf)' }}
+                  title="Open this day"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className={`text-xs font-bold ${isToday ? 'text-white bg-[var(--sage)] rounded-full w-5 h-5 flex items-center justify-center' : inMonth ? 'text-[var(--txt2)]' : 'text-[var(--txt4)]'}`}>
+                      {d.getDate()}
+                    </span>
+                    {dayList.length > 0 && (
+                      <span className="text-[9px] font-bold" style={{ color: 'var(--txt4)' }}>{dayList.length}</span>
+                    )}
+                  </div>
+                  <div className="space-y-0.5">
+                    {shown.map(l => {
+                      const c = teacherColor(l.teacher?.id);
+                      const cancelled = l.status.startsWith('cancelled');
+                      return (
+                        <div
+                          key={l.id}
+                          onClick={(e) => { e.stopPropagation(); setSelectedLesson(l); }}
+                          className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] font-medium truncate cursor-pointer hover:brightness-95"
+                          style={{
+                            background: hexToRgba(c, 0.12),
+                            borderLeft: `2px solid ${c}`,
+                            color: 'var(--txt2)',
+                            textDecoration: cancelled ? 'line-through' : undefined,
+                            opacity: cancelled ? 0.6 : 1,
+                          }}
+                          title={`${fmtTime(l.startsAt)} ${l.student?.firstName ?? ''} ${l.student?.lastName ?? ''}${l.teacher ? ' · ' + l.teacher.firstName + ' ' + l.teacher.lastName : ''}`}
+                        >
+                          <span className="tabular-nums shrink-0" style={{ color: c }}>{fmtTime(l.startsAt)}</span>
+                          <span className="truncate">{l.student?.firstName} {l.student?.lastName?.[0] ?? ''}</span>
+                        </div>
+                      );
+                    })}
+                    {extra > 0 && (
+                      <div className="text-[10px] font-semibold pl-1" style={{ color: 'var(--sage)' }}>+{extra} more</div>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
