@@ -165,18 +165,13 @@ export class BillingService {
     return inv!;
   }
 
-  // Itemizes one line item per individual lesson occurrence (date, teacher, instrument
-  // are read off the linked lesson at display time) for every student in the family,
-  // sorted earliest-first, skipping lessons already billed on another invoice.
-  private async generateLessonLineItems(
-    orgId: string, invoiceId: string, familyId: string, periodStart?: string, periodEnd?: string,
+  // The family's completed lessons that haven't been billed on any invoice yet,
+  // within the optional period, earliest-first. Shared by the combined statement
+  // and the per-class split so the two can never disagree about what's eligible.
+  private async getEligibleLessons(
+    orgId: string, studentIds: string[], periodStart?: string, periodEnd?: string,
   ) {
-    const famStudents = await this.db.db.query.students.findMany({
-      where: and(eq(students.organizationId, orgId), eq(students.familyId, familyId)),
-      columns: { id: true },
-    });
-    const studentIds = famStudents.map(s => s.id);
-    if (studentIds.length === 0) return;
+    if (studentIds.length === 0) return [];
 
     const candidateLessons = await this.db.db.query.lessons.findMany({
       where: and(
@@ -190,9 +185,8 @@ export class BillingService {
       },
     });
     // No completed lessons → nothing to itemise. Returning here also avoids
-    // calling inArray() with an empty list below, which builds invalid SQL and
-    // 500s the whole invoice create (the "clicked invoice, not working" report).
-    if (candidateLessons.length === 0) return;
+    // calling inArray() with an empty list below, which builds invalid SQL.
+    if (candidateLessons.length === 0) return [];
 
     const alreadyBilled = await this.db.db.query.invoiceLineItems.findMany({
       where: and(
@@ -206,13 +200,22 @@ export class BillingService {
     const start = periodStart ? new Date(periodStart) : null;
     const end = periodEnd ? new Date(`${periodEnd}T23:59:59`) : null;
 
-    const eligible = candidateLessons
+    return candidateLessons
       .filter(l => !billedLessonIds.has(l.id))
       .filter(l => !start || l.startsAt >= start)
       .filter(l => !end || l.startsAt <= end)
       .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+  }
 
-    if (eligible.length === 0) return;
+  // Turn a set of eligible lessons into invoice line rows (one per lesson, with a
+  // separate line for any overrun), then insert them and set the invoice total.
+  // Returns the number of line rows written so a caller can drop an empty invoice.
+  private async writeLessonLineItems(
+    orgId: string,
+    invoiceId: string,
+    eligible: Awaited<ReturnType<typeof BillingService.prototype.getEligibleLessons>>,
+  ): Promise<number> {
+    if (eligible.length === 0) return 0;
 
     const rows = eligible.flatMap(l => {
       const instrument = l.enrollment?.instrument
@@ -259,6 +262,81 @@ export class BillingService {
 
     const total = rows.reduce((s, r) => s + r.amount, 0);
     await this.db.db.update(invoices).set({ total, updatedAt: new Date() }).where(eq(invoices.id, invoiceId));
+    return rows.length;
+  }
+
+  // Itemises one line per completed, unbilled lesson for every student in the
+  // family (the combined statement). Optionally scoped to a single enrolment,
+  // which is how the per-class split bills one class at a time.
+  private async generateLessonLineItems(
+    orgId: string, invoiceId: string, familyId: string,
+    periodStart?: string, periodEnd?: string, enrollmentId?: string,
+  ) {
+    const famStudents = await this.db.db.query.students.findMany({
+      where: and(eq(students.organizationId, orgId), eq(students.familyId, familyId)),
+      columns: { id: true },
+    });
+    let eligible = await this.getEligibleLessons(orgId, famStudents.map(s => s.id), periodStart, periodEnd);
+    if (enrollmentId) eligible = eligible.filter(l => l.enrollmentId === enrollmentId);
+    await this.writeLessonLineItems(orgId, invoiceId, eligible);
+  }
+
+  /**
+   * Bill each class on its own invoice instead of one combined family statement.
+   *
+   * Groups the family's eligible lessons by enrolment (the "class" — a student's
+   * instrument, private or group) and raises one invoice per class that has
+   * anything to bill. A family with a child doing piano and cello gets two
+   * invoices, each showing only that class's lessons — which is what studios that
+   * bill instruments separately (or split group-class fees out) have asked for.
+   *
+   * Returns the invoices created (drafts, like a normal createInvoice), newest
+   * first; the caller issues them the usual way.
+   */
+  async createInvoicesPerClass(orgId: string, dto: CreateInvoiceDto) {
+    const family = await this.db.db.query.families.findFirst({
+      where: and(eq(families.id, dto.familyId), eq(families.organizationId, orgId)),
+      columns: { id: true },
+    });
+    if (!family) throw new NotFoundException('Family not found');
+
+    const famStudents = await this.db.db.query.students.findMany({
+      where: and(eq(students.organizationId, orgId), eq(students.familyId, dto.familyId)),
+      columns: { id: true },
+    });
+    const eligible = await this.getEligibleLessons(
+      orgId, famStudents.map(s => s.id), dto.periodStart, dto.periodEnd,
+    );
+    if (eligible.length === 0) {
+      throw new BadRequestException('No unbilled lessons in this period to invoice.');
+    }
+
+    // Group eligible lessons by class (enrolment). Lessons with no enrolment are
+    // skipped — they have no rate to bill and belong on a manual line, not here.
+    const byClass = new Map<string, typeof eligible>();
+    for (const l of eligible) {
+      if (!l.enrollmentId) continue;
+      const g = byClass.get(l.enrollmentId) ?? [];
+      g.push(l);
+      byClass.set(l.enrollmentId, g);
+    }
+    if (byClass.size === 0) {
+      throw new BadRequestException('No class lessons in this period to invoice.');
+    }
+
+    const created: Array<{ id: string; number: string; total: number }> = [];
+    for (const group of byClass.values()) {
+      // itemizeLessons:false so createInvoice makes an empty shell we fill with
+      // just this class's lessons.
+      const inv = await this.createInvoice(orgId, { ...dto, itemizeLessons: false });
+      await this.writeLessonLineItems(orgId, inv.id, group);
+      const refreshed = await this.db.db.query.invoices.findFirst({
+        where: eq(invoices.id, inv.id), columns: { id: true, number: true, total: true },
+      });
+      if (refreshed) created.push(refreshed);
+    }
+
+    return { invoices: created };
   }
 
   async sendInvoice(orgId: string, id: string) {

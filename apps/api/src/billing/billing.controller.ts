@@ -27,6 +27,14 @@ export class BillingController {
     return this.billing.createInvoice(user.orgId, dto);
   }
 
+  // Raise one invoice per class (enrolment) for the family, instead of a single
+  // combined statement. Returns { invoices: [...] }.
+  @Post('invoices/split-by-class')
+  @Roles('receptionist')
+  createPerClass(@CurrentUser() user: RequestUser, @Body() dto: CreateInvoiceDto) {
+    return this.billing.createInvoicesPerClass(user.orgId, dto);
+  }
+
   @Get('invoices/:id')
   @Roles('receptionist')
   getInvoice(@CurrentUser() user: RequestUser, @Param('id') id: string) {
