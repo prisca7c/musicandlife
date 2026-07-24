@@ -120,7 +120,7 @@ export class SchedulingService {
   // ─── Lessons ──────────────────────────────────────────────────────────────
   async getLessons(
     orgId: string,
-    params: { weekStart?: string; from?: string; to?: string; teacherId?: string; studentId?: string },
+    params: { weekStart?: string; from?: string; to?: string; teacherId?: string; studentId?: string; scope?: string },
     actor?: Actor,
   ) {
     const base = eq(lessons.organizationId, orgId);
@@ -154,11 +154,27 @@ export class SchedulingService {
       orderBy: (l, { asc }) => [asc(l.startsAt)],
     });
 
-    // Teachers only ever see their own lessons, regardless of the teacherId param —
-    // it must not be possible to view another teacher's schedule by passing their id.
-    // studentId still narrows further, e.g. "this student's lessons that I teach".
     if (actor?.role === 'teacher') {
       const staffId = await this.resolveStaffId(orgId, actor.userId);
+
+      // Opt-in whole-studio view (the calendar's "everyone" mode). A teacher may
+      // look at the full schedule to see who's teaching when — but a lesson's
+      // private notes stay with the teacher who wrote them, so they're stripped
+      // from lessons this teacher doesn't teach. The teacherId/studentId filters
+      // work the same as for management here. This is read-only: every mutation
+      // still goes through assertOwnsLesson, so seeing a lesson never means being
+      // able to touch it.
+      if (params.scope === 'all') {
+        let scoped = rows;
+        if (params.teacherId) scoped = scoped.filter(r => r.teacherId === params.teacherId);
+        if (params.studentId) scoped = scoped.filter(r => r.studentId === params.studentId);
+        return scoped.map(r => (r.teacherId === staffId ? r : { ...r, notes: null }));
+      }
+
+      // Default: a teacher sees only their own lessons, regardless of the
+      // teacherId param — it must not be possible to view another teacher's
+      // schedule by passing their id. studentId still narrows further, e.g.
+      // "this student's lessons that I teach". Attendance relies on this scoping.
       let scoped = rows.filter(r => r.teacherId === staffId);
       if (params.studentId) scoped = scoped.filter(r => r.studentId === params.studentId);
       return scoped;
@@ -182,7 +198,10 @@ export class SchedulingService {
     if (!lesson) throw new NotFoundException('Lesson not found');
     if (actor?.role === 'teacher') {
       const staffId = await this.resolveStaffId(orgId, actor.userId);
-      if (lesson.teacherId !== staffId) throw new NotFoundException('Lesson not found');
+      // A teacher can open any lesson's detail from the whole-studio calendar,
+      // but another teacher's private notes are withheld. Mutations remain gated
+      // by assertOwnsLesson, so read access here grants nothing more.
+      if (lesson.teacherId !== staffId) return { ...lesson, notes: null };
     }
     return lesson;
   }

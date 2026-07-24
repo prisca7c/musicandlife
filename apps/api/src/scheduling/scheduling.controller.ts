@@ -28,8 +28,9 @@ export class SchedulingController {
     @Query('to') to?: string,
     @Query('teacherId') teacherId?: string,
     @Query('studentId') studentId?: string,
+    @Query('scope') scope?: string,
   ) {
-    return this.scheduling.getLessons(user.orgId, { weekStart, from, to, teacherId, studentId }, { role: user.role, userId: user.userId });
+    return this.scheduling.getLessons(user.orgId, { weekStart, from, to, teacherId, studentId, scope }, { role: user.role, userId: user.userId });
   }
 
   @Post('lessons')
