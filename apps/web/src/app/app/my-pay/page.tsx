@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useApi } from '@/lib/swr';
+import { formatMoney } from '@/lib/money';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { LoadState } from '@/components/load-state';
@@ -19,7 +20,7 @@ interface PayRun {
   items: PayItem[];
 }
 
-const money = (p: number) => `£${(p / 100).toFixed(2)}`;
+const money = formatMoney;
 // "2026-07-01" → "July 2026". Runs are monthly in practice; the exact dates are
 // still shown underneath so an odd period is never misread as a whole month.
 const monthLabel = (iso: string) =>

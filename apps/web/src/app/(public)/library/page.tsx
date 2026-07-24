@@ -2,6 +2,7 @@
 
 import { useState, useEffect, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { Music, Mail, CheckCircle2 } from 'lucide-react';
 
 interface Terms { studioName: string; price: number; months: number; }
@@ -20,7 +21,7 @@ export default function LibrarySubscribePage() {
       .catch(() => setTerms(null));
   }, []);
 
-  const money = (p: number) => `£${(p / 100).toFixed(2)}`;
+  const money = formatMoney;
   const period = (m: number) => (m === 1 ? 'month' : `${m} months`);
 
   async function submit(e: FormEvent) {
