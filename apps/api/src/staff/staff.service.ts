@@ -31,6 +31,19 @@ export class StaffService {
     });
   }
 
+  /**
+   * A minimal active-staff list (id + name only) any teacher may read — enough to
+   * colour and filter the whole-studio calendar without exposing pay, contact
+   * details, or privileges the way findAll does.
+   */
+  async roster(orgId: string) {
+    return this.db.db.query.staffMembers.findMany({
+      where: and(eq(staffMembers.organizationId, orgId), eq(staffMembers.status, 'active')),
+      columns: { id: true, firstName: true, lastName: true },
+      orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
+    });
+  }
+
   /** A teacher's own staff record — used so the calendar can auto-assign them without exposing the full roster. */
   async findByUserId(orgId: string, userId: string) {
     return this.db.db.query.staffMembers.findFirst({
