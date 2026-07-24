@@ -225,6 +225,10 @@ export const instruments = pgTable(
     // today — so these are two independent flags rather than one lesson type.
     availablePrivate: boolean('available_private').notNull().default(true),
     availableGroup: boolean('available_group').notNull().default(false),
+    // Shown under the chips on the registration form when this instrument is
+    // picked. Suzuki violin needs it — the package is a group class AND a 1-on-1
+    // together, which nobody would guess from a chip labelled "Suzuki violin".
+    note: text('note'),
     // Controls the order of the chips on the registration form.
     sortOrder: integer('sort_order').notNull().default(0),
     // Soft-hide: retires an instrument from the form without deleting the row.

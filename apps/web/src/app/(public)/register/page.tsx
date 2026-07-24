@@ -17,6 +17,7 @@ import { InstrumentIcon } from '@/components/instrument-icons';
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Step = 1 | 2 | 3 | 4 | 'success';
 interface InstrumentSelection { instrument: string; lessonType: 'private' | 'group'; }
+interface Offered { private: string[]; group: string[]; notes: Record<string, string>; }
 interface FormData {
   studentFirstName: string; studentLastName: string; studentEmail: string; studentPhone: string;
   familyType: 'new' | 'existing';
@@ -137,17 +138,22 @@ export default function RegisterPage() {
   // The instruments offered are editable from Settings, so they're fetched
   // rather than compiled in. The build-time constants stay as the fallback: if
   // this call fails the form still renders a usable list instead of nothing.
-  const [offered, setOffered] = useState<{ private: string[]; group: string[] }>({
+  // `notes` explains anything a chip label can't: Suzuki violin, for instance,
+  // is a package of a group class and a 1-on-1 rather than one or the other.
+  const [offered, setOffered] = useState<Offered>({
     private: [...PRIVATE_INSTRUMENTS],
     group: [...GROUP_INSTRUMENTS],
+    notes: {},
   });
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await apiFetch<{ private: string[]; group: string[] }>('/public/instruments');
-        if (!cancelled && (res.private?.length || res.group?.length)) setOffered(res);
+        const res = await apiFetch<Offered>('/public/instruments');
+        if (!cancelled && (res.private?.length || res.group?.length)) {
+          setOffered({ ...res, notes: res.notes ?? {} });
+        }
       } catch { /* keep the built-in defaults */ }
     })();
     return () => { cancelled = true; };
@@ -256,6 +262,28 @@ export default function RegisterPage() {
       <div className="flex-1 h-px bg-[var(--bd)]" />
     </div>
   );
+
+  // ── Notes for whatever is selected in one section ─────────────────────────
+  // Only shown once something is picked, so the form stays uncluttered until
+  // the note is actually relevant to the person reading it.
+  const SelectionNotes = ({ lessonType }: { lessonType: 'private' | 'group' }) => {
+    const picked = data.instruments
+      .filter(i => i.lessonType === lessonType && offered.notes[i.instrument])
+      .map(i => i.instrument);
+    if (picked.length === 0) return null;
+    return (
+      <div className="mt-2.5 space-y-1.5">
+        {picked.map(inst => (
+          <div key={inst}
+            className="flex items-start gap-1.5 rounded-lg px-2.5 py-2 text-[11px] leading-snug"
+            style={{ background: 'var(--sand-lt, #FFF7E8)', color: 'var(--txt2)' }}>
+            <Info size={13} className="shrink-0 mt-px" style={{ color: 'var(--txt3)' }} />
+            <span><strong className="capitalize">{inst}:</strong> {offered.notes[inst]}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   // ── Chip ──────────────────────────────────────────────────────────────────
   const Chip = ({ instrument, lessonType, groupStyle }: { instrument: string; lessonType: 'private' | 'group'; groupStyle?: boolean }) => {
@@ -528,6 +556,7 @@ export default function RegisterPage() {
                     {data.instruments.filter(i=>i.lessonType==='private').length} selected: {data.instruments.filter(i=>i.lessonType==='private').map(i=>i.instrument).join(', ')}
                   </p>
                 )}
+                <SelectionNotes lessonType="private" />
               </div>
 
               {/* Group */}
@@ -545,6 +574,7 @@ export default function RegisterPage() {
                     {data.instruments.filter(i=>i.lessonType==='group').length} selected: {data.instruments.filter(i=>i.lessonType==='group').map(i=>i.instrument).join(', ')}
                   </p>
                 )}
+                <SelectionNotes lessonType="group" />
               </div>
 
               {errors.instruments && (
