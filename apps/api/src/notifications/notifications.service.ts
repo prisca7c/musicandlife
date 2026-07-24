@@ -17,6 +17,7 @@ export type TriggerEvent =
   | 'invoice.sent'
   | 'invoice.preview_summary'
   | 'newsletter.event'
+  | 'message.received'
   | 'payroll.approved';
 
 export interface TriggerContext {
@@ -107,6 +108,20 @@ export const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: strin
       footnote: "If this new time doesn't work for you, get in touch and we'll sort it out.",
     }),
   }),
+  // Portal messages exist so teachers and families can talk without swapping
+  // phone numbers. That only works if a message is actually noticed, so the
+  // text comes through by email while replying stays in the portal.
+  'message.received': (ctx) => ({
+    subject: ctx.subject ?? 'New message from Music & Life',
+    html: brandedEmail({
+      previewText: 'You have a new message in your portal.',
+      heading: 'You have a new message',
+      bodyHtml:
+        `<p style="margin:0 0 12px">${ctx.body}</p>` +
+        `<p style="margin:0;color:#6b6b6b;font-size:13px">Reply in your portal — replying to this email won't reach the sender.</p>`,
+      cta: { label: 'Read & reply in your portal', url: BRAND.portalUrl },
+    }),
+  }),
   'invoice.sent': (ctx) => ({
     subject: ctx.subject ?? 'New invoice from Music & Life',
     html: brandedEmail({
@@ -152,6 +167,7 @@ export const DEFAULT_RULES: Array<{
   { triggerEvent: 'invoice.sent', templateId: 'invoice.sent', channels: ['email'] },
   { triggerEvent: 'invoice.preview_summary', templateId: 'invoice.preview_summary', channels: ['email'] },
   { triggerEvent: 'newsletter.event', templateId: 'newsletter.event', channels: ['email'] },
+  { triggerEvent: 'message.received', templateId: 'message.received', channels: ['email'] },
 ];
 
 @Injectable()

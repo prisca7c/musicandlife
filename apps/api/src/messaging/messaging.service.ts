@@ -1,12 +1,13 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { eq, and, ne, inArray, sql, count } from 'drizzle-orm';
 import {
-  threads, threadParticipants, messages, memberships, files,
+  threads, threadParticipants, messages, memberships, files, users,
   staffMembers, students, guardians, enrollments, teacherAssignments,
 } from '@music-life/db';
 import type { BaseRole } from '@music-life/types';
 import { DbService } from '../db/db.service';
 import { FilesService } from '../files/files.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import type { CreateThreadDto } from './dto/create-thread.dto';
 
 const NON_STAFF_ROLES: BaseRole[] = ['guardian', 'student'];
@@ -19,10 +20,64 @@ const ROLE_LABEL: Record<string, string> = {
 
 @Injectable()
 export class MessagingService {
+  private readonly logger = new Logger(MessagingService.name);
+
   constructor(
     private readonly db: DbService,
     private readonly files: FilesService,
+    private readonly notifications: NotificationsService,
   ) {}
+
+  /**
+   * Email everyone else on the thread that a message arrived.
+   *
+   * Portal messaging exists so teachers and families can talk without swapping
+   * phone numbers, which only holds up if a message is actually noticed — an
+   * unread badge nobody logs in to see is no better than no message at all. The
+   * text is included so the email is useful on its own, but replying happens in
+   * the portal, keeping the whole conversation in one place and the sender's
+   * address private.
+   *
+   * Best-effort: a bad address must never fail the send itself.
+   */
+  private async notifyNewMessage(
+    orgId: string,
+    threadId: string,
+    senderId: string,
+    body: string,
+    recipients: { userId: string; email: string | null | undefined }[],
+  ) {
+    const targets = recipients.filter(r => r.userId !== senderId && r.email);
+    if (targets.length === 0) return;
+
+    const described = await this.describeUsers(orgId, [senderId]);
+    const sender = described.get(senderId);
+    const senderName = sender
+      ? `${sender.name}${sender.roleLabel ? ` (${sender.roleLabel})` : ''}`
+      : 'Someone at Music & Life';
+
+    // Escape before embedding — a message is user-typed and lands in an HTML
+    // email — then keep the author's line breaks.
+    const safe = body
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\r?\n/g, '<br>');
+    const preview = safe.trim()
+      ? `<strong>${senderName}</strong> wrote:<br><br>${safe}`
+      : `<strong>${senderName}</strong> sent you an attachment.`;
+
+    for (const t of targets) {
+      try {
+        await this.notifications.trigger('message.received', {
+          orgId,
+          email: t.email!,
+          subject: `New message from ${senderName}`,
+          body: preview,
+        });
+      } catch (e) {
+        this.logger.warn(`message.received notify failed for thread ${threadId}: ${e}`);
+      }
+    }
+  }
 
   // The set of guardian/student user-ids a teacher is allowed to message: the
   // families of students they actually teach (via enrollment or assignment) plus
@@ -365,6 +420,17 @@ export class MessagingService {
       body: dto.body, attachments: openingAttachments, readBy: [userId],
     });
 
+    // Starting a conversation should notify just as a reply does — otherwise the
+    // very first message, the one most likely to be missed, is the silent one.
+    const recipientRows = await this.db.db.query.users.findMany({
+      where: inArray(users.id, recipientIds),
+      columns: { id: true, email: true },
+    });
+    await this.notifyNewMessage(
+      orgId, thread!.id, userId, dto.body,
+      recipientRows.map(u => ({ userId: u.id, email: u.email })),
+    );
+
     return thread!;
   }
 
@@ -505,7 +571,7 @@ export class MessagingService {
     orgId: string, threadId: string, userId: string, body: string,
     attachments?: { fileId: string }[],
   ) {
-    await this.loadThread(orgId, threadId, userId);
+    const thread = await this.loadThread(orgId, threadId, userId);
 
     const resolved = await this.resolveAttachments(orgId, attachments);
     if (!body.trim() && resolved.length === 0) {
@@ -520,6 +586,11 @@ export class MessagingService {
     await this.db.db.update(threads)
       .set({ updatedAt: new Date() })
       .where(eq(threads.id, threadId));
+
+    await this.notifyNewMessage(
+      orgId, threadId, userId, body,
+      thread.participants.map(p => ({ userId: p.userId, email: p.user?.email })),
+    );
 
     return msg!;
   }
