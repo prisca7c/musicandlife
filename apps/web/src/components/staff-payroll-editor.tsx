@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { Check, Pencil } from 'lucide-react';
 
 /**
@@ -77,7 +78,7 @@ export function StaffPayrollEditor({
                 £<input type="number" step="0.01" min="0" value={rateText}
                   onChange={e => setRateText(e.target.value)} className={inputCls} /> /hr
               </span>
-            ) : `£${(rate / 100).toFixed(2)}/hr`}
+            ) : `${formatMoney(rate)}/hr`}
           </dd>
         </div>
         <div className="flex justify-between items-center gap-3">

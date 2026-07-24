@@ -2,6 +2,7 @@
 
 import { useState, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
 import { uploadFile } from '@/lib/upload';
 import { PageHeader } from '@/components/page-header';
@@ -211,7 +212,7 @@ export default function ResourcesPage() {
   );
   const [subscribing, setSubscribing] = useState(false);
   const [subError, setSubError] = useState('');
-  const money = (pence: number) => `£${(pence / 100).toFixed(2)}`;
+  const money = formatMoney;
   const period = (m: number) => (m === 1 ? 'month' : `${m} months`);
 
   async function subscribe() {

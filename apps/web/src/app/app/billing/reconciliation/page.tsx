@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { AutomatedHint } from '@/components/automated-hint';
@@ -27,7 +28,7 @@ interface ImportSummary {
   skippedNonCreditRows: number;
 }
 
-const money = (pence: number) => `£${(pence / 100).toFixed(2)}`;
+const money = formatMoney;
 const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
 export default function ReconciliationPage() {

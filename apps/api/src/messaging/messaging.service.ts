@@ -216,6 +216,11 @@ export class MessagingService {
     return ids
       .map((id) => described.get(id))
       .filter((r): r is NonNullable<typeof r> => Boolean(r))
+      // A parent/student is only ever messaging staff, and they don't need —
+      // and shouldn't be handed — staff members' personal email addresses just
+      // to pick someone from a list. Replying happens in-app. Staff callers are
+      // internal and keep the email (it disambiguates two people with one name).
+      .map((r) => (creatorIsStaff ? r : { ...r, email: '' }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 

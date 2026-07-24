@@ -3,6 +3,7 @@
 import { useState, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
@@ -225,7 +226,7 @@ export default function FamiliesPage() {
                 <td>
                   <span style={{ color: f.balanceCached < 0 ? 'var(--coral)' : 'var(--txt2)' }}
                     className={f.balanceCached < 0 ? 'font-semibold' : ''}>
-                    £{(Math.abs(f.balanceCached) / 100).toFixed(2)}{f.balanceCached < 0 ? ' owed' : ''}
+                    {formatMoney(Math.abs(f.balanceCached))}{f.balanceCached < 0 ? ' owed' : ''}
                   </span>
                 </td>
                 <td className="text-xs capitalize" style={{ color: 'var(--txt3)' }}>

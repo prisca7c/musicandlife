@@ -48,6 +48,14 @@ export class StaffController {
     return this.staff.findAll(user.orgId);
   }
 
+  // Active-staff names any teacher may read, to colour and filter the whole-studio
+  // calendar. Declared before `:id` so "roster" isn't captured as an id.
+  @Get('roster')
+  @Roles('teacher')
+  roster(@CurrentUser() user: RequestUser) {
+    return this.staff.roster(user.orgId);
+  }
+
   @Get('me')
   @Roles('teacher')
   findMe(@CurrentUser() user: RequestUser) {

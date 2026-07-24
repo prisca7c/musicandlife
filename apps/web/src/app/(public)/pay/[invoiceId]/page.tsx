@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 
 interface PublicInvoiceSummary {
   number: string;
@@ -35,14 +36,29 @@ export default function PayInvoicePage() {
         <div className="bg-white rounded-xl border shadow-sm p-8">
           {error && <p className="text-sm text-red-600">{error}</p>}
           {!data && !error && <p className="text-sm text-gray-400">Loading…</p>}
-          {data && (
+          {data && data.total <= 0 ? (
+            // A zero/negative total is a credit note, not a bill. Never show a
+            // "Pay … Total due -£4.00" screen — there is nothing to pay.
+            <>
+              <h1 className="text-xl font-bold text-gray-900 mb-1">Invoice {data.number}</h1>
+              <p className="text-sm text-gray-500 mb-6">{data.org.name}</p>
+              <div className="rounded-lg bg-green-50 border border-green-200 p-4">
+                <p className="text-xs text-green-700 uppercase tracking-wide mb-1">Nothing to pay</p>
+                <p className="text-sm text-gray-700">
+                  {data.total < 0
+                    ? <>This is a credit of <span className="font-semibold">{formatMoney(-data.total)}</span> in your favour — it will be set against future lessons. There is nothing to pay.</>
+                    : <>There is nothing to pay on this invoice.</>}
+                </p>
+              </div>
+            </>
+          ) : data && (
             <>
               <h1 className="text-xl font-bold text-gray-900 mb-1">Pay Invoice {data.number}</h1>
               <p className="text-sm text-gray-500 mb-6">{data.org.name}</p>
 
               <div className="rounded-lg bg-gray-50 border p-4 mb-6">
                 <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Total due</p>
-                <p className="text-2xl font-bold text-gray-900">£{(data.total / 100).toFixed(2)}</p>
+                <p className="text-2xl font-bold text-gray-900">{formatMoney(data.total)}</p>
                 <p className="text-xs text-gray-500 mt-1">Due {data.dueDate}</p>
                 {data.status === 'paid' && <p className="text-xs font-semibold text-green-700 mt-2">This invoice has already been paid.</p>}
               </div>

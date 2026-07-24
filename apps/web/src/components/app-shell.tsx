@@ -10,43 +10,48 @@ import {
   FileText, BarChart3, Settings,
   Briefcase, CreditCard, UserCheck, BookOpen, Landmark,
   Clock, History, ChevronLeft, ChevronRight, ChevronDown,
-  LogOut, PanelLeftClose, PanelLeftOpen, Megaphone, CalendarClock, CalendarPlus, Send,
+  LogOut, PanelLeftClose, PanelLeftOpen, Megaphone, CalendarClock, CalendarPlus, Send, Menu,
 } from 'lucide-react';
 import type { BaseRole } from '@music-life/types';
 import { apiFetch } from '@/lib/api';
 import { prefetchRoute, clearApiCache, useApi } from '@/lib/swr';
+import { canAccess } from '@/lib/nav-access';
 
-interface NavItem { label: string; href: string; roles: BaseRole[]; icon: React.ReactNode; }
+// Presentation only — which roles may see each link lives in nav-access.ts
+// (shared with the middleware route guard) so the sidebar and the URL guard can
+// never disagree about who is allowed where.
+interface NavItem { label: string; href: string; icon: React.ReactNode; }
 
 const NAV: NavItem[] = [
-  { label: 'Dashboard',    href: '/app/dashboard',         roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <LayoutDashboard size={16} /> },
-  { label: 'My lessons',   href: '/app/family/dashboard',  roles: ['guardian','student'],                                     icon: <LayoutDashboard size={16} /> },
-  { label: 'Book lesson',  href: '/app/family/book',       roles: ['guardian','student'],                                     icon: <Clock size={16} /> },
-  { label: 'History',      href: '/app/family/history',    roles: ['guardian','student'],                                     icon: <History size={16} /> },
-  { label: 'Lesson notes', href: '/app/family/notes',      roles: ['guardian','student'],                                     icon: <BookOpen size={16} /> },
-  { label: 'Calendar',     href: '/app/calendar',          roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <Calendar size={16} /> },
-  { label: 'Attendance',   href: '/app/attendance',        roles: ['system_admin','admin','manager','teacher'],               icon: <ClipboardCheck size={16} /> },
-  { label: 'Booking requests', href: '/app/lesson-requests', roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <CalendarPlus size={16} /> },
-  { label: 'Reschedules',  href: '/app/reschedule-requests', roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <CalendarClock size={16} /> },
-  { label: 'My availability', href: '/app/availability',    roles: ['teacher'],                                                icon: <Clock size={16} /> },
-  { label: 'Notes',        href: '/app/notes',             roles: ['system_admin','admin','manager','teacher'],               icon: <FileText size={16} /> },
-  { label: 'Students',     href: '/app/students',          roles: ['system_admin','admin','manager','receptionist','teacher'], icon: <UserCheck size={16} /> },
-  { label: 'Families',     href: '/app/families',          roles: ['system_admin','admin','manager','receptionist'],          icon: <Home size={16} /> },
-  { label: 'Staff',        href: '/app/staff',             roles: ['system_admin','admin'],                                   icon: <Briefcase size={16} /> },
-  { label: 'Payroll',      href: '/app/staff/payroll',     roles: ['system_admin','admin','manager'],                        icon: <PoundSterling size={16} /> },
+  { label: 'Dashboard',    href: '/app/dashboard',         icon: <LayoutDashboard size={16} /> },
+  { label: 'My lessons',   href: '/app/family/dashboard',  icon: <LayoutDashboard size={16} /> },
+  { label: 'Book lesson',  href: '/app/family/book',       icon: <Clock size={16} /> },
+  { label: 'History',      href: '/app/family/history',    icon: <History size={16} /> },
+  { label: 'Lesson notes', href: '/app/family/notes',      icon: <BookOpen size={16} /> },
+  { label: 'Calendar',     href: '/app/calendar',          icon: <Calendar size={16} /> },
+  { label: 'Attendance',   href: '/app/attendance',        icon: <ClipboardCheck size={16} /> },
+  { label: 'Booking requests', href: '/app/lesson-requests', icon: <CalendarPlus size={16} /> },
+  { label: 'Reschedules',  href: '/app/reschedule-requests', icon: <CalendarClock size={16} /> },
+  { label: 'My availability', href: '/app/availability',    icon: <Clock size={16} /> },
+  { label: 'Notes',        href: '/app/notes',             icon: <FileText size={16} /> },
+  { label: 'Students',     href: '/app/students',          icon: <UserCheck size={16} /> },
+  { label: 'Families',     href: '/app/families',          icon: <Home size={16} /> },
+  { label: 'Staff',        href: '/app/staff',             icon: <Briefcase size={16} /> },
+  { label: 'Payroll',      href: '/app/staff/payroll',     icon: <PoundSterling size={16} /> },
   // Separate from Payroll on purpose: "what am I owed" and "run the studio's
   // payroll" are different jobs, and the Payroll page is manager-only.
-  { label: 'My pay',       href: '/app/my-pay',            roles: ['teacher'],                                                icon: <PoundSterling size={16} /> },
-  { label: 'Billing',      href: '/app/billing',           roles: ['system_admin','admin','manager','receptionist','guardian'], icon: <CreditCard size={16} /> },
-  { label: 'Payments',     href: '/app/billing/reconciliation', roles: ['system_admin','admin','manager','receptionist'],      icon: <Landmark size={16} /> },
-  { label: 'New students', href: '/app/intake',            roles: ['system_admin','admin','manager','receptionist'],          icon: <ClipboardCheck size={16} /> },
-  { label: 'Messages',     href: '/app/messaging',         roles: ['system_admin','admin','manager','teacher','guardian'],    icon: <MessageSquare size={16} /> },
-  { label: 'Resources',    href: '/app/resources',         roles: ['system_admin','admin','manager','teacher','guardian','student'], icon: <FileText size={16} /> },
-  { label: 'Repertoire',   href: '/app/content',           roles: ['system_admin','admin','manager','teacher'],               icon: <BookOpen size={16} /> },
-  { label: 'Studio News',  href: '/app/news',              roles: ['system_admin','admin'],                                   icon: <Megaphone size={16} /> },
-  { label: 'Email everyone', href: '/app/broadcasts',      roles: ['system_admin','admin','manager'],                         icon: <Send size={16} /> },
-  { label: 'Reports',      href: '/app/reports',           roles: ['system_admin','admin','manager'],                        icon: <BarChart3 size={16} /> },
-  { label: 'Settings',     href: '/app/settings',          roles: ['system_admin','admin'],                                   icon: <Settings size={16} /> },
+  { label: 'My pay',       href: '/app/my-pay',            icon: <PoundSterling size={16} /> },
+  { label: 'Billing',      href: '/app/billing',           icon: <CreditCard size={16} /> },
+  { label: 'Payments',     href: '/app/billing/reconciliation', icon: <Landmark size={16} /> },
+  { label: 'New students', href: '/app/intake',            icon: <ClipboardCheck size={16} /> },
+  { label: 'Messages',     href: '/app/messaging',         icon: <MessageSquare size={16} /> },
+  { label: 'Resources',    href: '/app/resources',         icon: <FileText size={16} /> },
+  { label: 'Library subscribers', href: '/app/resource-subscribers', icon: <Users size={16} /> },
+  { label: 'Repertoire',   href: '/app/content',           icon: <BookOpen size={16} /> },
+  { label: 'Studio News',  href: '/app/news',              icon: <Megaphone size={16} /> },
+  { label: 'Email everyone', href: '/app/broadcasts',      icon: <Send size={16} /> },
+  { label: 'Reports',      href: '/app/reports',           icon: <BarChart3 size={16} /> },
+  { label: 'Settings',     href: '/app/settings',          icon: <Settings size={16} /> },
 ];
 
 // Group nav sections
@@ -55,7 +60,7 @@ const GROUPS = [
   { label: 'Studio',   items: ['Calendar','Attendance','Booking requests','Reschedules','My availability','Notes','New students','Messages'] },
   { label: 'People',   items: ['Students','Families','Staff','Payroll','My pay'] },
   { label: 'Finance',  items: ['Billing','Payments'] },
-  { label: 'Content',  items: ['Resources','Repertoire','Studio News','Email everyone'] },
+  { label: 'Content',  items: ['Resources','Library subscribers','Repertoire','Studio News','Email everyone'] },
   { label: 'Admin',    items: ['Reports','Settings'] },
 ];
 
@@ -130,8 +135,11 @@ function UserMenu({ collapsed, name, email }: { collapsed: boolean; name: string
 
 export function AppShell({ role, children }: { role: BaseRole; children: React.ReactNode }) {
   const pathname = usePathname();
-  const visible = NAV.filter(item => item.roles.includes(role));
+  const visible = NAV.filter(item => canAccess(role, item.href));
   const [collapsed, setCollapsed] = useState(false);
+  // On phones the sidebar is an off-canvas drawer rather than a fixed column —
+  // a 232px rail on a 375px screen leaves no room for the actual page.
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [me, setMe] = useState<{ name: string; email: string } | null>(null);
 
   // Unread badge on Messages. Polled rather than fetched once, so a message
@@ -150,6 +158,10 @@ export function AppShell({ role, children }: { role: BaseRole; children: React.R
     if (stored === '1') setCollapsed(true);
   }, []);
 
+  // Navigating closes the mobile drawer so the page you tapped to isn't left
+  // hidden behind it.
+  useEffect(() => { setMobileOpen(false); }, [pathname]);
+
   useEffect(() => {
     const token = document.cookie.match(/access_token=([^;]+)/)?.[1];
     apiFetch<{ user: { name: string; email: string } }>('/auth/me', { token })
@@ -166,8 +178,15 @@ export function AppShell({ role, children }: { role: BaseRole; children: React.R
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg)' }}>
-      {/* Sidebar */}
-      <aside className={`flex flex-col shrink-0 border-r border-white/10 transition-[width] duration-200 ${collapsed ? 'w-[68px]' : 'w-[232px]'}`}
+      {/* Backdrop — only on mobile when the drawer is open; tap to dismiss. */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setMobileOpen(false)} aria-hidden />
+      )}
+
+      {/* Sidebar — a static column from md up, an off-canvas drawer below it. */}
+      <aside className={`fixed md:static inset-y-0 left-0 z-40 w-[232px] flex flex-col shrink-0 border-r border-white/10 transition-[transform,width] duration-200
+        ${mobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0
+        ${collapsed ? 'md:w-[68px]' : 'md:w-[232px]'}`}
         style={{ background: 'var(--sage-dk)' }}>
 
         {/* Logo */}
@@ -196,7 +215,7 @@ export function AppShell({ role, children }: { role: BaseRole; children: React.R
             </span>
           )}
           <button onClick={toggleCollapsed} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="shrink-0 p-1.5 rounded-lg transition-colors hover:bg-white/10"
+            className="hidden md:inline-flex shrink-0 p-1.5 rounded-lg transition-colors hover:bg-white/10"
             style={{ color: 'rgba(255,255,255,0.5)' }}>
             {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
           </button>
@@ -257,8 +276,22 @@ export function AppShell({ role, children }: { role: BaseRole; children: React.R
       </aside>
 
       {/* Main */}
-      <main className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto p-7">
+      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {/* Mobile top bar — the only way to reach the drawer on a phone. */}
+        <div className="md:hidden flex items-center gap-3 h-14 px-4 border-b border-white/10 shrink-0"
+          style={{ background: 'var(--sage-dk)' }}>
+          <button onClick={() => setMobileOpen(true)} aria-label="Open menu"
+            className="-ml-1.5 p-1.5 rounded-lg text-white transition-colors hover:bg-white/10">
+            <Menu size={20} />
+          </button>
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-white flex items-center justify-center shrink-0 overflow-hidden p-0.5">
+              <Image src="/logo-icon.png" alt="Music & Life" width={24} height={24} className="w-full h-full object-contain" />
+            </div>
+            <span className="text-white font-extrabold text-sm truncate">Music &amp; Life</span>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 md:p-7">
           {children}
         </div>
       </main>

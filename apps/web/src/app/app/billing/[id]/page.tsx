@@ -5,6 +5,7 @@ import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
@@ -231,7 +232,7 @@ export default function InvoiceDetailPage() {
           <p className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--txt3)' }}>Total</p>
           <p className="font-extrabold tracking-tight"
             style={{ fontSize: '2.5rem', color: 'var(--sage-dk)', letterSpacing: '-0.03em' }}>
-            £{(invoice.total / 100).toFixed(2)}
+            {formatMoney(invoice.total)}
           </p>
         </div>
       </div>
@@ -265,7 +266,7 @@ export default function InvoiceDetailPage() {
               <tr>
                 <td colSpan={7} style={{ color: 'var(--txt3)' }}>Balance forward</td>
                 <td className="font-semibold" style={{ textAlign: 'right', color: 'var(--txt3)' }}>
-                  {invoice.balanceForward < 0 ? '-' : ''}£{(Math.abs(invoice.balanceForward) / 100).toFixed(2)}
+                  {formatMoney(invoice.balanceForward)}
                 </td>
               </tr>
             )}
@@ -292,14 +293,14 @@ export default function InvoiceDetailPage() {
                 </td>
                 <td>{item.description}</td>
                 <td className="font-semibold" style={{ textAlign: 'right' }}>
-                  {item.amount < 0 ? '-' : ''}£{(Math.abs(item.amount) / 100).toFixed(2)}
+                  {formatMoney(item.amount)}
                 </td>
               </tr>
             ))}
             {invoice.lineItems.length > 0 && (
               <tr style={{ background: 'var(--surf)', fontWeight: 700 }}>
                 <td colSpan={7}>Total</td>
-                <td style={{ textAlign: 'right' }}>£{(invoice.total / 100).toFixed(2)}</td>
+                <td style={{ textAlign: 'right' }}>{formatMoney(invoice.total)}</td>
               </tr>
             )}
           </tbody>
