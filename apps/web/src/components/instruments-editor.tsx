@@ -13,6 +13,43 @@ interface Instrument {
   availableGroup: boolean;
   active: boolean;
   sortOrder: number;
+  note: string | null;
+}
+
+/**
+ * Free-text note shown to families under the chips when they pick this
+ * instrument. Saves on blur so there is nothing extra to click; the local draft
+ * means typing isn't fighting a re-render on every keystroke.
+ *
+ * Declared at module scope on purpose: nested inside the editor it would be a
+ * fresh component type on every parent render, so React would remount it and
+ * the caret would jump out of the field mid-sentence.
+ */
+function NoteCell({
+  inst,
+  disabled,
+  onSave,
+}: {
+  inst: Instrument;
+  disabled: boolean;
+  onSave: (note: string) => void;
+}) {
+  const [draft, setDraft] = useState(inst.note ?? '');
+  const saved = (inst.note ?? '').trim();
+  return (
+    <input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { if (draft.trim() !== saved) onSave(draft.trim()); }}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+      disabled={disabled}
+      maxLength={400}
+      placeholder="Add a note…"
+      aria-label={`Registration note for ${inst.name}`}
+      className="w-full px-2 py-1 rounded-lg border text-[12px] outline-none focus:border-[var(--sage-md)] disabled:opacity-50"
+      style={{ borderColor: draft ? 'var(--bd2)' : 'transparent', background: draft ? '#fff' : 'transparent' }}
+    />
+  );
 }
 
 /**
@@ -28,6 +65,9 @@ export function InstrumentsEditor() {
   const [isGroup, setIsGroup] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
+  // Confirming inline rather than through window.confirm — same as the payroll
+  // editor, which reads better than a browser dialog interrupting the page.
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
 
   async function add() {
     const trimmed = name.trim().toLowerCase();
@@ -68,7 +108,7 @@ export function InstrumentsEditor() {
   }
 
   async function remove(inst: Instrument) {
-    if (!confirm(`Remove "${inst.name}"? Families already taking it keep their lessons — it just disappears from the registration form.`)) return;
+    setConfirmingDelete(null);
     setBusy(inst.id);
     setError('');
     try {
@@ -98,6 +138,8 @@ export function InstrumentsEditor() {
     <div>
       <p className="text-[13px] text-[var(--txt3)] mb-4">
         What families can choose on the registration form. Changes appear on the form straight away.
+        A note is shown to the family when they pick that instrument — useful where the name alone
+        doesn&apos;t say enough, like a package that includes both a group class and a 1-on-1.
       </p>
 
       {error && (
@@ -110,16 +152,17 @@ export function InstrumentsEditor() {
             <tr className="text-left text-[11px] uppercase tracking-wider" style={{ background: 'var(--surf)', color: 'var(--txt3)' }}>
               <th className="px-4 py-2.5 font-bold">Instrument</th>
               <th className="px-4 py-2.5 font-bold">Lesson types</th>
+              <th className="px-4 py-2.5 font-bold w-[34%]">Note shown at registration</th>
               <th className="px-4 py-2.5 font-bold">Offered</th>
               <th className="px-4 py-2.5" />
             </tr>
           </thead>
           <tbody>
             {!list && (
-              <tr><td colSpan={4} className="px-4 py-8 text-center text-[13px]" style={{ color: 'var(--txt4)' }}>Loading…</td></tr>
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-[13px]" style={{ color: 'var(--txt4)' }}>Loading…</td></tr>
             )}
             {list?.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-8 text-center text-[13px]" style={{ color: 'var(--txt4)' }}>No instruments yet.</td></tr>
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-[13px]" style={{ color: 'var(--txt4)' }}>No instruments yet.</td></tr>
             )}
             {list?.map((inst) => (
               <tr key={inst.id} className="border-t" style={{ borderColor: 'var(--bd)' }}>
@@ -146,6 +189,13 @@ export function InstrumentsEditor() {
                   </span>
                 </td>
                 <td className="px-4 py-2.5">
+                  <NoteCell
+                    inst={inst}
+                    disabled={busy === inst.id}
+                    onSave={(note) => patch(inst.id, { note })}
+                  />
+                </td>
+                <td className="px-4 py-2.5">
                   <button
                     type="button"
                     onClick={() => patch(inst.id, { active: !inst.active })}
@@ -158,16 +208,41 @@ export function InstrumentsEditor() {
                   </button>
                 </td>
                 <td className="px-4 py-2.5 text-right">
-                  <button
-                    type="button"
-                    onClick={() => remove(inst)}
-                    disabled={busy === inst.id}
-                    aria-label={`Remove ${inst.name}`}
-                    className="p-1.5 rounded-lg hover:bg-[var(--coral-lt)] disabled:opacity-50"
-                    style={{ color: 'var(--coral)' }}
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  {confirmingDelete === inst.id ? (
+                    <span className="inline-flex items-center gap-1.5 justify-end">
+                      <span className="text-[11px]" style={{ color: 'var(--txt3)' }}>
+                        Remove? Existing lessons are unaffected.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => remove(inst)}
+                        disabled={busy === inst.id}
+                        className="px-2 py-1 rounded-lg text-[11px] font-bold text-white disabled:opacity-50"
+                        style={{ background: 'var(--coral)' }}
+                      >
+                        Remove
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingDelete(null)}
+                        className="px-2 py-1 rounded-lg text-[11px] font-semibold border"
+                        style={{ borderColor: 'var(--bd2)' }}
+                      >
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingDelete(inst.id)}
+                      disabled={busy === inst.id}
+                      aria-label={`Remove ${inst.name}`}
+                      className="p-1.5 rounded-lg hover:bg-[var(--coral-lt)] disabled:opacity-50"
+                      style={{ color: 'var(--coral)' }}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
