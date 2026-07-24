@@ -214,19 +214,46 @@ export class BillingService {
 
     if (eligible.length === 0) return;
 
-    const rows = eligible.map(l => {
+    const rows = eligible.flatMap(l => {
       const instrument = l.enrollment?.instrument
         ? l.enrollment.instrument.charAt(0).toUpperCase() + l.enrollment.instrument.slice(1)
         : '';
       const kind = l.enrollment?.lessonType === 'group' ? 'group class' : 'lesson';
-      const description = [instrument, `${kind} · ${l.duration} min`].filter(Boolean).join(' ');
-      return {
+      const base = {
         organizationId: orgId,
         invoiceId,
         lessonId: l.id,
-        description,
-        amount: proratedAmount(l.enrollment?.rate, l.enrollment?.defaultDuration, l.duration),
       };
+      const rate = l.enrollment?.rate;
+      const standard = l.enrollment?.defaultDuration;
+      const total = proratedAmount(rate, standard, l.duration);
+
+      // A lesson that ran long is still charged pro-rata, but showing it as one
+      // inflated line ("Piano lesson · 75 min — £56.25") invites the "why is
+      // this more than usual?" email. Split the overrun onto its own line so the
+      // bill explains itself. The overtime amount is the remainder rather than a
+      // second prorate, so the two lines always sum to exactly the same total.
+      if (rate != null && standard && l.duration > standard) {
+        const extra = l.duration - standard;
+        return [
+          {
+            ...base,
+            description: [instrument, `${kind} · ${standard} min`].filter(Boolean).join(' '),
+            amount: rate,
+          },
+          {
+            ...base,
+            description: [instrument, `${kind} · ${extra} min extra time`].filter(Boolean).join(' '),
+            amount: total - rate,
+          },
+        ];
+      }
+
+      return [{
+        ...base,
+        description: [instrument, `${kind} · ${l.duration} min`].filter(Boolean).join(' '),
+        amount: total,
+      }];
     });
     await this.db.db.insert(invoiceLineItems).values(rows);
 
