@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, Calendar, Users, Home,
   PoundSterling, ClipboardCheck, MessageSquare,
@@ -74,7 +74,6 @@ function initialsOf(name: string) {
 function UserMenu({ collapsed, name, email }: { collapsed: boolean; name: string; email: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const router = useRouter();
 
   useEffect(() => {
     function onDown(e: MouseEvent) {
@@ -91,7 +90,10 @@ function UserMenu({ collapsed, name, email }: { collapsed: boolean; name: string
     // The SWR cache is keyed by path alone, so anything left here would be
     // served to whoever signs in next on this browser.
     await clearApiCache();
-    router.push('/login');
+    // Hard navigation for the same reason as sign-in: Next's App Router cache
+    // survives a router.push, so the next person to sign in on this browser can
+    // be handed the pages this session already rendered.
+    window.location.href = '/login';
   }
 
   return (

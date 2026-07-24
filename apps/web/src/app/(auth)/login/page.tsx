@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Eye, EyeOff } from 'lucide-react';
@@ -9,7 +8,6 @@ import { apiFetch } from '@/lib/api';
 import { clearApiCache } from '@/lib/swr';
 
 export default function LoginPage() {
-  const router = useRouter();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPw, setShowPw] = useState(false);
@@ -37,7 +35,14 @@ export default function LoginPage() {
       // which is keyed by API path and knows nothing about who is signed in.
       // Without this, the app opens showing THEIR data under YOUR name.
       await clearApiCache();
-      router.push('/app/dashboard');
+      // A hard navigation, not router.push(). Clearing the SWR cache above only
+      // empties OUR cache; Next's App Router keeps its own client-side cache of
+      // already-rendered RSC payloads for visited routes, and a soft navigation
+      // happily re-serves the previous session's rendered pages. That is what
+      // made a fresh sign-in intermittently show the last person's portal with
+      // no deployment involved. Replacing the document drops the router cache,
+      // the SWR cache and all React state together.
+      window.location.href = '/app/dashboard';
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
