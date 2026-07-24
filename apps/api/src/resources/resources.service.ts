@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { eq, and, or, ilike, sql, inArray } from 'drizzle-orm';
 import { resources, guardians, students, families, staffMembers, teacherAssignments, enrollments, files } from '@music-life/db';
 import { DbService } from '../db/db.service';
+import { FilesService } from '../files/files.service';
 import type { CreateResourceDto } from './dto/create-resource.dto';
 import type { BaseRole } from '@music-life/types';
 
@@ -43,7 +44,10 @@ export interface ResourceFilters {
 
 @Injectable()
 export class ResourcesService {
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly files: FilesService,
+  ) {}
 
   // Resource access is a paid subscription, separate from lesson billing —
   // gates GET for guardian/student roles only; staff always bypass.
@@ -215,12 +219,17 @@ export class ResourcesService {
     // fileId/teacherId/studentId are caller-supplied FKs (all constrained in the
     // DB): a bogus id 500s on the constraint and a foreign-org id would tag the
     // resource against another studio's row. Validate each against this org.
+    // Default the delivery mode from the file's type when the caller didn't pick
+    // one: a video is view-only (streamed, no download), anything else (sheet
+    // music PDFs, audio, images) is downloadable.
+    let delivery = dto.delivery;
     if (dto.fileId) {
       const file = await this.db.db.query.files.findFirst({
         where: and(eq(files.id, dto.fileId), eq(files.organizationId, orgId)),
-        columns: { id: true },
+        columns: { id: true, mime: true },
       });
       if (!file) throw new NotFoundException('File not found');
+      if (!delivery) delivery = file.mime.startsWith('video/') ? 'view_only' : 'download';
     }
     if (teacherId) {
       const teacher = await this.db.db.query.staffMembers.findFirst({
@@ -238,9 +247,35 @@ export class ResourcesService {
     }
 
     const [resource] = await this.db.db.insert(resources)
-      .values({ ...dto, teacherId, organizationId: orgId, ownerId })
+      .values({ ...dto, delivery, teacherId, organizationId: orgId, ownerId })
       .returning();
     return resource!;
+  }
+
+  /**
+   * Sign a time-limited URL for a file resource's underlying file, enforcing the
+   * SAME visibility + subscription rules as the library listing (we look the
+   * resource up through findAll rather than trusting the id), then apply the
+   * resource's delivery mode: a downloadable resource is served as an attachment,
+   * a view-only one inline so there's no download link to pass around.
+   */
+  async signResourceFile(orgId: string, role: BaseRole, userId: string, id: string) {
+    const visible = await this.findAll(orgId, role, userId, {});
+    const resource = visible.find(r => r.id === id);
+    // 404 (not 403) so a caller can't probe which resources exist in the org.
+    if (!resource) throw new NotFoundException('Resource not found');
+    if (resource.type !== 'file' || !resource.fileId) {
+      throw new BadRequestException('This resource has no file to open.');
+    }
+    const disposition = resource.delivery === 'view_only' ? 'inline' : 'attachment';
+    const signed = await this.files.signDownloadForOrg(resource.fileId, orgId, { disposition });
+    return {
+      url: signed.downloadUrl,
+      delivery: resource.delivery,
+      mime: signed.mime,
+      name: signed.originalName,
+      expiresAt: signed.expiresAt,
+    };
   }
 
   async remove(orgId: string, id: string) {

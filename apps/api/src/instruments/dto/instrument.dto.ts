@@ -15,6 +15,11 @@ export class CreateInstrumentDto {
   availableGroup?: boolean;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  note?: string;
+
+  @IsOptional()
   @IsInt()
   @Min(0)
   @Max(999)
@@ -39,6 +44,11 @@ export class UpdateInstrumentDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  note?: string;
 
   @IsOptional()
   @IsInt()

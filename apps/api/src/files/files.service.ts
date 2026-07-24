@@ -66,11 +66,22 @@ export class FilesService {
   // family portal, which verifies the file is an attachment on a family-visible
   // note belonging to one of the caller's own students). Never expose this
   // directly on a controller — always gate it behind a domain check.
-  async signDownloadForOrg(fileId: string, orgId: string) {
+  async signDownloadForOrg(
+    fileId: string, orgId: string,
+    opts: { disposition?: 'inline' | 'attachment' } = {},
+  ) {
     const file = await this.db.db.query.files.findFirst({
       where: and(eq(files.id, fileId), eq(files.organizationId, orgId)),
     });
     if (!file) throw new NotFoundException('File not found');
-    return { ...(await this.storage.signDownload({ fileKey: file.key })), mime: file.mime, originalName: file.originalName };
+    return {
+      ...(await this.storage.signDownload({
+        fileKey: file.key,
+        disposition: opts.disposition,
+        fileName: opts.disposition === 'attachment' ? (file.originalName ?? undefined) : undefined,
+      })),
+      mime: file.mime,
+      originalName: file.originalName,
+    };
   }
 }

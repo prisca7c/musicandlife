@@ -32,6 +32,7 @@ import { BroadcastModule } from './broadcasts/broadcast.module';
 import { InstrumentsModule } from './instruments/instruments.module';
 import { CalendarModule } from './calendar/calendar.module';
 import { FamilyPortalModule } from './family-portal/family-portal.module';
+import { PublicLibraryModule } from './public-library/public-library.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { FamilyPortalModule } from './family-portal/family-portal.module';
     MessagingModule, RegistrationModule, LeadsModule,
     ResourcesModule, ReportsModule,
     NotesModule, RepertoireModule, NewsModule, BroadcastModule, InstrumentsModule, CalendarModule, FamilyPortalModule,
+    PublicLibraryModule,
     HealthModule,
   ],
   providers: [

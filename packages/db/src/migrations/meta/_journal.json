@@ -159,8 +159,22 @@
     {
       "idx": 22,
       "version": "7",
-      "when": 1784851429424,
-      "tag": "0022_calendar_feed_token",
+      "when": 1784866755465,
+      "tag": "0022_instrument_note",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784934079351,
+      "tag": "0023_public_resources",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784934485849,
+      "tag": "0024_calendar_feed_token",
       "breakpoints": true
     }
   ]

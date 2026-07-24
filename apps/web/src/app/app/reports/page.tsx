@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { pdf } from '@react-pdf/renderer';
 import { apiFetch, apiFetchBlob } from '@/lib/api';
+import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
 import { LoadState } from '@/components/load-state';
 import { PageHeader } from '@/components/page-header';
@@ -219,7 +220,7 @@ export default function ReportsPage() {
           <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
             <div>
               <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Revenue by type</h2>
-              {revenue && <p className="text-xs mt-0.5 capitalize" style={{ color: 'var(--txt4)' }}>{revenue.accountingMode} basis · £{(revenue.total / 100).toFixed(2)}</p>}
+              {revenue && <p className="text-xs mt-0.5 capitalize" style={{ color: 'var(--txt4)' }}>{revenue.accountingMode} basis · {formatMoney(revenue.total)}</p>}
             </div>
             <button onClick={() => downloadCsv(`/reports/revenue?from=${from}&to=${to}&format=csv`, 'revenue.csv')}
               disabled={generating === 'revenue.csv'}
@@ -237,7 +238,7 @@ export default function ReportsPage() {
                     Earned from completed lessons
                     <span className="block text-xs" style={{ color: 'var(--txt4)' }}>{revenue.completedLessons} lesson{revenue.completedLessons !== 1 ? 's' : ''} taught this period</span>
                   </span>
-                  <span className="font-extrabold" style={{ color: 'var(--sage-dk)' }}>£{(revenue.earnedFromLessons / 100).toFixed(2)}</span>
+                  <span className="font-extrabold" style={{ color: 'var(--sage-dk)' }}>{formatMoney(revenue.earnedFromLessons)}</span>
                 </div>
                 <p className="text-xs" style={{ color: 'var(--txt4)' }}>Money movements ({revenue.accountingMode} basis):</p>
                 {revenue.byType.length === 0 && <p className="text-sm" style={{ color: 'var(--txt4)' }}>No payments or charges recorded in this period.</p>}
@@ -246,7 +247,7 @@ export default function ReportsPage() {
                     <span className="text-sm capitalize" style={{ color: 'var(--txt3)' }}>{row.type}</span>
                     <span className="font-bold"
                       style={{ color: row.type === 'charge' ? 'var(--txt)' : row.type === 'payment' ? 'var(--sage)' : 'var(--txt3)' }}>
-                      £{(Number(row.total ?? 0) / 100).toFixed(2)}
+                      {formatMoney(Number(row.total ?? 0))}
                     </span>
                   </div>
                 ))}

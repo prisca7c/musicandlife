@@ -53,13 +53,21 @@ export class InstrumentsService {
     });
     // Unauthenticated callers get the built-in defaults rather than an error if
     // the org can't be resolved — the form must always have something to show.
-    if (!org) return { private: [...PRIVATE_INSTRUMENTS], group: [...GROUP_INSTRUMENTS] };
+    if (!org) {
+      return { private: [...PRIVATE_INSTRUMENTS], group: [...GROUP_INSTRUMENTS], notes: {} };
+    }
 
     const rows = await this.list(org.id);
     const active = rows.filter((r) => r.active);
+    // Notes are keyed by name because that is what the form has in hand when a
+    // chip is picked; enrollments store the instrument as free text too.
+    const notes: Record<string, string> = {};
+    for (const r of active) if (r.note?.trim()) notes[r.name] = r.note.trim();
+
     return {
       private: active.filter((r) => r.availablePrivate).map((r) => r.name),
       group: active.filter((r) => r.availableGroup).map((r) => r.name),
+      notes,
     };
   }
 

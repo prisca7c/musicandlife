@@ -21,7 +21,7 @@
   --txt:      #111827;
   --txt2:     #374151;
   --txt3:     #6B7280;
-  --txt4:     #9CA3AF;
+  --txt4:     #6E7480; /* was #9CA3AF (gray-400) — 2.54:1 on white failed WCAG AA; this clears 4.5:1 for hint/helper text */
   --bd:       #E5E7EB;
   --bd2:      #D1D5DB;
   --bg:       #F0F4F8;

@@ -46,8 +46,23 @@ export class R2FileStorageAdapter extends FileStoragePort {
     return { uploadUrl, fileKey };
   }
 
-  async signDownload(opts: { fileKey: string; expiresInSeconds?: number }): Promise<SignedDownloadResult> {
-    const command = new GetObjectCommand({ Bucket: this.bucket, Key: opts.fileKey });
+  async signDownload(opts: {
+    fileKey: string; expiresInSeconds?: number;
+    disposition?: 'inline' | 'attachment'; fileName?: string;
+  }): Promise<SignedDownloadResult> {
+    // The disposition is baked into the pre-signed URL via a response-header
+    // override, so R2 returns Content-Disposition accordingly: 'attachment'
+    // makes the browser download the file, 'inline' streams it in place (how a
+    // view-only video is served — there's no download link to hand out).
+    const responseContentDisposition = opts.disposition
+      ? (opts.disposition === 'attachment' && opts.fileName
+          ? `attachment; filename="${opts.fileName.replace(/"/g, '')}"`
+          : opts.disposition)
+      : undefined;
+    const command = new GetObjectCommand({
+      Bucket: this.bucket, Key: opts.fileKey,
+      ...(responseContentDisposition ? { ResponseContentDisposition: responseContentDisposition } : {}),
+    });
     const expiresIn = opts.expiresInSeconds ?? 3600;
     const downloadUrl = await getSignedUrl(this.client, command, { expiresIn });
     return { downloadUrl, expiresAt: new Date(Date.now() + expiresIn * 1000) };

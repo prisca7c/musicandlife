@@ -4,6 +4,7 @@ import { useState, useEffect, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
+import { formatMoney } from '@/lib/money';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { AutomatedHint } from '@/components/automated-hint';
@@ -180,7 +181,7 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
               </button>
               {lineItems.some(l => l.amount) && (
                 <p className="text-sm font-semibold pt-1" style={{ color: 'var(--txt)' }}>
-                  Total: £{lineItems.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0).toFixed(2)}
+                  Total: {formatMoney(Math.round(lineItems.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0) * 100))}
                 </p>
               )}
             </div>
@@ -264,7 +265,7 @@ function RecordPaymentModal({ open, onClose, onCreated }: { open: boolean; onClo
           <div>
             <label className="ui-label">Apply to invoice</label>
             <SearchableSelect
-              options={invoices.map(i => ({ value: i.id, label: `${i.number} — £${(i.total / 100).toFixed(2)}` }))}
+              options={invoices.map(i => ({ value: i.id, label: `${i.number} — ${formatMoney(i.total)}` }))}
               value={invoiceId}
               onChange={setInvoiceId}
               emptyLabel="No specific invoice"
@@ -307,6 +308,14 @@ const STATUS_COLORS: Record<string, string> = {
   draft: 'default', sent: 'trial', paid: 'active', void: 'withdrawn',
 };
 
+// "sent" is our internal word for "issued and waiting to be paid" — meaningless to
+// a parent. Show them plain English. A negative total is a credit note regardless
+// of workflow status.
+function statusLabel(i: { status: string; total: number }): string {
+  if (i.total < 0) return 'Credit';
+  return { draft: 'Draft', sent: 'Due', paid: 'Paid', void: 'Void' }[i.status] ?? i.status;
+}
+
 export default function BillingPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
@@ -343,7 +352,7 @@ export default function BillingPage() {
             <InfoTooltip text="'Outstanding' is the total still unpaid across all invoices. Staff see the whole studio's balance here; a parent signed in sees only their own family's invoices and what they owe." />
           </span>
         }
-        subtitle={outstanding > 0 ? `£${(outstanding / 100).toFixed(2)} outstanding` : undefined}
+        subtitle={outstanding > 0 ? `${formatMoney(outstanding)} outstanding` : undefined}
         action={
           isGuardian ? undefined : (
             <div className="flex gap-2">
@@ -408,14 +417,14 @@ export default function BillingPage() {
                         showing "£-4.00" alongside an "awaiting payment" dot
                         read as a debt nobody could ever collect. */}
                     {i.total < 0
-                      ? <span title="Credit note — money owed to the family, not by them">−£{Math.abs(i.total / 100).toFixed(2)} credit</span>
-                      : `£${(i.total / 100).toFixed(2)}`}
+                      ? <span title="Credit note — money owed to the family, not by them">{formatMoney(Math.abs(i.total))} credit</span>
+                      : formatMoney(i.total)}
                     {i.total > 0 && i.status !== 'void' && i.status !== 'draft' && (
                       <PaidDot paid={i.status === 'paid'} title={i.status === 'paid' ? 'Paid' : 'Awaiting payment'} />
                     )}
                   </span>
                 </td>
-                <td><Badge variant={STATUS_COLORS[i.status]}>{i.status}</Badge></td>
+                <td><Badge variant={i.total < 0 ? 'default' : STATUS_COLORS[i.status]}>{statusLabel(i)}</Badge></td>
               </tr>
             ))}
           </tbody>

@@ -214,19 +214,46 @@ export class BillingService {
 
     if (eligible.length === 0) return;
 
-    const rows = eligible.map(l => {
+    const rows = eligible.flatMap(l => {
       const instrument = l.enrollment?.instrument
         ? l.enrollment.instrument.charAt(0).toUpperCase() + l.enrollment.instrument.slice(1)
         : '';
       const kind = l.enrollment?.lessonType === 'group' ? 'group class' : 'lesson';
-      const description = [instrument, `${kind} · ${l.duration} min`].filter(Boolean).join(' ');
-      return {
+      const base = {
         organizationId: orgId,
         invoiceId,
         lessonId: l.id,
-        description,
-        amount: proratedAmount(l.enrollment?.rate, l.enrollment?.defaultDuration, l.duration),
       };
+      const rate = l.enrollment?.rate;
+      const standard = l.enrollment?.defaultDuration;
+      const total = proratedAmount(rate, standard, l.duration);
+
+      // A lesson that ran long is still charged pro-rata, but showing it as one
+      // inflated line ("Piano lesson · 75 min — £56.25") invites the "why is
+      // this more than usual?" email. Split the overrun onto its own line so the
+      // bill explains itself. The overtime amount is the remainder rather than a
+      // second prorate, so the two lines always sum to exactly the same total.
+      if (rate != null && standard && l.duration > standard) {
+        const extra = l.duration - standard;
+        return [
+          {
+            ...base,
+            description: [instrument, `${kind} · ${standard} min`].filter(Boolean).join(' '),
+            amount: rate,
+          },
+          {
+            ...base,
+            description: [instrument, `${kind} · ${extra} min extra time`].filter(Boolean).join(' '),
+            amount: total - rate,
+          },
+        ];
+      }
+
+      return [{
+        ...base,
+        description: [instrument, `${kind} · ${l.duration} min`].filter(Boolean).join(' '),
+        amount: total,
+      }];
     });
     await this.db.db.insert(invoiceLineItems).values(rows);
 
@@ -243,6 +270,17 @@ export class BillingService {
     if (inv.total === 0) {
       throw new BadRequestException(
         'This invoice totals £0.00. Add at least one line item before issuing it.',
+      );
+    }
+    // A negative total is a credit, not a bill. Issuing it as a "sent" invoice
+    // put a payable in front of a family that owes nothing (the pay page even
+    // showed "Total due -£4.00"). Refuse it at the point of issue: adjust the
+    // line items so the invoice is zero-or-positive, or apply the credit to the
+    // family's balance instead of dressing it up as an invoice.
+    if (inv.total < 0) {
+      throw new BadRequestException(
+        'This invoice totals a credit (less than £0.00), so it cannot be issued as a bill. '
+        + 'Adjust the line items, or apply the credit to the family balance instead.',
       );
     }
     const [updated] = await this.db.db.update(invoices)
