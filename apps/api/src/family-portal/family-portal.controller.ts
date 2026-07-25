@@ -480,6 +480,19 @@ export class FamilyPortalController {
     const duration = parseInt(durationStr, 10);
     if (!teacherId || !weekStart) throw new BadRequestException('teacherId and weekStart are required');
 
+    // Only expose a teacher's week to a family that actually has them: the slots
+    // returned reveal, by omission, when that teacher is already booked or blocked,
+    // so an unscoped teacherId let any signed-in guardian/student read any in-org
+    // teacher's free/busy schedule. This mirrors the family-scoping already applied
+    // to `teachers` and `teacher-availability` (and the enrolment/teacher guard in
+    // bookLesson) so the three booking surfaces can never disagree about who "your
+    // teacher" is.
+    const family = await this.requireFamily(user.userId, user.orgId);
+    const teacherIds = await this.familyTeacherIds(user.orgId, family.students.map(s => s.id));
+    if (!teacherIds.includes(teacherId)) {
+      throw new NotFoundException('Teacher not found');
+    }
+
     // Delegate to the shared scheduling engine so parent booking uses the exact
     // same slot logic as the staff calendar: 15-minute increments, interpreted in
     // the STUDIO timezone (not the server's), and filtered against the teacher's
