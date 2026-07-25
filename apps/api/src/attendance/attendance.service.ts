@@ -41,6 +41,27 @@ const CONSUMES_CREDIT_STATUSES = new Set<string>(['present', 'absent_no_makeup']
 // Only these attendance states put money on the family's account.
 const CHARGEABLE_STATUSES = new Set<string>(['present', 'absent_no_makeup']);
 
+// Choose which available credit a lesson should consume.
+//
+// A prepaid credit is banked at the rate of the enrolment it was bought for (the
+// exact pence come off the family balance at purchase — see planPrepaidCredits).
+// So a lesson must spend a credit bought for its OWN enrolment before falling
+// back to a generic credit that carries no enrolment (e.g. a make-up granted by
+// hand). It must NEVER spend a credit bought for a DIFFERENT enrolment: using a
+// £25 violin credit to cover a £30 piano lesson mis-bills the family by the rate
+// difference, and the ledger no longer reconciles against what was banked.
+// Oldest-first within each group so credits are consumed in the order earned.
+// Exported (pure) for unit testing without a DB.
+export function pickCreditForEnrollment<T extends { enrollmentId: string | null; createdAt: Date }>(
+  available: T[],
+  enrollmentId: string | null,
+): T | null {
+  const byAge = [...available].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  return byAge.find(c => c.enrollmentId === enrollmentId)
+    ?? byAge.find(c => c.enrollmentId === null)
+    ?? null;
+}
+
 @Injectable()
 export class AttendanceService {
   private readonly logger = new Logger(AttendanceService.name);
@@ -199,7 +220,7 @@ export class AttendanceService {
     }
 
     // Private lessons: consume a prepaid credit if one is available…
-    await this.consumeOneCredit(tx, orgId, lesson.studentId, lesson.id);
+    await this.consumeOneCredit(tx, orgId, lesson.studentId, lesson.id, lesson.enrollmentId);
 
     // …and, when no prepaid credit covered it, charge the family (PAYG).
     if (enrollment) await this.postAutoCharge(tx, orgId, lesson);
@@ -263,16 +284,19 @@ export class AttendanceService {
       .where(eq(families.id, familyId));
   }
 
-  private async consumeOneCredit(tx: Executor, orgId: string, studentId: string, lessonId: string) {
-    const credit = await tx.query.lessonCredits.findFirst({
+  private async consumeOneCredit(tx: Executor, orgId: string, studentId: string, lessonId: string, enrollmentId: string | null) {
+    const available = await tx.query.lessonCredits.findMany({
       where: and(
         eq(lessonCredits.organizationId, orgId),
         eq(lessonCredits.studentId, studentId),
         eq(lessonCredits.status, 'available'),
       ),
-      orderBy: (c, { asc }) => [asc(c.createdAt)],
+      columns: { id: true, enrollmentId: true, createdAt: true },
     });
-    if (!credit) return; // PAYG — no credit to consume, auto-charge handles billing
+    // Spend a credit bought for THIS enrolment (or a generic one), never one
+    // bought for a different enrolment at a different rate — see the helper.
+    const credit = pickCreditForEnrollment(available, enrollmentId);
+    if (!credit) return; // PAYG — no eligible credit, auto-charge handles billing
 
     await tx.update(lessonCredits)
       .set({ status: 'used', usedInLessonId: lessonId })
