@@ -661,6 +661,10 @@ export class BillingService {
   // org settings so the studio can change them; these are the defaults if unset.
   static readonly RESOURCE_SUB_DEFAULT_PRICE = 600; // £6.00 per period
   static readonly RESOURCE_SUB_DEFAULT_MONTHS = 1;
+  // Stable prefix of a resource-subscription invoice's line item. Used both to
+  // label the charge and to recognise an already-outstanding one (there is no
+  // dedicated invoice "kind" column), so the two must stay in sync.
+  static readonly RESOURCE_SUB_LABEL_PREFIX = 'Resource library access';
 
   async getResourceSubscriptionTerms(orgId: string): Promise<{ price: number; months: number }> {
     const org = await this.db.db.query.organizations.findFirst({
@@ -696,11 +700,41 @@ export class BillingService {
 
     const { price, months } = await this.getResourceSubscriptionTerms(orgId);
 
+    // Idempotency guard. The subscribe endpoint takes no arguments, so a
+    // double-tap, a two-tab retry, or a back-button re-POST would otherwise
+    // raise a second invoice (and a second email) and stack a second period —
+    // charging the family twice for one intent. Access is granted the moment the
+    // invoice is issued (paid later by bank transfer), so if an unpaid
+    // resource-subscription invoice already exists we return it rather than
+    // charging again. Once that invoice is reconciled to 'paid', a genuine
+    // renewal is allowed through. There is no invoice "kind" column, so the
+    // subscription invoice is recognised by its line-item label prefix.
+    const outstanding = await this.db.db.query.invoices.findMany({
+      where: and(
+        eq(invoices.organizationId, orgId),
+        eq(invoices.familyId, familyId),
+        eq(invoices.status, 'sent'),
+      ),
+      columns: { id: true, number: true },
+      with: { lineItems: { columns: { description: true } } },
+    });
+    const alreadyPending = outstanding.find(inv =>
+      inv.lineItems.some(li => li.description.startsWith(BillingService.RESOURCE_SUB_LABEL_PREFIX)),
+    );
+    if (alreadyPending) {
+      return {
+        paidUntil: family.resourceAccessPaidUntil ?? null,
+        invoiceId: alreadyPending.id,
+        invoiceNumber: alreadyPending.number,
+        price, months, alreadyPending: true,
+      };
+    }
+
     // One manual invoice, one line, issued so it lands on the family's account.
     const inv = await this.createInvoice(orgId, {
       familyId, mode: 'monthly_statement', itemizeLessons: false,
     });
-    const label = `Resource library access — ${months} month${months === 1 ? '' : 's'}`;
+    const label = `${BillingService.RESOURCE_SUB_LABEL_PREFIX} — ${months} month${months === 1 ? '' : 's'}`;
     await this.addLineItem(orgId, inv.id, label, price);
     await this.sendInvoice(orgId, inv.id);
 
