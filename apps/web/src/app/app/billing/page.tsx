@@ -190,7 +190,7 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
                     <input
                       value={item.amount}
                       onChange={e => updateLineItem(idx, 'amount', e.target.value)}
-                      type="number" min="0.01" step="0.01"
+                      type="number" min="0.01" max="100000" step="0.01"
                       placeholder="0.00"
                       className="ui-input pl-6 w-full"
                     />

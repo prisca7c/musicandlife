@@ -35,7 +35,7 @@ export class CreateStaffDto {
   @IsOptional()
   @IsInt()
   @Min(0)
-  @Max(1_000_000) // £10,000/hr
+  @Max(1_000_000, { message: 'Hourly rate must not exceed £10,000.' }) // £10,000/hr
   hourlyRate?: number;
 
   @IsOptional()
