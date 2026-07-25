@@ -9,6 +9,19 @@ import { ROLE_LEVEL, type BaseRole } from '@music-life/types';
 
 export interface Actor { role: BaseRole; userId: string }
 
+// The payroll period end arrives as a bare calendar date (the UI's
+// <input type="date">), so `new Date('2026-06-30')` is midnight UTC. Comparing
+// lessons with `startsAt <= end` against that would exclude every lesson on the
+// final day (any time after 00:00Z is "greater"), silently underpaying the
+// teacher for that day. Extend the bound to the end of that calendar day (UTC),
+// consistent with the rest of this module treating period dates as UTC.
+// Exported so the boundary can be unit-tested directly.
+export function periodEndInclusive(end: Date): Date {
+  const inclusive = new Date(end);
+  inclusive.setUTCHours(23, 59, 59, 999);
+  return inclusive;
+}
+
 @Injectable()
 export class PayrollService {
   constructor(private readonly db: DbService) {}
@@ -104,7 +117,7 @@ export class PayrollService {
         eq(lessons.organizationId, orgId),
         eq(lessons.teacherId, staffId),
         gte(lessons.startsAt, start),
-        lte(lessons.startsAt, end),
+        lte(lessons.startsAt, periodEndInclusive(end)),
       ),
       with: { attendance: { columns: { actualStartedAt: true, actualEndedAt: true } } },
     });
