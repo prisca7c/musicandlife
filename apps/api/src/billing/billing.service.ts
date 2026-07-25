@@ -16,6 +16,35 @@ export function proratedAmount(rate: number | undefined, defaultDuration: number
   return Math.round((rate * actualDuration) / defaultDuration);
 }
 
+/**
+ * Split a pot of on-account money into whole prepaid lessons across a family's
+ * active private enrolments, proportionally by lesson rate.
+ *
+ * Pure so the money maths can be tested without a database. Returns which
+ * enrolments get how many credits and the exact pence that buys them
+ * (`allocated`) — the caller banks `allocated` off the family's cash balance so
+ * the same money is never counted both as a balance and as free lessons.
+ */
+export function planPrepaidCredits(
+  billable: Array<{ studentId: string; enrollmentId: string; rate: number }>,
+  pot: number,
+): { credits: Array<{ studentId: string; enrollmentId: string }>; allocated: number } {
+  const credits: Array<{ studentId: string; enrollmentId: string }> = [];
+  if (pot <= 0 || billable.length === 0) return { credits, allocated: 0 };
+
+  const totalRate = billable.reduce((sum, b) => sum + b.rate, 0);
+  if (totalRate <= 0) return { credits, allocated: 0 };
+
+  let allocated = 0;
+  for (const { studentId, enrollmentId, rate } of billable) {
+    const share = (rate / totalRate) * pot;
+    const creditCount = Math.floor(share / rate);
+    for (let i = 0; i < creditCount; i++) credits.push({ studentId, enrollmentId });
+    allocated += creditCount * rate;
+  }
+  return { credits, allocated };
+}
+
 @Injectable()
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
@@ -862,9 +891,27 @@ export class BillingService {
   }
 
   // ─── Credit allocation ────────────────────────────────────────────────────
-  // When a prepaid payment arrives, split it across the family's active students
-  // proportionally by lesson rate, converting whole lesson amounts to credits.
-  // Any fractional remainder stays on the family ledger balance.
+  /**
+   * When a prepaid (on-account) payment arrives, convert the money the studio is
+   * now holding for the family into whole prepaid lessons, split across their
+   * active students proportionally by lesson rate.
+   *
+   * The convertible pot is the family's POSITIVE balance after the payment — not
+   * the raw payment amount — so a payment that first clears an outstanding charge
+   * only banks the genuine surplus, and a family already in debt never receives
+   * lessons they haven't paid for.
+   *
+   * Crucially, the converted pence are deducted from `balanceCached` via an
+   * `adjustment` ledger entry. Attendance skips the per-lesson charge whenever a
+   * credit covers the lesson (postAutoCharge), so leaving the money on the
+   * balance too would count it twice — once as a positive balance and again as
+   * the free lessons the credits pay for — handing the family double the lessons
+   * their money bought. The `adjustment` type keeps this reclassification out of
+   * both the cash and accrual revenue reports (which key off `payment`/`charge`).
+   *
+   * Idempotent per source payment, so the fire-and-forget caller can re-run it
+   * without double-issuing credits or double-deducting the balance.
+   */
   async allocatePaymentToCredits(orgId: string, familyId: string, paymentId: string, amountPence: number) {
     const familyStudents = await this.db.db.query.students.findMany({
       where: and(eq(students.familyId, familyId), eq(students.organizationId, orgId)),
@@ -885,40 +932,54 @@ export class BillingService {
 
     if (billable.length === 0) return { allocated: 0, remainder: amountPence };
 
-    const totalRate = billable.reduce((sum, b) => sum + b.rate, 0);
-    let allocated = 0;
-    const toInsert: Array<{
-      organizationId: string; studentId: string; enrollmentId: string;
-      type: 'prepaid'; sourcePaymentId: string; status: 'available';
-    }> = [];
+    return this.db.db.transaction(async (tx) => {
+      // Re-running (the caller fires this off after commit) must be a no-op: if
+      // this payment already minted credits, don't issue more or deduct again.
+      const already = await tx.query.lessonCredits.findFirst({
+        where: and(eq(lessonCredits.organizationId, orgId), eq(lessonCredits.sourcePaymentId, paymentId)),
+        columns: { id: true },
+      });
+      if (already) return { allocated: 0, remainder: 0 };
 
-    for (const { studentId, enrollmentId, rate } of billable) {
-      const share = (rate / totalRate) * amountPence;
-      const creditCount = Math.floor(share / rate);
-      if (creditCount <= 0) continue;
+      // Lock the family row so the balance we read (and the adjustment we post)
+      // can't race a concurrent charge/payment.
+      const [family] = await tx.select({ balanceCached: families.balanceCached }).from(families)
+        .where(and(eq(families.id, familyId), eq(families.organizationId, orgId)))
+        .for('update');
+      if (!family) return { allocated: 0, remainder: amountPence };
 
-      for (let i = 0; i < creditCount; i++) {
-        toInsert.push({
-          organizationId: orgId,
-          studentId,
-          enrollmentId,
-          type: 'prepaid',
-          sourcePaymentId: paymentId,
-          status: 'available',
-        });
-      }
-      allocated += creditCount * rate;
-    }
+      const pot = Math.max(0, family.balanceCached);
+      const { credits, allocated } = planPrepaidCredits(billable, pot);
+      if (allocated <= 0) return { allocated: 0, remainder: family.balanceCached };
 
-    if (toInsert.length > 0) {
-      await this.db.db.insert(lessonCredits).values(toInsert);
-    }
+      await tx.insert(lessonCredits).values(credits.map(c => ({
+        organizationId: orgId,
+        studentId: c.studentId,
+        enrollmentId: c.enrollmentId,
+        type: 'prepaid' as const,
+        sourcePaymentId: paymentId,
+        status: 'available' as const,
+      })));
 
-    this.logger.log(
-      `Payment ${paymentId}: allocated ${allocated}p across ${toInsert.length} lesson credits, remainder ${amountPence - allocated}p on family balance`,
-    );
+      const newBalance = family.balanceCached - allocated;
+      await tx.insert(ledgerEntries).values({
+        organizationId: orgId,
+        familyId,
+        type: 'adjustment',
+        amount: -allocated,
+        balanceAfter: newBalance,
+        description: `Applied to ${credits.length} prepaid lesson credit${credits.length === 1 ? '' : 's'}`,
+      });
+      await tx.update(families)
+        .set({ balanceCached: newBalance, updatedAt: new Date() })
+        .where(eq(families.id, familyId));
 
-    return { allocated, remainder: amountPence - allocated };
+      this.logger.log(
+        `Payment ${paymentId}: converted ${allocated}p of on-account balance into ${credits.length} lesson credits (balance ${family.balanceCached}p → ${newBalance}p)`,
+      );
+
+      return { allocated, remainder: newBalance };
+    });
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
