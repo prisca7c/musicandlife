@@ -1,4 +1,5 @@
 import { IsString, IsEmail, IsOptional, IsDateString, IsArray, IsIn, ValidateNested, IsBoolean, MaxLength, MinLength, ArrayMaxSize } from 'class-validator';
+import { IsRealisticDob } from '../../common/validators/is-realistic-dob';
 import { Type } from 'class-transformer';
 
 export class InstrumentSelectionDto {
@@ -28,6 +29,7 @@ export class SubmitRegistrationDto {
 
   @IsOptional()
   @IsDateString()
+  @IsRealisticDob()
   studentDob?: string;
 
   @IsOptional()
