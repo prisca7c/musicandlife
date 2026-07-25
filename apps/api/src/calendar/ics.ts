@@ -27,11 +27,26 @@ function toIcsUtc(d: Date): string {
 
 /** RFC 5545 §3.3.11: backslash, semicolon, comma and newline are special in TEXT values. */
 function escapeText(s: string): string {
-  return s
+  // Drop C0 control characters (except the CR/LF we fold below), which are not
+  // valid in a TEXT value. Done as a codepoint scan rather than a control-char
+  // regex (which ESLint's no-control-regex forbids).
+  let cleaned = '';
+  for (const ch of s) {
+    const code = ch.codePointAt(0)!;
+    if (code < 0x20 && ch !== '\n' && ch !== '\r') continue;
+    if (code === 0x7f) continue; // DEL
+    cleaned += ch;
+  }
+  return cleaned
     .replace(/\\/g, '\\\\')
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
-    .replace(/\r?\n/g, '\\n');
+    // Collapse every line-break form — CRLF, lone LF, and lone CR — to the
+    // literal \n escape. A bare \r is invalid inside a TEXT value and some
+    // calendar parsers treat it as a line terminator, so leaving it raw would
+    // let a name/instrument containing \r (settable via the API; this feed is
+    // unauthenticated) split the content line and inject iCal properties.
+    .replace(/\r\n|\r|\n/g, '\\n');
 }
 
 /**
