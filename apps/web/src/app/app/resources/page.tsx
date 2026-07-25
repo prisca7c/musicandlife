@@ -212,6 +212,9 @@ export default function ResourcesPage() {
   );
   const [subscribing, setSubscribing] = useState(false);
   const [subError, setSubError] = useState('');
+  // Charging the family real money should never happen on a single stray tap, so
+  // the button opens a confirmation first and only this POSTs after they agree.
+  const [confirmingSub, setConfirmingSub] = useState(false);
   const money = formatMoney;
   const period = (m: number) => (m === 1 ? 'month' : `${m} months`);
 
@@ -221,6 +224,7 @@ export default function ResourcesPage() {
       await apiFetch('/family/resource-subscription/subscribe', { method: 'POST', token: tok() });
       await mutateSub();
       await mutate();
+      setConfirmingSub(false);
     } catch (err) {
       setSubError(err instanceof Error ? err.message : 'Could not start your subscription. Please try again.');
     } finally { setSubscribing(false); }
@@ -277,10 +281,31 @@ export default function ResourcesPage() {
                 A subscription is <strong>{money(sub.price)}</strong> per {period(sub.months)}.
               </p>
               {subError && <p className="mb-3 text-sm text-red-600">{subError}</p>}
-              <button onClick={subscribe} disabled={subscribing}
+              <button onClick={() => { setSubError(''); setConfirmingSub(true); }} disabled={subscribing}
                 className="bg-[var(--sage)] text-white rounded px-5 py-2.5 text-sm font-medium hover:bg-[var(--sage-dk)] disabled:opacity-50">
                 {subscribing ? 'Setting up…' : `Subscribe — ${money(sub.price)} / ${period(sub.months)}`}
               </button>
+
+              <Modal open={confirmingSub} onClose={() => { if (!subscribing) setConfirmingSub(false); }} title="Confirm subscription">
+                <p className="text-sm text-gray-700 mb-2">
+                  This will invoice you <strong>{money(sub.price)}</strong> for {period(sub.months)} of resource library access.
+                </p>
+                <p className="text-xs text-gray-500 mb-5">
+                  The invoice is added to your account to pay by bank transfer, and the library unlocks straight away. You won&apos;t be charged twice if you already have an unpaid subscription invoice.
+                </p>
+                {subError && <p className="mb-3 text-sm text-red-600">{subError}</p>}
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setConfirmingSub(false)} disabled={subscribing}
+                    className="rounded px-4 py-2 text-sm font-medium border disabled:opacity-50"
+                    style={{ borderColor: 'var(--bd)', color: 'var(--txt)' }}>
+                    Cancel
+                  </button>
+                  <button onClick={subscribe} disabled={subscribing}
+                    className="bg-[var(--sage)] text-white rounded px-4 py-2 text-sm font-medium hover:bg-[var(--sage-dk)] disabled:opacity-50">
+                    {subscribing ? 'Setting up…' : `Confirm — ${money(sub.price)}`}
+                  </button>
+                </div>
+              </Modal>
               <p className="text-xs text-gray-400 mt-3 max-w-sm mx-auto">
                 We&apos;ll add this to your account as an invoice you can pay by bank transfer, and unlock the library straight away.
               </p>
