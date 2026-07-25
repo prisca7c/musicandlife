@@ -296,7 +296,21 @@ export class RegistrationService {
     if (data.studentEmail && !emailRe.test(data.studentEmail)) errors.push('studentEmail is not a valid email');
     if (data.guardianEmail && !emailRe.test(data.guardianEmail)) errors.push('guardianEmail is not a valid email');
     if (data.lessonType && !['private', 'group'].includes(data.lessonType)) errors.push("lessonType must be 'private' or 'group'");
-    if (data.studentDob && isNaN(Date.parse(data.studentDob))) errors.push('studentDob is not a valid date');
+    if (data.studentDob) {
+      const t = Date.parse(data.studentDob);
+      if (isNaN(t)) {
+        errors.push('studentDob is not a valid date');
+      } else {
+        // Same bound as the student/registration DTOs: not in the future, not a
+        // slipped-digit year, so a typo'd DOB is caught before creating a student.
+        const now = new Date();
+        const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        const d = new Date(t);
+        if (d.getTime() > endOfToday.getTime() || d.getUTCFullYear() < 1900) {
+          errors.push('studentDob must be a real date of birth (not in the future, and after 1900)');
+        }
+      }
+    }
     return errors;
   }
 

@@ -33,6 +33,10 @@ function RegistrationDetailModal({ reg, open, onClose, onDecision }: {
 
   if (!reg) return null;
   const p = reg.payload;
+  // With no contact email the server still creates the family/student/enrollments,
+  // but can't create a portal login or send the welcome email — so the copy must
+  // not promise one. (QA H13)
+  const hasEmail = !!p.contactEmail?.trim();
 
   async function approve() {
     setActioning(true); setError('');
@@ -69,7 +73,7 @@ function RegistrationDetailModal({ reg, open, onClose, onDecision }: {
             { label: 'Student', value: `${p.studentFirstName} ${p.studentLastName}` },
             { label: 'Family', value: p.familyName },
             { label: 'Contact', value: p.contactName },
-            { label: 'Email', value: p.contactEmail },
+            { label: 'Email', value: hasEmail ? p.contactEmail : 'None on file' },
             ...(p.contactPhone ? [{ label: 'Phone', value: p.contactPhone }] : []),
           ].map(row => (
             <div key={row.label} className="flex justify-between gap-4">
@@ -106,8 +110,16 @@ function RegistrationDetailModal({ reg, open, onClose, onDecision }: {
             <div>
               <p className="text-sm font-semibold mb-1" style={{ color: 'var(--txt2)' }}>Approve registration</p>
               <p className="text-xs mb-3" style={{ color: 'var(--txt3)' }}>
-                Creates the family, student, and enrollments. Sends a welcome email with portal login link.
+                {hasEmail
+                  ? 'Creates the family, student, and enrollments. Sends a welcome email with portal login link.'
+                  : 'Creates the family, student, and enrollments.'}
               </p>
+              {!hasEmail && (
+                <div className="text-xs rounded-xl px-3 py-2 mb-3"
+                  style={{ background: 'var(--amber-lt, #FEF3C7)', color: 'var(--amber-dk, #92400E)', border: '1px solid #FDE68A' }}>
+                  No email on file — this family won’t get a welcome email or a portal login. Add an email to their record afterwards to invite them.
+                </div>
+              )}
               <button onClick={approve} disabled={actioning}
                 className="w-full flex items-center justify-center gap-2 rounded-[10px] px-4 py-2.5 text-sm font-bold text-white transition-colors disabled:opacity-50"
                 style={{ background: 'var(--sage)' }}

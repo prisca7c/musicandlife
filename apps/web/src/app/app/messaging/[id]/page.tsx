@@ -109,6 +109,18 @@ export default function ThreadPage() {
 
   const others = (thread.people ?? []).filter(p => p.userId !== myId);
 
+  // Admins can review staff↔family conversations from the oversight tab without
+  // being a participant. Tell the teacher and family so it isn't a surprise —
+  // their messages here aren't private from studio management. Admins already
+  // know they have this access, so we don't show it to them.
+  const NON_STAFF = ['guardian', 'student'];
+  const people = thread.people ?? [];
+  const hasFamily = people.some(p => NON_STAFF.includes(p.role));
+  const hasStaff = people.some(p => p.role && !NON_STAFF.includes(p.role));
+  const myRole = me?.membership?.role;
+  const iAmAdmin = myRole === 'admin' || myRole === 'system_admin';
+  const showOversightNotice = hasFamily && hasStaff && !iAmAdmin;
+
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 120px)' }}>
       <div className="mb-2"><Link href="/app/messaging" className="text-sm text-gray-500 hover:text-gray-700">← Messages</Link></div>
@@ -126,6 +138,11 @@ export default function ThreadPage() {
             </span>
           ))}
         </div>
+        {showOversightNotice && (
+          <p className="text-xs text-gray-400 mt-2">
+            Studio admins can review this conversation. Messages here aren&apos;t private from studio management.
+          </p>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-3 pb-4">

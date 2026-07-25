@@ -273,6 +273,13 @@ interface FamilyInvoice { id: string; number: string; status: string; total: num
 
 const INVOICE_STATUS_COLORS: Record<string, string> = { draft: 'default', sent: 'trial', paid: 'active', void: 'withdrawn' };
 
+// Mirror the billing list: "sent" is internal jargon, and a negative total is a
+// credit note regardless of workflow status. Keep this in sync with billing/page.tsx.
+function invoiceStatusLabel(i: { status: string; total: number }): string {
+  if (i.total < 0) return 'Credit';
+  return { draft: 'Draft', sent: 'Due', paid: 'Paid', void: 'Void' }[i.status] ?? i.status;
+}
+
 // Absorb a duplicate family into this one. The picked family is the SOURCE
 // (deleted); the family on the page is the target that survives.
 function MergeFamilyModal({ open, onClose, targetId, targetName, onMerged }: {
@@ -542,8 +549,12 @@ export default function FamilyDetailPage() {
                     </td>
                     <td style={{ color: 'var(--txt3)' }}>{i.issuedOn}</td>
                     <td style={{ color: 'var(--txt3)' }}>{i.dueDate}</td>
-                    <td className="font-semibold" style={{ textAlign: 'right' }}>{formatMoney(i.total)}</td>
-                    <td><Badge variant={INVOICE_STATUS_COLORS[i.status]}>{i.status}</Badge></td>
+                    <td className="font-semibold" style={{ textAlign: 'right' }}>
+                      {i.total < 0
+                        ? <span title="Credit note — money owed to the family, not by them">{formatMoney(Math.abs(i.total))} credit</span>
+                        : formatMoney(i.total)}
+                    </td>
+                    <td><Badge variant={i.total < 0 ? 'default' : INVOICE_STATUS_COLORS[i.status]}>{invoiceStatusLabel(i)}</Badge></td>
                   </tr>
                 ))}
               </tbody>
