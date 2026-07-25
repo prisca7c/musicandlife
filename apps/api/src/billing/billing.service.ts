@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException, Logger } from '@nestjs/common';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, sum } from 'drizzle-orm';
 import {
   invoices, invoiceLineItems, ledgerEntries, payments,
   families, students, enrollments, lessonCredits, lessons, organizations, attendance,
@@ -854,10 +854,25 @@ export class BillingService {
               eq(invoices.familyId, dto.familyId),
             ),
           });
-          if (inv && dto.amount >= inv.total && inv.status !== 'void') {
-            await tx.update(invoices)
-              .set({ status: 'paid', updatedAt: new Date() })
-              .where(eq(invoices.id, dto.invoiceId));
+          // Mark paid on the CUMULATIVE total paid against the invoice, not just
+          // this one payment. Two part-payments (£30 then £20 on a £50 invoice)
+          // fully settle it, but comparing a single `dto.amount` to the total
+          // left the invoice stuck 'sent' forever — so it still showed as
+          // outstanding, kept drawing dunning reminders and inflated the
+          // outstanding-invoices KPI, even though the family owed nothing. The
+          // just-inserted payment is already in this txn, so it's counted here.
+          if (inv && inv.status !== 'void' && inv.status !== 'paid') {
+            const [paid] = await tx.select({ total: sum(payments.amount) })
+              .from(payments)
+              .where(and(
+                eq(payments.invoiceId, dto.invoiceId),
+                eq(payments.organizationId, orgId),
+              ));
+            if (Number(paid?.total ?? 0) >= inv.total) {
+              await tx.update(invoices)
+                .set({ status: 'paid', updatedAt: new Date() })
+                .where(eq(invoices.id, dto.invoiceId));
+            }
           }
         }
 
