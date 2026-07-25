@@ -190,7 +190,7 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
                     <input
                       value={item.amount}
                       onChange={e => updateLineItem(idx, 'amount', e.target.value)}
-                      type="number" min="0.01" step="0.01"
+                      type="number" min="0.01" max="100000" step="0.01"
                       placeholder="0.00"
                       className="ui-input pl-6 w-full"
                     />
@@ -260,12 +260,24 @@ function RecordPaymentModal({ open, onClose, onCreated }: { open: boolean; onClo
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSaving(true); setError('');
     const f = new FormData(e.currentTarget);
+    const amount = Math.round(parseFloat(f.get('amount') as string) * 100);
+    // Guard against fat-fingered amounts (an extra zero turns £250 into a
+    // ledger-polluting figure). The server hard-caps at £1,000,000; anything
+    // over £10,000 is almost certainly a typo for a music lesson, so make the
+    // user confirm it before it hits the ledger.
+    if (amount > 100_000_000) {
+      setError('Amount can’t exceed £1,000,000.'); setSaving(false); return;
+    }
+    if (amount > 1_000_000 &&
+        !window.confirm(`Record a payment of £${(amount / 100).toLocaleString('en-GB', { minimumFractionDigits: 2 })}? That’s unusually large — check for an extra digit.`)) {
+      setSaving(false); return;
+    }
     try {
       await apiFetch('/payments', { method: 'POST', token: tok(), body: JSON.stringify({
         familyId,
         invoiceId: invoiceId || undefined,
         method,
-        amount: Math.round(parseFloat(f.get('amount') as string) * 100),
+        amount,
         notes: f.get('notes') || undefined,
       })});
       onCreated(); onClose();
@@ -317,7 +329,7 @@ function RecordPaymentModal({ open, onClose, onCreated }: { open: boolean; onClo
         </div>
         <div>
           <label className="ui-label">Amount (£) <span style={{ color: 'var(--coral)' }}>*</span></label>
-          <input name="amount" type="number" min="0.01" step="0.01" required className="ui-input" />
+          <input name="amount" type="number" min="0.01" max="1000000" step="0.01" required className="ui-input" />
         </div>
         <div>
           <label className="ui-label">Notes</label>

@@ -98,6 +98,7 @@ export class ReportsService {
               eq(ledgerEntries.organizationId, orgId),
               eq(ledgerEntries.type, 'payment'),
               gte(ledgerEntries.occurredAt, monthStart),
+              lte(ledgerEntries.occurredAt, monthEnd),
             )),
 
       // Outstanding invoices — studio-wide financials, hidden for teachers
