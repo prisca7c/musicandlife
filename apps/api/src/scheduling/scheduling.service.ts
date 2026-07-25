@@ -541,9 +541,20 @@ export class SchedulingService {
     duration: number,
     timeZone: string,
   ): Promise<string | null> {
-    if (!teacherId) return null;
     const start = new Date(startsAtISO);
     const end = new Date(start.getTime() + duration * 60000);
+
+    // A slot in the past is never bookable — you can't confirm, counter, or
+    // reschedule a lesson onto a time that has already happened. createLessonRequest
+    // guards the proposal, but a request made days ago can name a time that has
+    // since passed; without this, confirming it would create a past-dated lesson.
+    // This is the shared chokepoint for both display (ok:false, button disabled)
+    // and the confirm/counter/approve writes, so the guard lives here once.
+    if (start.getTime() <= Date.now()) {
+      return 'That time has already passed. Please pick a time in the future.';
+    }
+
+    if (!teacherId) return null;
 
     const blocks = await exec.query.blockedTime.findMany({
       where: and(eq(blockedTime.organizationId, orgId), eq(blockedTime.staffId, teacherId)),
