@@ -2,7 +2,15 @@ export function toCsv(rows: Record<string, unknown>[]): string {
   if (rows.length === 0) return '';
   const headers = Object.keys(rows[0]!);
   const escape = (v: unknown) => {
-    const s = v === null || v === undefined ? '' : String(v);
+    let s = v === null || v === undefined ? '' : String(v);
+    // Neutralise spreadsheet formula injection (CSV/DDE). A cell whose value
+    // starts with = + - @ tab or CR is evaluated as a formula by Excel/Sheets,
+    // so a value like `=HYPERLINK(...)` or `=cmd|'/c calc'!A1` seeded through a
+    // free-text field (e.g. instrument, set via the public registration form)
+    // would run when a manager opens an exported report. Prefix such values with
+    // an apostrophe so the spreadsheet treats them as text. Plain numbers are
+    // left alone so legit negatives / money amounts aren't mangled.
+    if (/^[=+\-@\t\r]/.test(s) && Number.isNaN(Number(s))) s = `'${s}`;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [headers.join(','), ...rows.map(r => headers.map(h => escape(r[h])).join(','))];
