@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { eq, and } from 'drizzle-orm';
-import { families, memberships } from '@music-life/db';
+import { eq, and, ne } from 'drizzle-orm';
+import { families, memberships, invoices } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { BillingService } from './billing.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -76,6 +76,31 @@ export class InvoiceSchedulerWorker {
       if (daysUntil === 0) {
         try {
           const { periodStart, periodEnd } = resolveBillingPeriod(family.billingMode, invoiceDate);
+
+          // Idempotency: never auto-generate a second invoice for a period this
+          // family has already been billed for. The daily cron normally hits
+          // daysUntil===0 on a single day, but a redeploy that replays a missed
+          // job, a manual invocation, or any same-day re-entry lands here again;
+          // the advisory lock only serialises *concurrent* runs, it does not
+          // remember that this period was already invoiced. Without this guard a
+          // family gets duplicate monthly statements. (A DB unique constraint is
+          // deliberately NOT used: per-class invoicing legitimately produces
+          // several invoices for the same family + period.)
+          const existing = await this.db.db.query.invoices.findFirst({
+            where: and(
+              eq(invoices.organizationId, family.organizationId),
+              eq(invoices.familyId, family.id),
+              eq(invoices.periodStart, periodStart),
+              eq(invoices.periodEnd, periodEnd),
+              ne(invoices.status, 'void'),
+            ),
+            columns: { id: true },
+          });
+          if (existing) {
+            this.logger.log(`Skipping ${family.id}: already invoiced for ${periodStart}–${periodEnd}`);
+            continue;
+          }
+
           const inv = await this.billing.createInvoice(family.organizationId, {
             familyId: family.id,
             mode: family.invoiceMode,
