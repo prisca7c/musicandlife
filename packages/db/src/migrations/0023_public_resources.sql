@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS "resource_subscribers" (
 	CONSTRAINT "resource_subscribers_access_token_unique" UNIQUE("access_token")
 );
 --> statement-breakpoint
-ALTER TABLE "resources" ADD COLUMN "delivery" text DEFAULT 'download' NOT NULL;--> statement-breakpoint
+ALTER TABLE "resources" ADD COLUMN IF NOT EXISTS "delivery" text DEFAULT 'download' NOT NULL;--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "resource_subscribers" ADD CONSTRAINT "resource_subscribers_organization_id_organizations_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organizations"("id") ON DELETE no action ON UPDATE no action;
 EXCEPTION
