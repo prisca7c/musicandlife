@@ -169,6 +169,13 @@
       "when": 1784934079351,
       "tag": "0023_public_resources",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784958847533,
+      "tag": "0024_calendar_feed_token",
+      "breakpoints": true
     }
   ]
 }

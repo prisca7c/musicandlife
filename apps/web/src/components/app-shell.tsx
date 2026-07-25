@@ -28,6 +28,7 @@ const NAV: NavItem[] = [
   { label: 'Book lesson',  href: '/app/family/book',       icon: <Clock size={16} /> },
   { label: 'History',      href: '/app/family/history',    icon: <History size={16} /> },
   { label: 'Lesson notes', href: '/app/family/notes',      icon: <BookOpen size={16} /> },
+  { label: 'Add to calendar', href: '/app/family/calendar', icon: <CalendarPlus size={16} /> },
   { label: 'Calendar',     href: '/app/calendar',          icon: <Calendar size={16} /> },
   { label: 'Attendance',   href: '/app/attendance',        icon: <ClipboardCheck size={16} /> },
   { label: 'Booking requests', href: '/app/lesson-requests', icon: <CalendarPlus size={16} /> },
@@ -56,7 +57,7 @@ const NAV: NavItem[] = [
 
 // Group nav sections
 const GROUPS = [
-  { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History','Lesson notes'] },
+  { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History','Lesson notes','Add to calendar'] },
   { label: 'Studio',   items: ['Calendar','Attendance','Booking requests','Reschedules','My availability','Notes','New students','Messages'] },
   { label: 'People',   items: ['Students','Families','Staff','Payroll','My pay'] },
   { label: 'Finance',  items: ['Billing','Payments'] },

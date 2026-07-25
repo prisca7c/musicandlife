@@ -46,6 +46,11 @@ export const families = pgTable(
     // form). When false, the 24h reminder worker skips this family entirely.
     // Defaults true so existing families keep getting reminders as before.
     emailRemindersEnabled: boolean('email_reminders_enabled').notNull().default(true),
+    // Secret that authorises the family's read-only .ics lesson feed. The URL is
+    // the only credential a calendar app can present, so this is a capability
+    // token: unguessable, per-family, and revocable by regenerating it. Null
+    // until the family first asks for their feed.
+    calendarToken: text('calendar_token'),
     autoInvoice: boolean('auto_invoice').notNull().default(false),
     invoiceMode: text('invoice_mode', {
       enum: ['monthly_statement', 'per_lesson'],
@@ -76,6 +81,10 @@ export const families = pgTable(
     // Auto-matching a statement line to a family is only sound if the reference
     // identifies exactly one family.
     uniqueIndex('families_org_payment_reference_uidx').on(t.organizationId, t.paymentReference),
+    // The calendar feed is looked up by token alone on an unauthenticated route,
+    // so it needs an index — and it must resolve to exactly one family, since
+    // the token is the only credential the request carries.
+    uniqueIndex('families_calendar_token_uidx').on(t.calendarToken),
   ],
 );
 

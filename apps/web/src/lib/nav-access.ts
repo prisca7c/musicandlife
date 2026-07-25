@@ -25,6 +25,7 @@ export const ROUTE_ACCESS: RouteAccess[] = [
   { href: '/app/family/book',           roles: ['guardian', 'student'] },
   { href: '/app/family/history',        roles: ['guardian', 'student'] },
   { href: '/app/family/notes',          roles: ['guardian', 'student'] },
+  { href: '/app/family/calendar',       roles: ['guardian'] },
   { href: '/app/calendar',              roles: ['system_admin', 'admin', 'manager', 'receptionist', 'teacher'] },
   { href: '/app/attendance',            roles: ['system_admin', 'admin', 'manager', 'teacher'] },
   { href: '/app/lesson-requests',       roles: ['system_admin', 'admin', 'manager', 'receptionist', 'teacher'] },
