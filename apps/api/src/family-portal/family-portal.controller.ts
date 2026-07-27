@@ -31,9 +31,16 @@ class BookLessonDto {
   @IsUUID() teacherId!: string;
   @IsUUID() studentId!: string;
   @IsUUID() enrollmentId!: string;
+  // 1st choice (booked immediately) + up to two ranked fallbacks the teacher may
+  // move the lesson to instead of declining it.
   @IsDateString() startsAt!: string;
+  @IsOptional() @IsDateString() startsAt2?: string;
+  @IsOptional() @IsDateString() startsAt3?: string;
   @IsInt() @Min(15) @Max(240) duration!: number;
   @IsOptional() @IsBoolean() @Type(() => Boolean) isTrialLesson?: boolean;
+  // Set up a weekly recurring series from this slot (autobooks going forward)
+  // rather than a one-off lesson.
+  @IsOptional() @IsBoolean() @Type(() => Boolean) recurring?: boolean;
 }
 
 class CancelLessonDto {
@@ -529,13 +536,6 @@ export class FamilyPortalController {
       );
     }
 
-    const slotStart = new Date(dto.startsAt);
-    if (isNaN(slotStart.getTime())) throw new BadRequestException('Invalid start time');
-    // A parent/student must not be able to self-book a lesson in the past.
-    if (slotStart.getTime() <= Date.now()) {
-      throw new BadRequestException('Lessons must be booked for a future time.');
-    }
-
     const teacher = await this.db.db.query.staffMembers.findFirst({
       where: and(eq(staffMembers.id, dto.teacherId), eq(staffMembers.organizationId, user.orgId)),
       with: { user: { columns: { email: true } } },
@@ -547,20 +547,27 @@ export class FamilyPortalController {
       with: { family: { columns: { email: true, name: true } } },
     });
 
-    // Delegate the actual write to the scheduling service so self-service booking
-    // runs under the SAME advisory lock + conflict checks as staff booking — this
-    // prevents double-booking a teacher (including concurrent races) and
-    // reuses the hardened overlap window. The instant is passed as a Z-suffixed
-    // ISO string, which round-trips through the service's zoned parse unchanged.
-    const lesson = await this.scheduling.createLesson(user.orgId, {
-      studentId: dto.studentId,
-      teacherId: dto.teacherId,
-      enrollmentId: dto.enrollmentId,
-      termId: enrollment.termId ?? undefined,
-      startsAt: slotStart.toISOString(),
-      duration: dto.duration,
-      isTrialLesson: dto.isTrialLesson ?? false,
-    });
+    // Book the 1st choice immediately (under the shared lock + conflict checks)
+    // and open a teacher-veto review holding the ranked fallbacks. The ≥48h lead
+    // time and the "future only" guard live in the scheduling service so every
+    // booking surface enforces them identically. Z-suffixed ISO instants
+    // round-trip through the service's zoned parse unchanged.
+    const { lesson } = await this.scheduling.createFamilyBooking(
+      user.orgId,
+      {
+        studentId: dto.studentId,
+        teacherId: dto.teacherId,
+        enrollmentId: dto.enrollmentId,
+        termId: enrollment.termId ?? undefined,
+        startsAt: dto.startsAt,
+        startsAt2: dto.startsAt2,
+        startsAt3: dto.startsAt3,
+        duration: dto.duration,
+        isTrialLesson: dto.isTrialLesson ?? false,
+        recurring: dto.recurring ?? false,
+      },
+      user.userId,
+    );
 
     // Send confirmation emails (non-blocking)
     this.sendBookingConfirmations(user.orgId, lesson, teacher, student!, enrollment.instrument, !!dto.isTrialLesson)

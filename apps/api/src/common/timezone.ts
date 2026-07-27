@@ -54,3 +54,28 @@ export function parseZonedDateTime(input: string, timeZone: string): Date {
   instant = new Date(guess - tzOffsetMs(instant, timeZone));
   return instant;
 }
+
+const WEEKDAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'] as const;
+export type Weekday = typeof WEEKDAY_NAMES[number];
+
+/**
+ * The inverse of {@link parseZonedDateTime} for a recurring rule: given an
+ * absolute instant, return the weekday + wall-clock "HH:MM" it falls on IN THE
+ * STUDIO'S ZONE. A slot the family picked as "Wed 15:30 London" must recur on
+ * Wednesdays at 15:30 local — deriving that from the server's zone (UTC on
+ * Render) would drift by the offset and land the series on the wrong day/time
+ * around DST. Uses the same Intl-in-zone approach as {@link parseZonedDateTime}.
+ */
+export function zonedWeekdayAndTime(instant: Date, timeZone: string): { weekday: Weekday; startTime: string } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, hour12: false, weekday: 'long', hour: '2-digit', minute: '2-digit',
+  }).formatToParts(instant);
+  const m: Record<string, string> = {};
+  for (const p of parts) if (p.type !== 'literal') m[p.type] = p.value;
+  let hour = parseInt(m.hour!, 10);
+  if (hour === 24) hour = 0;
+  return {
+    weekday: (m.weekday ?? '').toLowerCase() as Weekday,
+    startTime: `${String(hour).padStart(2, '0')}:${m.minute}`,
+  };
+}

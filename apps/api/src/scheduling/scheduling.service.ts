@@ -10,7 +10,7 @@ import type { CreateRescheduleRequestDto } from './dto/reschedule-request.dto';
 import type { CreateLessonRequestDto } from './dto/lesson-request.dto';
 import type { BaseRole } from '@music-life/types';
 import { NotificationsService } from '../notifications/notifications.service';
-import { parseZonedDateTime } from '../common/timezone';
+import { parseZonedDateTime, zonedWeekdayAndTime } from '../common/timezone';
 
 // Resolves to the caller's own staffId when their role is exactly 'teacher' (so service
 // methods can scope/ownership-check); higher roles (receptionist+) act unrestricted.
@@ -735,6 +735,151 @@ export class SchedulingService {
     return req!;
   }
 
+  // A family self-booking books its 1st choice this many hours ahead at the
+  // earliest, so the teacher always has room to move or decline before it runs.
+  private static readonly FAMILY_BOOKING_LEAD_HOURS = 48;
+
+  /**
+   * A family self-books from the calendar. Unlike the front-desk lesson request
+   * (which creates nothing until a teacher confirms a time), this books the
+   * family's 1st-choice time IMMEDIATELY — so they leave with a confirmed lesson
+   * — while recording the 2nd/3rd choices and opening an 'auto_confirmed' request
+   * the teacher can Accept, Move (to a recorded alternative) or Decline. The
+   * caller (family-portal) has already checked the student, enrolment and teacher
+   * belong to this family.
+   */
+  async createFamilyBooking(
+    orgId: string,
+    dto: {
+      studentId: string; teacherId: string; enrollmentId: string; termId?: string;
+      startsAt: string; startsAt2?: string; startsAt3?: string;
+      duration: number; isTrialLesson?: boolean; recurring?: boolean; notes?: string;
+    },
+    requestedBy: string,
+  ) {
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const ranked = [dto.startsAt, dto.startsAt2, dto.startsAt3]
+      .filter((s): s is string => !!s)
+      .map((s) => parseZonedDateTime(s, tz));
+    if (ranked.length === 0) throw new BadRequestException('Pick at least one time.');
+
+    const leadMs = SchedulingService.FAMILY_BOOKING_LEAD_HOURS * 3600000;
+    if (ranked[0]!.getTime() - Date.now() < leadMs) {
+      throw new BadRequestException(
+        `Lessons booked online must be at least ${SchedulingService.FAMILY_BOOKING_LEAD_HOURS} hours ahead. For anything sooner, please contact the studio.`,
+      );
+    }
+
+    // Instant-book the 1st choice — runs the shared advisory lock + conflict
+    // checks, so self-service can't double-book a teacher.
+    const lesson = await this.createLesson(orgId, {
+      studentId: dto.studentId,
+      teacherId: dto.teacherId,
+      enrollmentId: dto.enrollmentId,
+      termId: dto.termId,
+      startsAt: ranked[0]!.toISOString(),
+      duration: dto.duration,
+      isTrialLesson: dto.isTrialLesson ?? false,
+      notes: dto.notes,
+    });
+
+    // Recording a recurring rule switches on the nightly generator for this
+    // enrolment; materialise the near-term window now so the series shows up
+    // immediately, not only after the 2 AM top-up.
+    if (dto.recurring) {
+      const rule = zonedWeekdayAndTime(ranked[0]!, tz);
+      await this.db.db.update(enrollments)
+        .set({ scheduleRule: rule, updatedAt: new Date() })
+        .where(and(eq(enrollments.id, dto.enrollmentId), eq(enrollments.organizationId, orgId)));
+      await this.materializeEnrollment(orgId, dto.enrollmentId).catch((e) =>
+        this.logger.warn(`materialize after recurring family booking failed: ${e}`),
+      );
+    }
+
+    const [req] = await this.db.db.insert(lessonRequests).values({
+      organizationId: orgId,
+      studentId: dto.studentId,
+      teacherId: dto.teacherId,
+      enrollmentId: dto.enrollmentId,
+      duration: dto.duration,
+      proposedStartsAt: ranked[0]!,
+      proposedStartsAt2: ranked[1],
+      proposedStartsAt3: ranked[2],
+      status: 'auto_confirmed',
+      isRecurring: dto.recurring ?? false,
+      createdLessonId: lesson.id,
+      requestedBy,
+      notes: dto.notes,
+    }).returning();
+
+    return { lesson, request: req! };
+  }
+
+  /**
+   * Accept / Move / Decline a family auto-booking. The lesson already exists
+   * (createdLessonId), so — unlike a front-desk request — we act on it in place
+   * rather than creating a second one.
+   */
+  private async decideAutoBooking(
+    orgId: string,
+    req: typeof lessonRequests.$inferSelect,
+    decision: 'confirmed' | 'declined',
+    actor: Actor,
+    chosenStartsAt?: string,
+    reason?: string,
+  ) {
+    const lessonId = req.createdLessonId;
+    if (!lessonId) throw new BadRequestException('This booking has no lesson to act on');
+
+    // Atomically claim the review so a double-tap or two-teacher race resolves once.
+    const claimed = await this.db.db.update(lessonRequests)
+      .set({ status: decision, decidedBy: actor.userId, decidedAt: new Date(), reason })
+      .where(and(
+        eq(lessonRequests.id, req.id),
+        eq(lessonRequests.organizationId, orgId),
+        eq(lessonRequests.status, 'auto_confirmed'),
+      ))
+      .returning({ id: lessonRequests.id });
+    if (claimed.length === 0) throw new BadRequestException('This booking has already been reviewed');
+
+    try {
+      if (decision === 'declined') {
+        // cancelled_teacher = no charge, no credit lost, teacher not paid; also
+        // notifies the family. NOT the family-cancel path (which can charge).
+        await this.cancelLesson(orgId, lessonId, { reason: 'cancelled_teacher', notes: reason }, actor.userId, actor);
+        // Declining a recurring booking stops the whole series, not just this occurrence.
+        if (req.isRecurring && req.enrollmentId) {
+          await this.db.db.update(enrollments)
+            .set({ scheduleRule: null, updatedAt: new Date() })
+            .where(and(eq(enrollments.id, req.enrollmentId), eq(enrollments.organizationId, orgId)));
+        }
+        return { id: req.id, status: 'declined' as const, lessonId };
+      }
+
+      // Confirmed: keep #1 (Accept) or move to one of the family's other ranked
+      // times (Move). A time that wasn't offered is rejected.
+      const ranked = [req.proposedStartsAt, req.proposedStartsAt2, req.proposedStartsAt3]
+        .filter(Boolean).map((d) => (d as Date).toISOString());
+      const target = chosenStartsAt ? new Date(chosenStartsAt).toISOString() : ranked[0]!;
+      if (!ranked.includes(target)) {
+        throw new BadRequestException('Chosen time is not one of the family’s proposed options');
+      }
+      if (target !== req.proposedStartsAt.toISOString()) {
+        // Move the booked lesson: re-checks conflicts + availability and notifies the family.
+        await this.directReschedule(orgId, lessonId, target, actor);
+      }
+      return { id: req.id, status: 'confirmed' as const, lessonId };
+    } catch (err) {
+      // The side effect failed (e.g. the alternative slot is no longer free).
+      // Put the review back to 'auto_confirmed' so it isn't stranded as decided
+      // with nothing having happened.
+      await this.db.db.update(lessonRequests)
+        .set({ status: 'auto_confirmed', decidedBy: null, decidedAt: null })
+        .where(eq(lessonRequests.id, req.id));
+      throw err;
+    }
+  }
+
   async getLessonRequests(orgId: string, actor: Actor, status?: string) {
     const teacherStaffId = actor.role === 'teacher' ? await this.resolveStaffId(orgId, actor.userId) : null;
 
@@ -747,7 +892,7 @@ export class SchedulingService {
         ? and(
             eq(lessonRequests.organizationId, orgId),
             status === 'pending'
-              ? inArray(lessonRequests.status, ['pending', 'counter_proposed'])
+              ? inArray(lessonRequests.status, ['pending', 'counter_proposed', 'auto_confirmed'])
               : eq(lessonRequests.status, status as 'confirmed' | 'declined'),
           )
         : eq(lessonRequests.organizationId, orgId),
@@ -773,7 +918,9 @@ export class SchedulingService {
       const options = await Promise.all(ranked.map(async (t, i) => {
         const iso = t.toISOString();
         const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, r.teacherId, iso, r.duration, tz);
-        const conflict = unavailable ? false : await this.hasConflict(this.db.db, orgId, iso, r.duration, r.teacherId);
+        // Exclude the request's own instant-booked lesson (auto_confirmed) so its
+        // 1st choice doesn't read as clashing with itself.
+        const conflict = unavailable ? false : await this.hasConflict(this.db.db, orgId, iso, r.duration, r.teacherId, r.createdLessonId ?? undefined);
         return {
           rank: i + 1,
           startsAt: iso,
@@ -852,15 +999,22 @@ export class SchedulingService {
       where: and(eq(lessonRequests.id, id), eq(lessonRequests.organizationId, orgId)),
     });
     if (!req) throw new NotFoundException('Request not found');
-    // A counter-proposal is still live — it's awaiting the front desk, not decided.
-    if (req.status !== 'pending' && req.status !== 'counter_proposed') {
-      throw new BadRequestException('Request already decided');
-    }
 
     // A teacher may only decide their own requests; receptionist+ may decide any.
     if (actor.role === 'teacher') {
       const staffId = await this.resolveStaffId(orgId, actor.userId);
       if (!staffId || req.teacherId !== staffId) throw new ForbiddenException('Not your request');
+    }
+
+    // A family auto-booking already created the lesson: Accept / Move / Decline
+    // it in place instead of creating a second one.
+    if (req.status === 'auto_confirmed') {
+      return this.decideAutoBooking(orgId, req, decision, actor, chosenStartsAt, reason);
+    }
+
+    // A counter-proposal is still live — it's awaiting the front desk, not decided.
+    if (req.status !== 'pending' && req.status !== 'counter_proposed') {
+      throw new BadRequestException('Request already decided');
     }
 
     let target: string | undefined;

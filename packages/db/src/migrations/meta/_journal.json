@@ -176,6 +176,13 @@
       "when": 1784958847533,
       "tag": "0024_calendar_feed_token",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1785136086896,
+      "tag": "0025_family_booking_veto",
+      "breakpoints": true
     }
   ]
 }
