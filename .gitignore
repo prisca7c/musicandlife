@@ -32,3 +32,6 @@ Thumbs.db
 coverage/
 .vercel
 .env*
+
+# Local Claude Code MCP server config (personal, not for the repo)
+.mcp.json
