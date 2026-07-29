@@ -108,7 +108,20 @@ export const lessonRequests = pgTable(
     counterStartsAt2: timestamp('counter_starts_at_2', { withTimezone: true }),
     counterStartsAt3: timestamp('counter_starts_at_3', { withTimezone: true }),
     notes: text('notes'),
-    status: text('status', { enum: ['pending','counter_proposed','confirmed','declined'] }).notNull().default('pending'),
+    // A family self-booking books its 1st-choice time IMMEDIATELY (so the family
+    // leaves with a confirmed lesson) while still giving the teacher a veto. Such
+    // a request starts life as 'auto_confirmed': the lesson already exists
+    // (createdLessonId is set at creation), and the teacher may Accept (→confirmed,
+    // no change), Move to the 2nd/3rd choice (→confirmed, lesson rescheduled), or
+    // Decline (→declined, lesson cancelled as cancelled_teacher — no charge, no
+    // credit lost). Front-desk-proposed requests still start 'pending' with no
+    // lesson until a time is confirmed.
+    status: text('status', { enum: ['pending','counter_proposed','confirmed','declined','auto_confirmed'] }).notNull().default('pending'),
+    // True when this booking set up a recurring weekly series (the enrollment's
+    // scheduleRule). A teacher declining a recurring auto-booking clears that rule
+    // so the nightly generator stops materialising the series, not just the one
+    // instant-booked occurrence.
+    isRecurring: boolean('is_recurring').notNull().default(false),
     requestedBy: uuid('requested_by').notNull().references(() => users.id),
     decidedBy: uuid('decided_by').references(() => users.id),
     decidedAt: timestamp('decided_at', { withTimezone: true }),

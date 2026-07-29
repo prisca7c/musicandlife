@@ -14,6 +14,7 @@ export type TriggerEvent =
   | 'lesson.reminder_24h'
   | 'lesson.cancelled'
   | 'lesson.rescheduled'
+  | 'booking.review_reminder'
   | 'invoice.sent'
   | 'invoice.preview_summary'
   | 'newsletter.event'
@@ -108,6 +109,20 @@ export const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: strin
       footnote: "If this new time doesn't work for you, get in touch and we'll sort it out.",
     }),
   }),
+  // A family self-booked and their 1st choice is already on the teacher's
+  // calendar — this nudges the teacher to confirm it or move it to one of the
+  // family's back-up times if it doesn't work. The lesson stands eitherway; this
+  // is only a prompt to review, sent once if it's still unreviewed after a day.
+  'booking.review_reminder': (ctx) => ({
+    subject: 'A new booking is waiting for your OK',
+    html: brandedEmail({
+      previewText: 'A family booked a lesson — please confirm or suggest another time.',
+      heading: 'A booking needs your review',
+      bodyHtml: `<p style="margin:0 0 12px">A family booked a lesson with you and it's on your calendar now.</p><p style="margin:0">${ctx.body}</p>`,
+      cta: { label: 'Review in your portal', url: BRAND.portalUrl },
+      footnote: 'If the time works, just confirm it. If not, you can move it to one of the family’s other choices or decline.',
+    }),
+  }),
   // Portal messages exist so teachers and families can talk without swapping
   // phone numbers. That only works if a message is actually noticed, so the
   // text comes through by email while replying stays in the portal.
@@ -164,6 +179,7 @@ export const DEFAULT_RULES: Array<{
   { triggerEvent: 'lesson.reminder_24h', templateId: 'lesson.reminder_24h', channels: ['email'] },
   { triggerEvent: 'lesson.cancelled', templateId: 'lesson.cancelled', channels: ['email'] },
   { triggerEvent: 'lesson.rescheduled', templateId: 'lesson.rescheduled', channels: ['email'] },
+  { triggerEvent: 'booking.review_reminder', templateId: 'booking.review_reminder', channels: ['email'] },
   { triggerEvent: 'invoice.sent', templateId: 'invoice.sent', channels: ['email'] },
   { triggerEvent: 'invoice.preview_summary', templateId: 'invoice.preview_summary', channels: ['email'] },
   { triggerEvent: 'newsletter.event', templateId: 'newsletter.event', channels: ['email'] },

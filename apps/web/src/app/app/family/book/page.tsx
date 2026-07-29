@@ -1,21 +1,43 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
-import { fmtTime, fmtDate } from '@/lib/datetime';
+import { fmtTime, studioDayString } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { SearchableSelect } from '@/components/searchable-select';
-import { ChevronLeft, ChevronRight, Check, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Check, Loader2, Repeat, X } from 'lucide-react';
 
 interface Teacher { id: string; firstName: string; lastName: string; instruments: string[]; defaultDuration: number; }
 interface Enrollment { id: string; instrument: string; rate: number; teacherId: string | null; lessonType: string; status: string; defaultDuration: number; }
 interface Student { id: string; firstName: string; lastName: string; status: string; enrollments: Enrollment[]; }
-interface Slot { startsAt: string; endsAt: string; }
 interface DashboardData { students: Student[]; }
+interface RawSlot { startsAt: string; endsAt: string; }
+
+// One available slot, tagged with the enrolment (and so the student + teacher +
+// price) it belongs to — needed once several teachers/children are overlaid on
+// one calendar.
+interface Slot {
+  startsAt: string;
+  enrollmentId: string;
+  studentId: string;
+  studentName: string;
+  teacherId: string;
+  teacherName: string;
+  instrument: string;
+  duration: number;
+  price: number;
+}
+
+const ALL = '__all__';
+const LEAD_HOURS = 48;
+
+// A small, colour-blind-friendly palette so each teacher reads as a distinct
+// colour when more than one is shown at once.
+const TEACHER_COLORS = ['#2f6f4f', '#8a5a2b', '#3b5b9a', '#7a3b8a', '#9a2b4b', '#2b7a7a'];
 
 function weekMonday(date: Date) {
   const d = new Date(date);
@@ -24,95 +46,175 @@ function weekMonday(date: Date) {
   return d;
 }
 
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 export default function BookLessonPage() {
   const router = useRouter();
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  const [selectedTeacher, setSelectedTeacher] = useState('');
-  const [selectedStudent, setSelectedStudent] = useState('');
-  const [selectedEnrollment, setSelectedEnrollment] = useState('');
-  const [isTrial, setIsTrial] = useState(false);
-  const [weekStart, setWeekStart] = useState(() => weekMonday(new Date()));
-  const [selectedSlot, setSelectedSlot] = useState('');
-  const [booking, setBooking] = useState(false);
-  const [done, setDone] = useState(false);
-
-  // Cached reads — the teacher/student pickers populate instantly on revisit.
   const { data: teachers = [] } = useApi<Teacher[]>('/family/teachers');
   const { data: dashData } = useApi<DashboardData>('/family/dashboard');
-  const students = (dashData?.students as unknown as Student[]) ?? [];
+  const students = useMemo(() => (dashData?.students as unknown as Student[]) ?? [], [dashData]);
 
-  const teacher = teachers.find(t => t.id === selectedTeacher);
-  const student = students.find(s => s.id === selectedStudent);
-  const enrollment = student?.enrollments?.find(e => e.id === selectedEnrollment);
-  // Lesson length comes from the STUDENT's enrollment, not the teacher's
-  // default: a 30-minute pupil was being booked into a 60-minute slot (and
-  // charged accordingly) whenever their teacher's default happened to be 60.
-  // Families can still pick a different length — some weeks want a longer
-  // session — and the price follows, prorated exactly as the API charges it.
-  const contracted = enrollment?.defaultDuration ?? teacher?.defaultDuration ?? 60;
-  const [durationChoice, setDurationChoice] = useState<number | null>(null);
-  const duration = durationChoice ?? contracted;
+  const [selectedStudent, setSelectedStudent] = useState('');
+  const [teacherFilter, setTeacherFilter] = useState<string>(ALL);
+  const [weekStart, setWeekStart] = useState(() => weekMonday(new Date()));
+  const [isTrial, setIsTrial] = useState(false);
+  const [recurring, setRecurring] = useState(false);
+  // Ranked picks (1st = booked now, 2nd/3rd = fallbacks). All must belong to the
+  // same enrolment — you book one lesson, not a mix of teachers.
+  const [picks, setPicks] = useState<Slot[]>([]);
+  const [booking, setBooking] = useState(false);
+  const [done, setDone] = useState<{ recurring: boolean } | null>(null);
 
-  // Reset to the contracted length whenever the instrument changes.
-  useEffect(() => { setDurationChoice(null); }, [selectedEnrollment]);
-
-  // A student signing in with their own login is shown a "Student" dropdown
-  // containing exactly one option: themselves. Pick it for them. The same
-  // applies to a one-child family — there is nothing to choose.
+  // A one-child family (or a student logging in) shouldn't be asked to choose.
   const onlyStudentId = students.length === 1 ? students[0]!.id : null;
+  useEffect(() => { if (onlyStudentId) setSelectedStudent(prev => prev || onlyStudentId); }, [onlyStudentId]);
+  // Default multi-child parents to "All my children" so they see everything at once.
   useEffect(() => {
-    if (onlyStudentId) setSelectedStudent(prev => prev || onlyStudentId);
-  }, [onlyStudentId]);
+    if (students.length > 1 && !selectedStudent) setSelectedStudent(ALL);
+  }, [students.length, selectedStudent]);
 
-  // The enrolment names the teacher; adopt it rather than asking. Only an
-  // enrolment with no teacher assigned falls through to the picker.
-  const enrollmentTeacherId = enrollment?.teacherId ?? null;
+  const teacherName = (id: string | null) => {
+    const t = teachers.find(x => x.id === id);
+    return t ? `${t.firstName} ${t.lastName}` : 'Your teacher';
+  };
+
+  // Every bookable (student, enrolment) pair in the current scope. This is what
+  // the calendar draws availability for.
+  const scope = useMemo(() => {
+    const chosen = selectedStudent === ALL ? students : students.filter(s => s.id === selectedStudent);
+    return chosen.flatMap(s =>
+      (s.enrollments ?? [])
+        .filter(e => (e.status === 'active' || e.status === 'trial') && e.teacherId)
+        .map(e => ({
+          studentId: s.id,
+          studentName: `${s.firstName} ${s.lastName}`,
+          enrollmentId: e.id,
+          instrument: e.instrument,
+          rate: e.rate,
+          duration: e.defaultDuration,
+          teacherId: e.teacherId as string,
+        })),
+    );
+  }, [selectedStudent, students]);
+
+  // Distinct teachers in scope → the "see all / one at a time" filter.
+  const scopeTeachers = useMemo(() => {
+    const ids = [...new Set(scope.map(e => e.teacherId))];
+    return ids.map((id, i) => ({ id, name: teacherName(id), color: TEACHER_COLORS[i % TEACHER_COLORS.length] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, teachers]);
+  const colorFor = (teacherId: string) => scopeTeachers.find(t => t.id === teacherId)?.color ?? TEACHER_COLORS[0];
+
+  // If the current filter no longer matches anyone in scope, fall back to "all".
   useEffect(() => {
-    if (enrollmentTeacherId) setSelectedTeacher(enrollmentTeacherId);
-    else setSelectedTeacher('');
-  }, [enrollmentTeacherId]);
+    if (teacherFilter !== ALL && !scopeTeachers.some(t => t.id === teacherFilter)) setTeacherFilter(ALL);
+  }, [scopeTeachers, teacherFilter]);
 
-  // Mirrors proratedAmount() on the API: a length other than the enrollment's
-  // normal one is charged in proportion.
-  const priceFor = (mins: number) =>
-    enrollment ? Math.round((enrollment.rate * mins) / (enrollment.defaultDuration || mins)) : 0;
+  const activeEnrollments = useMemo(
+    () => scope.filter(e => teacherFilter === ALL || e.teacherId === teacherFilter),
+    [scope, teacherFilter],
+  );
 
-  // Availability is cached per teacher+week+duration; picking a teacher (or
-  // paging weeks) re-keys and loads the slots. Null key = don't fetch yet.
+  // ── Fan-out availability: one call per enrolment in view, merged. SWR can't key
+  //    a dynamic number of requests, so this loads them in parallel by hand. ──
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
   const ws = weekStart.toISOString().split('T')[0];
-  const slotsKey = selectedTeacher
-    ? `/family/availability?teacherId=${selectedTeacher}&weekStart=${ws}&duration=${duration}`
-    : null;
-  const { data: slots = [], isLoading: loadingSlots } = useApi<Slot[]>(slotsKey);
+  const enrollFetchKey = activeEnrollments.map(e => `${e.enrollmentId}:${e.teacherId}:${e.duration}`).join('|');
 
-  // Clear any picked slot when the teacher/week/duration changes.
-  useEffect(() => { setSelectedSlot(''); }, [selectedTeacher, weekStart, duration]);
+  const reqSeq = useRef(0);
+  useEffect(() => {
+    if (activeEnrollments.length === 0) { setSlots([]); return; }
+    const seq = ++reqSeq.current;
+    setLoadingSlots(true);
+    Promise.all(
+      activeEnrollments.map(async (e) => {
+        try {
+          const raw = await apiFetch<RawSlot[]>(
+            `/family/availability?teacherId=${e.teacherId}&weekStart=${ws}&duration=${e.duration}`,
+            { token: tok() },
+          );
+          return (raw ?? []).map<Slot>(s => ({
+            startsAt: s.startsAt,
+            enrollmentId: e.enrollmentId,
+            studentId: e.studentId,
+            studentName: e.studentName,
+            teacherId: e.teacherId,
+            teacherName: teacherName(e.teacherId),
+            instrument: e.instrument,
+            duration: e.duration,
+            price: e.rate,
+          }));
+        } catch { return []; }
+      }),
+    ).then(perEnrollment => {
+      if (seq !== reqSeq.current) return; // a newer request superseded this one
+      setSlots(perEnrollment.flat());
+      setLoadingSlots(false);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enrollFetchKey, ws]);
 
-  const slotsByDay = slots.reduce<Record<string, Slot[]>>((acc, s) => {
-    const day = fmtDate(s.startsAt, { weekday: 'long', day: 'numeric', month: 'short' });
-    (acc[day] = acc[day] ?? []).push(s);
-    return acc;
-  }, {});
+  // Clear picks whenever the scope/week changes — stale picks would point at slots
+  // no longer shown.
+  useEffect(() => { setPicks([]); setRecurring(false); }, [enrollFetchKey, ws]);
+
+  const lockedEnrollment = picks[0]?.enrollmentId ?? null;
+  const cutoff = Date.now() + LEAD_HOURS * 3600000;
+  const slotKey = (s: Slot) => `${s.enrollmentId}@${s.startsAt}`;
+  const pickRank = (s: Slot) => picks.findIndex(p => slotKey(p) === slotKey(s));
+
+  function toggleSlot(s: Slot) {
+    const existing = pickRank(s);
+    if (existing >= 0) { setPicks(picks.filter((_, i) => i !== existing)); return; }
+    // Picks from a different enrolment start a fresh selection — one booking is
+    // one teacher/instrument for one child.
+    if (lockedEnrollment && s.enrollmentId !== lockedEnrollment) { setPicks([s]); return; }
+    if (recurring) { setPicks([s]); return; }          // a series uses one weekly time
+    if (picks.length >= 3) return;                      // 1st + two fallbacks max
+    setPicks([...picks, s]);
+  }
+
+  // Build the 7-day week grid (Mon→Sun) with each day's slots sorted by time.
+  const days = useMemo(() => {
+    const byDay = new Map<string, Slot[]>();
+    for (const s of slots) {
+      const day = studioDayString(s.startsAt);
+      (byDay.get(day) ?? byDay.set(day, []).get(day)!).push(s);
+    }
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(weekStart.getTime() + i * 86400000);
+      const key = studioDayString(d);
+      const daySlots = (byDay.get(key) ?? []).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+      return { date: d, key, slots: daySlots };
+    });
+  }, [slots, weekStart]);
 
   async function book() {
-    if (!selectedSlot || !selectedTeacher || !selectedStudent || !selectedEnrollment) return;
+    const first = picks[0];
+    if (!first) return;
     setBooking(true);
     try {
       await apiFetch('/family/lessons', {
         method: 'POST', token: tok(),
         body: JSON.stringify({
-          teacherId: selectedTeacher,
-          studentId: selectedStudent,
-          enrollmentId: selectedEnrollment,
-          startsAt: selectedSlot,
-          duration,
+          teacherId: first.teacherId,
+          studentId: first.studentId,
+          enrollmentId: first.enrollmentId,
+          startsAt: first.startsAt,
+          startsAt2: recurring ? undefined : picks[1]?.startsAt,
+          startsAt3: recurring ? undefined : picks[2]?.startsAt,
+          duration: first.duration,
           isTrialLesson: isTrial,
+          recurring,
         }),
       });
-      setDone(true);
-    } catch (e) { alert('Booking failed — this slot may no longer be available.'); }
-    finally { setBooking(false); }
+      setDone({ recurring });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Booking failed — that time may no longer be available.');
+    } finally { setBooking(false); }
   }
 
   if (done) return (
@@ -120,10 +222,16 @@ export default function BookLessonPage() {
       <div className="w-16 h-16 rounded-full bg-[var(--sage-lt)] flex items-center justify-center mb-4">
         <Check size={32} className="text-[var(--sage-dk)]" />
       </div>
-      <h2 className="text-xl font-black mb-2" style={{ color: 'var(--txt)' }}>Lesson booked!</h2>
-      <p className="text-sm mb-6" style={{ color: 'var(--txt3)' }}>A confirmation email has been sent to you and the teacher.</p>
+      <h2 className="text-xl font-black mb-2" style={{ color: 'var(--txt)' }}>
+        {done.recurring ? 'Weekly lesson set up!' : 'Lesson booked!'}
+      </h2>
+      <p className="text-sm mb-6 max-w-md" style={{ color: 'var(--txt3)' }}>
+        {done.recurring
+          ? 'Your weekly lesson is now on the calendar. Your teacher will confirm it or suggest another time.'
+          : 'Your first-choice time is booked. Your teacher will confirm it, or move it to one of your other choices if they need to.'}
+      </p>
       <div className="flex gap-3">
-        <button onClick={() => { setDone(false); setSelectedSlot(''); }}
+        <button onClick={() => { setDone(null); setPicks([]); setRecurring(false); }}
           className="px-4 py-2 rounded-xl border border-[var(--bd2)] text-sm font-medium hover:bg-[var(--surf)]">
           Book another
         </button>
@@ -135,207 +243,201 @@ export default function BookLessonPage() {
     </div>
   );
 
+  const multiTeacher = scopeTeachers.length > 1;
+
   return (
     <div>
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">
             Book a lesson
-            <InfoTooltip text="You'll only ever see times the teacher is genuinely free — we hide slots that clash with another lesson or fall outside their working hours. Pick a slot and the studio confirms it shortly after." />
+            <InfoTooltip text="Pick your best time and up to two back-ups. Your first choice is booked straight away; your teacher confirms it or moves it to a back-up if that time doesn't work. You'll only ever see times the teacher is genuinely free." />
           </span>
         }
-        subtitle="Choose the student and instrument, then pick a slot"
+        subtitle="Choose who it's for, then tap your preferred times on the calendar"
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ── Step 1: Details ── */}
-        <div className="space-y-4">
-          <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
-            <p className="text-xs font-bold uppercase tracking-widest mb-4" style={{ color: 'var(--txt3)' }}>1. Lesson details</p>
-
-            <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>Student</label>
-            {/* One option is not a choice — a student logging in was made to
-                pick themselves out of a dropdown of one. */}
-            {students.length === 1 ? (
-              <p className="mb-3 rounded-xl border px-3 py-2 text-sm font-medium"
-                style={{ borderColor: 'var(--bd2)', background: 'var(--surf)', color: 'var(--txt)' }}>
-                {students[0]!.firstName} {students[0]!.lastName}
-              </p>
-            ) : (
-              <div className="mb-3">
-                <SearchableSelect
-                  options={students.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
-                  value={selectedStudent} onChange={v => { setSelectedStudent(v); setSelectedEnrollment(''); }}
-                  placeholder="Select student…"
-                />
-              </div>
-            )}
-
-            {student && (() => {
-              const bookable = (student.enrollments ?? []).filter(e => e.status === 'active' || e.status === 'trial');
-              return (
-                <>
-                  <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>Instrument / Class</label>
-                  {bookable.length === 0 ? (
-                    <p className="text-xs mb-3 rounded-xl border border-[var(--bd2)] bg-[var(--surf)] px-3 py-2" style={{ color: 'var(--txt3)' }}>
-                      This student isn&apos;t signed up for any instrument or class yet. Please contact the studio to get set up.
-                    </p>
-                  ) : (
-                    <select value={selectedEnrollment} onChange={e => setSelectedEnrollment(e.target.value)}
-                      className="w-full border border-[var(--bd2)] rounded-xl px-3 py-2 text-sm mb-3 focus:outline-none focus:border-[var(--sage)]">
-                      <option value="">Select instrument / class…</option>
-                      {bookable.map(e => (
-                        <option key={e.id} value={e.id}>
-                          {e.instrument.charAt(0).toUpperCase() + e.instrument.slice(1)}
-                          {e.lessonType === 'group' ? ' (group class)' : ''} — {formatMoney(e.rate)} / {e.defaultDuration} min
-                        </option>
-                      ))}
-                    </select>
-                  )}
-
-                  {enrollment && (
-                    <>
-                      {/* The teacher follows from the instrument — it is not a
-                          free choice. Picking them separately let a family book
-                          a piano lesson with the cello teacher; the API now
-                          rejects that outright, so don't offer it. */}
-                      <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>Teacher</label>
-                      {enrollment.teacherId ? (
-                        <p className="mb-3 rounded-xl border px-3 py-2 text-sm font-medium"
-                          style={{ borderColor: 'var(--bd2)', background: 'var(--surf)', color: 'var(--txt)' }}>
-                          {teacher ? `${teacher.firstName} ${teacher.lastName}` : 'Your teacher'}
-                          <span className="block text-xs font-normal" style={{ color: 'var(--txt3)' }}>
-                            Set by this enrolment
-                          </span>
-                        </p>
-                      ) : (
-                        <div className="mb-3">
-                          <SearchableSelect
-                            options={teachers.map(t => ({ value: t.id, label: `${t.firstName} ${t.lastName} — ${t.instruments.join(', ')}` }))}
-                            value={selectedTeacher} onChange={setSelectedTeacher} placeholder="Select teacher…"
-                          />
-                        </div>
-                      )}
-
-                      <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt3)' }}>
-                        Lesson length
-                      </label>
-                      <div className="flex gap-2 mb-3">
-                        {[30, 45, 60].map((m) => (
-                          <button
-                            key={m}
-                            type="button"
-                            onClick={() => setDurationChoice(m)}
-                            className="flex-1 rounded-xl border px-2 py-2 text-xs font-semibold transition"
-                            style={
-                              duration === m
-                                ? { borderColor: 'var(--sage)', background: 'var(--sage-lt)', color: 'var(--sage-dk)' }
-                                : { borderColor: 'var(--bd2)', color: 'var(--txt3)' }
-                            }
-                          >
-                            {m} min
-                            <span className="block font-bold" style={{ color: 'var(--txt)' }}>
-                              {formatMoney(priceFor(m))}
-                            </span>
-                            {m === contracted && (
-                              <span className="block text-[10px] font-medium" style={{ color: 'var(--txt4)' }}>usual</span>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </>
-              );
-            })()}
-
-            <label className="flex items-center gap-2.5 text-sm cursor-pointer mt-1">
-              <input type="checkbox" checked={isTrial} onChange={e => setIsTrial(e.target.checked)}
-                className="rounded border-[var(--bd2)]" />
-              <span style={{ color: 'var(--txt)' }}>This is a trial lesson</span>
-            </label>
+      {/* ── Controls: child + teacher filter ── */}
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        {students.length > 1 && (
+          <div className="min-w-[220px]">
+            <SearchableSelect
+              options={[{ value: ALL, label: 'All my children' }, ...students.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))]}
+              value={selectedStudent} onChange={v => setSelectedStudent(v)}
+              placeholder="Select child…"
+            />
           </div>
+        )}
 
-          {selectedSlot && (
-            <div className="bg-[var(--sage-lt)] rounded-2xl border border-[var(--sage-md)] p-4">
-              <p className="text-xs font-bold uppercase tracking-widest mb-2 text-[var(--sage-dk)]">Selected slot</p>
-              <p className="font-semibold text-sm" style={{ color: 'var(--txt)' }}>
-                {fmtDate(selectedSlot, { weekday: 'long', day: 'numeric', month: 'long' })}
-              </p>
-              <p className="text-sm" style={{ color: 'var(--txt3)' }}>
-                {fmtTime(selectedSlot)} · {duration} min
-                {enrollment ? ` · ${formatMoney(priceFor(duration))}` : ''}
-              </p>
-              <button onClick={book} disabled={booking || !selectedEnrollment || !selectedStudent}
-                className="mt-3 w-full bg-[var(--sage)] text-white font-bold text-sm py-2.5 rounded-xl hover:bg-[var(--sage-dk)] disabled:opacity-50 flex items-center justify-center gap-2">
-                {booking ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-                Confirm booking
+        {multiTeacher && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-semibold mr-1" style={{ color: 'var(--txt3)' }}>Teachers:</span>
+            <button onClick={() => setTeacherFilter(ALL)}
+              className="px-2.5 py-1 rounded-lg text-xs font-semibold border transition"
+              style={teacherFilter === ALL
+                ? { borderColor: 'var(--sage)', background: 'var(--sage-lt)', color: 'var(--sage-dk)' }
+                : { borderColor: 'var(--bd2)', color: 'var(--txt3)' }}>
+              See all
+            </button>
+            {scopeTeachers.map(t => (
+              <button key={t.id} onClick={() => setTeacherFilter(t.id)}
+                className="px-2.5 py-1 rounded-lg text-xs font-semibold border transition inline-flex items-center gap-1.5"
+                style={teacherFilter === t.id
+                  ? { borderColor: t.color, background: `${t.color}14`, color: t.color }
+                  : { borderColor: 'var(--bd2)', color: 'var(--txt3)' }}>
+                <span className="w-2 h-2 rounded-full" style={{ background: t.color }} />
+                {t.name}
               </button>
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
+      </div>
 
-        {/* ── Step 2: Slots ── */}
-        <div className="lg:col-span-2">
-          {!selectedTeacher ? (
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* ── Calendar ── */}
+        <div className="lg:col-span-3">
+          {scope.length === 0 ? (
             <div className="bg-white rounded-2xl border border-[var(--bd)] p-12 text-center">
-              <p className="text-sm" style={{ color: 'var(--txt3)' }}>Choose a student and instrument to see available slots.</p>
+              <p className="text-sm" style={{ color: 'var(--txt3)' }}>
+                No bookable instruments yet. Please contact the studio to get set up.
+              </p>
             </div>
           ) : (
-            <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+            <div className="bg-white rounded-2xl border p-4 sm:p-5" style={{ borderColor: 'var(--bd)' }}>
               {/* Week nav */}
-              <div className="flex items-center justify-between mb-5">
-                <button onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() - 7); return n; })}
-                  className="p-2 rounded-xl border border-[var(--bd2)] hover:bg-[var(--surf)]">
+              <div className="flex items-center justify-between mb-4">
+                <button onClick={() => setWeekStart(d => new Date(d.getTime() - 7 * 86400000))}
+                  className="p-2 rounded-xl border border-[var(--bd2)] hover:bg-[var(--surf)]" aria-label="Previous week">
                   <ChevronLeft size={16} />
                 </button>
                 <p className="font-bold text-sm" style={{ color: 'var(--txt)' }}>
                   {weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })} –{' '}
                   {new Date(weekStart.getTime() + 6 * 86400000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
                 </p>
-                <button onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(n.getDate() + 7); return n; })}
-                  className="p-2 rounded-xl border border-[var(--bd2)] hover:bg-[var(--surf)]">
+                <button onClick={() => setWeekStart(d => new Date(d.getTime() + 7 * 86400000))}
+                  className="p-2 rounded-xl border border-[var(--bd2)] hover:bg-[var(--surf)]" aria-label="Next week">
                   <ChevronRight size={16} />
                 </button>
               </div>
 
               {loadingSlots ? (
-                <div className="py-12 text-center text-[var(--txt3)] text-sm flex items-center justify-center gap-2">
-                  <Loader2 size={16} className="animate-spin" /> Loading slots…
-                </div>
-              ) : Object.keys(slotsByDay).length === 0 ? (
-                <div className="py-12 text-center">
-                  <p className="text-sm" style={{ color: 'var(--txt3)' }}>No available slots this week.</p>
-                  <p className="text-xs mt-1" style={{ color: 'var(--txt4)' }}>Try the next week →</p>
+                <div className="py-16 text-center text-[var(--txt3)] text-sm flex items-center justify-center gap-2">
+                  <Loader2 size={16} className="animate-spin" /> Loading times…
                 </div>
               ) : (
-                <div className="space-y-5">
-                  {Object.entries(slotsByDay).map(([day, daySlots]) => (
-                    <div key={day}>
-                      <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--txt3)' }}>{day}</p>
-                      <div className="flex flex-wrap gap-2">
-                        {daySlots.map(slot => {
-                          const active = selectedSlot === slot.startsAt;
-                          return (
-                            <button key={slot.startsAt}
-                              onClick={() => setSelectedSlot(slot.startsAt)}
-                              className={`px-3 py-1.5 rounded-xl text-sm font-semibold border transition-all
-                                ${active
-                                  ? 'bg-[var(--sage)] text-white border-[var(--sage)]'
-                                  : 'border-[var(--bd2)] hover:border-[var(--sage-md)] hover:bg-[var(--sage-lt)]'
-                                }`}
-                              style={{ color: active ? undefined : 'var(--txt)' }}>
-                              {fmtTime(slot.startsAt)}
-                            </button>
-                          );
-                        })}
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                  {days.map(({ date, key, slots: daySlots }) => {
+                    const isToday = studioDayString(new Date()) === key;
+                    return (
+                      <div key={key} className="min-h-[120px]">
+                        <div className="text-center mb-2">
+                          <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--txt3)' }}>
+                            {date.toLocaleDateString('en-GB', { weekday: 'short' })}
+                          </p>
+                          <p className="text-sm font-black" style={{ color: isToday ? 'var(--sage-dk)' : 'var(--txt)' }}>
+                            {date.getDate()}
+                          </p>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          {daySlots.length === 0 ? (
+                            <p className="text-[11px] text-center py-2" style={{ color: 'var(--txt4)' }}>—</p>
+                          ) : daySlots.map(s => {
+                            const rank = pickRank(s);
+                            const picked = rank >= 0;
+                            const tooSoon = new Date(s.startsAt).getTime() < cutoff;
+                            const c = colorFor(s.teacherId);
+                            return (
+                              <button key={slotKey(s)} disabled={tooSoon} onClick={() => toggleSlot(s)}
+                                title={tooSoon ? `Online bookings need ${LEAD_HOURS}h notice — call the studio for sooner.` : `${s.studentName} · ${cap(s.instrument)} · ${s.teacherName}`}
+                                className="relative w-full rounded-lg text-xs font-semibold border py-1.5 px-1 transition disabled:opacity-35 disabled:cursor-not-allowed"
+                                style={picked
+                                  ? { borderColor: 'var(--sage)', background: 'var(--sage)', color: '#fff' }
+                                  : { borderColor: 'var(--bd2)', color: 'var(--txt)' }}>
+                                {multiTeacher && !picked && (
+                                  <span className="absolute left-1 top-1 w-1.5 h-1.5 rounded-full" style={{ background: c }} />
+                                )}
+                                {fmtTime(s.startsAt)}
+                                {picked && <span className="ml-1 text-[10px] font-black">#{rank + 1}</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
+              )}
+
+              {!loadingSlots && slots.length === 0 && scope.length > 0 && (
+                <p className="text-center text-sm mt-4" style={{ color: 'var(--txt3)' }}>
+                  No available times this week. Try the next week →
+                </p>
               )}
             </div>
           )}
+        </div>
+
+        {/* ── Selection / confirm ── */}
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border p-5 sticky top-4" style={{ borderColor: 'var(--bd)' }}>
+            <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--txt3)' }}>Your choices</p>
+
+            {picks.length === 0 ? (
+              <p className="text-sm" style={{ color: 'var(--txt3)' }}>
+                Tap a time on the calendar. Your <strong>1st</strong> choice is booked right away; add up to two back-ups your teacher can move it to.
+              </p>
+            ) : (
+              <>
+                <div className="mb-3 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: 'var(--bd2)', background: 'var(--surf)' }}>
+                  <p className="font-bold" style={{ color: 'var(--txt)' }}>{cap(picks[0]!.instrument)}</p>
+                  <p className="text-xs" style={{ color: 'var(--txt3)' }}>
+                    {picks[0]!.studentName} · {picks[0]!.teacherName} · {picks[0]!.duration} min · {formatMoney(picks[0]!.price)}
+                  </p>
+                </div>
+
+                <ul className="space-y-1.5 mb-3">
+                  {picks.map((p, i) => (
+                    <li key={slotKey(p)} className="flex items-center justify-between gap-2 text-sm rounded-lg border px-2.5 py-1.5"
+                      style={{ borderColor: i === 0 ? 'var(--sage-md)' : 'var(--bd2)' }}>
+                      <span style={{ color: 'var(--txt)' }}>
+                        <span className="font-black mr-1.5" style={{ color: 'var(--sage-dk)' }}>#{i + 1}</span>
+                        {new Date(p.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} · {fmtTime(p.startsAt)}
+                        {i === 0 && <span className="ml-1.5 text-[10px] font-bold uppercase" style={{ color: 'var(--sage-dk)' }}>booked now</span>}
+                      </span>
+                      <button onClick={() => setPicks(picks.filter((_, j) => j !== i))} className="text-[var(--txt4)] hover:text-[var(--txt)]" aria-label="Remove">
+                        <X size={14} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+
+                <label className="flex items-center gap-2.5 text-sm cursor-pointer mb-2">
+                  <input type="checkbox" checked={recurring}
+                    onChange={e => { setRecurring(e.target.checked); if (e.target.checked) setPicks(p => p.slice(0, 1)); }}
+                    className="rounded border-[var(--bd2)]" />
+                  <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--txt)' }}>
+                    <Repeat size={13} /> Repeat weekly
+                  </span>
+                </label>
+                {recurring && (
+                  <p className="text-xs mb-2 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)' }}>
+                    Books this time every week — no need to rebook. Back-up times don&apos;t apply to a weekly series.
+                  </p>
+                )}
+
+                <label className="flex items-center gap-2.5 text-sm cursor-pointer mb-3">
+                  <input type="checkbox" checked={isTrial} onChange={e => setIsTrial(e.target.checked)} className="rounded border-[var(--bd2)]" />
+                  <span style={{ color: 'var(--txt)' }}>This is a trial lesson</span>
+                </label>
+
+                <button onClick={book} disabled={booking}
+                  className="w-full bg-[var(--sage)] text-white font-bold text-sm py-2.5 rounded-xl hover:bg-[var(--sage-dk)] disabled:opacity-50 flex items-center justify-center gap-2">
+                  {booking ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                  {recurring ? 'Set up weekly lesson' : 'Book & send to teacher'}
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

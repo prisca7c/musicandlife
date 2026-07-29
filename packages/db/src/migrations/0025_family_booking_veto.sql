@@ -1,0 +1,1 @@
+ALTER TABLE "lesson_requests" ADD COLUMN IF NOT EXISTS "is_recurring" boolean DEFAULT false NOT NULL;
