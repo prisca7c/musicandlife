@@ -499,6 +499,19 @@ export class SchedulingService {
     }
   }
 
+  /** Emails the family once that a whole recurring series was cancelled. Best-effort. */
+  private async notifyRecurringCancelled(orgId: string, studentId: string) {
+    const { firstName, emails } = await this.lessonNotifyRecipients(studentId);
+    if (emails.length === 0) return;
+    for (const email of emails) {
+      await this.notifications.trigger('lesson.cancelled', {
+        orgId,
+        email,
+        body: `${firstName ?? 'Your child'}'s recurring weekly lessons have been cancelled by the teacher. There's no charge — please book a new time if you'd like to continue.`,
+      });
+    }
+  }
+
   // ─── Teacher availability ───────────────────────────────────────────────────
   private async getOrgTimezone(exec: Executor, orgId: string): Promise<string> {
     const org = await exec.query.organizations.findFirst({
@@ -770,6 +783,18 @@ export class SchedulingService {
       );
     }
 
+    // Group classes meet at a fixed shared time — they aren't self-bookable as
+    // individual slots. Guard the API even though the picker hides them, so a
+    // stale client or a crafted request can't turn a group enrolment into a 1:1.
+    const enrollment = await this.db.db.query.enrollments.findFirst({
+      where: and(eq(enrollments.id, dto.enrollmentId), eq(enrollments.organizationId, orgId)),
+      columns: { lessonType: true },
+    });
+    if (!enrollment) throw new BadRequestException('Enrolment not found.');
+    if (enrollment.lessonType === 'group') {
+      throw new BadRequestException('Group classes are arranged by the studio, not booked online. Please contact us to join a group.');
+    }
+
     // Instant-book the 1st choice — runs the shared advisory lock + conflict
     // checks, so self-service can't double-book a teacher.
     const lesson = await this.createLesson(orgId, {
@@ -831,6 +856,22 @@ export class SchedulingService {
     const lessonId = req.createdLessonId;
     if (!lessonId) throw new BadRequestException('This booking has no lesson to act on');
 
+    // The family may have cancelled or moved this lesson between booking it and the
+    // teacher reviewing. Acting on a non-scheduled lesson would either no-op an
+    // "Accept" onto a dead lesson or reschedule a cancelled one, so treat the
+    // review as moot: resolve the request and take it out of the queue.
+    const existingLesson = await this.getLesson(orgId, lessonId).catch(() => null);
+    if (!existingLesson || existingLesson.status !== 'scheduled') {
+      await this.db.db.update(lessonRequests)
+        .set({ status: 'declined', decidedBy: actor.userId, decidedAt: new Date(), reason: 'Lesson no longer active' })
+        .where(and(
+          eq(lessonRequests.id, req.id),
+          eq(lessonRequests.organizationId, orgId),
+          eq(lessonRequests.status, 'auto_confirmed'),
+        ));
+      throw new BadRequestException('This lesson was already changed or cancelled by the family, so there’s nothing to review. It has been cleared from your list.');
+    }
+
     // Atomically claim the review so a double-tap or two-teacher race resolves once.
     const claimed = await this.db.db.update(lessonRequests)
       .set({ status: decision, decidedBy: actor.userId, decidedAt: new Date(), reason })
@@ -847,11 +888,40 @@ export class SchedulingService {
         // cancelled_teacher = no charge, no credit lost, teacher not paid; also
         // notifies the family. NOT the family-cancel path (which can charge).
         await this.cancelLesson(orgId, lessonId, { reason: 'cancelled_teacher', notes: reason }, actor.userId, actor);
-        // Declining a recurring booking stops the whole series, not just this occurrence.
+        // Declining a recurring booking stops the whole series, not just this
+        // occurrence. Booking already materialised the near-term window (up to
+        // RECURRENCE_WINDOW_WEEKS of real rows), so nulling the rule alone would
+        // strand weeks 2-N on everyone's calendar — cancel every future
+        // occurrence of this enrolment too, on the same no-charge teacher path.
         if (req.isRecurring && req.enrollmentId) {
           await this.db.db.update(enrollments)
             .set({ scheduleRule: null, updatedAt: new Date() })
             .where(and(eq(enrollments.id, req.enrollmentId), eq(enrollments.organizationId, orgId)));
+
+          const now = new Date();
+          const future = await this.db.db.query.lessons.findMany({
+            where: and(
+              eq(lessons.enrollmentId, req.enrollmentId),
+              eq(lessons.organizationId, orgId),
+              eq(lessons.status, 'scheduled'),
+              gte(lessons.startsAt, now),
+            ),
+            columns: { id: true, studentId: true, startsAt: true },
+          });
+          if (future.length) {
+            await this.db.db.update(lessons)
+              .set({ status: 'cancelled_teacher', cancelledAt: now, notes: reason, updatedAt: now })
+              .where(and(
+                eq(lessons.enrollmentId, req.enrollmentId),
+                eq(lessons.organizationId, orgId),
+                eq(lessons.status, 'scheduled'),
+                gte(lessons.startsAt, now),
+              ));
+            // One notice for the series, not one email per week.
+            await this.notifyRecurringCancelled(orgId, future[0]!.studentId).catch((e) =>
+              this.logger.warn(`recurring cancel notify failed for enrollment ${req.enrollmentId}: ${e}`),
+            );
+          }
         }
         return { id: req.id, status: 'declined' as const, lessonId };
       }

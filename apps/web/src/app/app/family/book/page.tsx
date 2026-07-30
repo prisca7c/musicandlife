@@ -88,7 +88,9 @@ export default function BookLessonPage() {
     const out: { studentId: string; studentName: string; enrollmentId: string; instrument: string; rate: number; duration: number; teacherId: string }[] = [];
     for (const s of chosen) {
       for (const e of s.enrollments ?? []) {
-        if (!((e.status === 'active' || e.status === 'trial') && e.teacherId)) continue;
+        // Group classes meet at a fixed shared time — they aren't self-bookable
+        // as individual slots, so keep them out of the picker entirely.
+        if (!((e.status === 'active' || e.status === 'trial') && e.teacherId && e.lessonType !== 'group')) continue;
         // Collapse enrolments that would book the identical lesson — same child,
         // teacher, instrument (case-insensitive: "piano"/"Piano" are one thing),
         // length AND price. Anything that still differs (e.g. two piano rates) is
@@ -473,7 +475,9 @@ export default function BookLessonPage() {
 
                 <label className="flex items-center gap-2.5 text-sm cursor-pointer mb-2">
                   <input type="checkbox" checked={recurring}
-                    onChange={e => { setRecurring(e.target.checked); if (e.target.checked) setPicks(p => p.slice(0, 1)); }}
+                    // A weekly series and a one-off trial are mutually exclusive —
+                    // turning one on turns the other off.
+                    onChange={e => { setRecurring(e.target.checked); if (e.target.checked) { setPicks(p => p.slice(0, 1)); setIsTrial(false); } }}
                     className="rounded border-[var(--bd2)]" />
                   <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--txt)' }}>
                     <Repeat size={13} /> Repeat weekly
@@ -485,10 +489,12 @@ export default function BookLessonPage() {
                   </p>
                 )}
 
-                <label className="flex items-center gap-2.5 text-sm cursor-pointer mb-3">
-                  <input type="checkbox" checked={isTrial} onChange={e => setIsTrial(e.target.checked)} className="rounded border-[var(--bd2)]" />
-                  <span style={{ color: 'var(--txt)' }}>This is a trial lesson</span>
-                </label>
+                {!recurring && (
+                  <label className="flex items-center gap-2.5 text-sm cursor-pointer mb-3">
+                    <input type="checkbox" checked={isTrial} onChange={e => setIsTrial(e.target.checked)} className="rounded border-[var(--bd2)]" />
+                    <span style={{ color: 'var(--txt)' }}>This is a trial lesson</span>
+                  </label>
+                )}
 
                 <button onClick={book} disabled={booking}
                   className="w-full bg-[var(--sage)] text-white font-bold text-sm py-2.5 rounded-xl hover:bg-[var(--sage-dk)] disabled:opacity-50 flex items-center justify-center gap-2">

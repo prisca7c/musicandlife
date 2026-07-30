@@ -35,7 +35,13 @@ function makeService() {
   };
   const db = {
     db: {
-      query: { lessonRequests: { findFirst: jest.fn() } },
+      query: {
+        lessonRequests: { findFirst: jest.fn() },
+        // Booking checks the enrolment isn't a group class; decline of a recurring
+        // series scans for the future rows it materialised.
+        enrollments: { findFirst: jest.fn().mockResolvedValue({ lessonType: 'private' }) },
+        lessons: { findMany: jest.fn().mockResolvedValue([]) },
+      },
       insert: jest.fn(() => ({
         values: (v: Record<string, unknown>) => { inserted.push(v); return { returning: async () => [{ ...v, id: 'req-1' }] }; },
       })),
@@ -54,6 +60,9 @@ function makeService() {
   s.directReschedule = jest.fn().mockResolvedValue({});
   s.cancelLesson = jest.fn().mockResolvedValue({});
   s.materializeEnrollment = jest.fn().mockResolvedValue({ created: 1 });
+  // The lesson under review is still scheduled unless a test says otherwise.
+  s.getLesson = jest.fn().mockResolvedValue({ id: 'lesson-1', status: 'scheduled', studentId: 'stu-1' });
+  s.notifyRecurringCancelled = jest.fn().mockResolvedValue(undefined);
 
   return { svc, s, db, inserted, updates };
 }
@@ -102,6 +111,18 @@ describe('SchedulingService.createFamilyBooking', () => {
     expect(rule.startTime).toMatch(/^\d{2}:\d{2}$/);
     expect(s.materializeEnrollment).toHaveBeenCalledWith('org-1', 'en-1');
   });
+
+  it('rejects a group enrolment — group classes are not self-bookable', async () => {
+    const { svc, s, db } = makeService();
+    (db.db.query.enrollments.findFirst as jest.Mock).mockResolvedValue({ lessonType: 'group' });
+    await expect(
+      svc.createFamilyBooking('org-1', {
+        studentId: 'stu-1', teacherId: 't-1', enrollmentId: 'en-1',
+        startsAt: iso(72), duration: 60,
+      }, 'u-1'),
+    ).rejects.toThrow(BadRequestException);
+    expect(s.createLesson).not.toHaveBeenCalled();
+  });
 });
 
 describe('SchedulingService.decideLessonRequest — auto_confirmed (family veto)', () => {
@@ -130,6 +151,34 @@ describe('SchedulingService.decideLessonRequest — auto_confirmed (family veto)
 
     await svc.decideLessonRequest('org-1', 'req-1', 'declined', staff, undefined, undefined);
     expect(updates.some(u => u.set.scheduleRule === null)).toBe(true);
+  });
+
+  it('DECLINE of a recurring booking cancels the already-materialised future weeks', async () => {
+    const { svc, s, db, updates } = makeService();
+    (db.db.query.lessonRequests.findFirst as jest.Mock).mockResolvedValue({ ...baseReq(), isRecurring: true });
+    // Weeks 2-3 were materialised at booking time and are still on the calendar.
+    (db.db.query.lessons.findMany as jest.Mock).mockResolvedValue([
+      { id: 'lesson-2', studentId: 'stu-1', startsAt: new Date(iso(240)) },
+      { id: 'lesson-3', studentId: 'stu-1', startsAt: new Date(iso(408)) },
+    ]);
+
+    await svc.decideLessonRequest('org-1', 'req-1', 'declined', staff, undefined, undefined);
+    // A bulk status flip to cancelled_teacher for the future rows, plus one notice.
+    expect(updates.some(u => u.set.status === 'cancelled_teacher')).toBe(true);
+    expect(s.notifyRecurringCancelled).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves the request without acting when the family already cancelled the lesson', async () => {
+    const { svc, s, db } = makeService();
+    (db.db.query.lessonRequests.findFirst as jest.Mock).mockResolvedValue(baseReq());
+    (s.getLesson as jest.Mock).mockResolvedValue({ id: 'lesson-1', status: 'cancelled_family', studentId: 'stu-1' });
+
+    await expect(
+      svc.decideLessonRequest('org-1', 'req-1', 'confirmed', staff),
+    ).rejects.toThrow(BadRequestException);
+    // Neither Accept nor Move touched the dead lesson.
+    expect(s.cancelLesson).not.toHaveBeenCalled();
+    expect(s.directReschedule).not.toHaveBeenCalled();
   });
 
   it('ACCEPT (no chosen time) keeps the 1st choice — no reschedule', async () => {
