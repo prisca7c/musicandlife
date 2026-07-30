@@ -114,7 +114,23 @@ describe('SchedulingService.createFamilyBooking', () => {
     const rule = ruleWrite!.set.scheduleRule as { weekday: string; startTime: string };
     expect(rule.weekday).toMatch(/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/);
     expect(rule.startTime).toMatch(/^\d{2}:\d{2}$/);
-    expect(s.materializeEnrollment).toHaveBeenCalledWith('org-1', 'en-1');
+    expect(s.materializeEnrollment).toHaveBeenCalledWith('org-1', 'en-1', { fromDate: expect.any(String) });
+  });
+
+  it('materialises the recurring series from the first booked lesson, not from now', async () => {
+    const { svc, s } = makeService();
+    const first = iso(72); // 1st choice, 72h out
+    await svc.createFamilyBooking('org-1', {
+      studentId: 'stu-1', teacherId: 't-1', enrollmentId: 'en-1',
+      startsAt: first, duration: 60, recurring: true,
+    }, 'u-1');
+    // Anchoring at the first lesson (not now) stops an earlier same-weekday slot
+    // that fell inside the 48h lead window from being back-filled as a surprise
+    // lesson. fromDate must equal the first booked instant and be well ahead of now.
+    const call = (s.materializeEnrollment as jest.Mock).mock.calls[0];
+    const fromDate = call[2].fromDate as string;
+    expect(new Date(fromDate).getTime()).toBe(new Date(first).getTime());
+    expect(new Date(fromDate).getTime()).toBeGreaterThan(Date.now() + 47 * 3600000);
   });
 
   it('stores a recurring end date on the weekly rule when given', async () => {
@@ -207,7 +223,11 @@ describe('SchedulingService.decideLessonRequest — auto_confirmed (family veto)
     expect(updates.some(u => u.set.status === 'cancelled_teacher')).toBe(true);
     const ruleWrite = updates.find(u => 'scheduleRule' in u.set);
     expect((ruleWrite!.set.scheduleRule as { endDate?: string }).endDate).toBe('2026-12-31');
-    expect(s.materializeEnrollment).toHaveBeenCalledWith('org-1', 'en-1');
+    // Regeneration is anchored at the teacher's chosen new time (a future ISO),
+    // not now — so an earlier same-weekday slot this week isn't back-filled.
+    expect(s.materializeEnrollment).toHaveBeenCalledWith('org-1', 'en-1', { fromDate: expect.any(String) });
+    const moveFrom = (s.materializeEnrollment as jest.Mock).mock.calls.at(-1)![2].fromDate as string;
+    expect(new Date(moveFrom).getTime()).toBeGreaterThan(Date.now());
     expect(s.notifyRecurringMoved).toHaveBeenCalledTimes(1);
   });
 
