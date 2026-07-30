@@ -844,7 +844,13 @@ export class SchedulingService {
       await this.db.db.update(enrollments)
         .set({ scheduleRule: rule, updatedAt: new Date() })
         .where(and(eq(enrollments.id, dto.enrollmentId), eq(enrollments.organizationId, orgId)));
-      await this.materializeEnrollment(orgId, dto.enrollmentId).catch((e) =>
+      // Generate the series starting from the first booked lesson, NOT from now.
+      // The family's 1st choice can be a week out precisely because this week's
+      // slot fell inside the 48h lead window; materialising from now would emit
+      // that nearer (<48h) occurrence too — an extra lesson they never booked
+      // that then bills them. Anchoring at ranked[0] keeps the series to the
+      // times the family actually chose.
+      await this.materializeEnrollment(orgId, dto.enrollmentId, { fromDate: ranked[0]!.toISOString() }).catch((e) =>
         this.logger.warn(`materialize after recurring family booking failed: ${e}`),
       );
     }
@@ -1044,7 +1050,10 @@ export class SchedulingService {
       await this.db.db.update(enrollments)
         .set({ scheduleRule: rule, updatedAt: new Date() })
         .where(and(eq(enrollments.id, req.enrollmentId), eq(enrollments.organizationId, orgId)));
-      await this.materializeEnrollment(orgId, req.enrollmentId);
+      // Anchor regeneration at the teacher's chosen new time, not now, so an
+      // earlier same-weekday slot still ahead this week isn't back-filled as a
+      // surprise lesson (see createFamilyBooking for the same reasoning).
+      await this.materializeEnrollment(orgId, req.enrollmentId, { fromDate: target.toISOString() });
 
       await this.notifyRecurringMoved(orgId, req.studentId, target).catch((e) =>
         this.logger.warn(`recurring move notify failed for enrollment ${req.enrollmentId}: ${e}`),
