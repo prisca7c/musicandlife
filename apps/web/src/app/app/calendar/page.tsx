@@ -85,7 +85,13 @@ function getWeekStart(date: Date) {
   d.setHours(0, 0, 0, 0);
   return d;
 }
-function formatDate(d: Date) { return d.toISOString().split('T')[0]!; }
+// The calendar's from/to/weekStart fetch bounds, as the STUDIO-zone day of a
+// local-midnight grid date. `.toISOString()` renders in UTC, which under BST
+// (local = UTC+1) rolls a local Monday back to Sunday — so the API window
+// started a day early and its upper bound cut off the grid's final Sunday,
+// hiding every Sunday lesson from the week view (and the last Sunday of the
+// month view) all summer. studioDayString matches how the grid buckets lessons.
+function formatDate(d: Date) { return studioDayString(d); }
 
 // The 6-week (42-day) grid that renders the month containing `date`: always
 // starts on the Monday on or before the 1st, so the first week's leading days
