@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, gte } from 'drizzle-orm';
 import { enrollments, students, staffMembers, terms, lessons } from '@music-life/db';
 import { DbService } from '../db/db.service';
@@ -37,11 +37,37 @@ export class EnrollmentsService {
 
     await this.assertTeacherAndTermInOrg(orgId, dto.teacherId, dto.termId);
 
+    // Store the instrument trimmed, and reject a case-/whitespace-variant
+    // duplicate of one the student already holds. "Piano" and "piano" (or
+    // " piano ") were otherwise persisted as two separate enrolments for the
+    // same instrument+teacher+type — which fragments reports and billing and
+    // renders as two identical, indistinguishable bookable slots on the family
+    // calendar. Match case-insensitively on instrument + teacher + lessonType;
+    // a withdrawn enrolment never blocks re-enrolling.
+    const instrument = dto.instrument.trim();
+    const siblings = await this.db.db.query.enrollments.findMany({
+      where: and(eq(enrollments.studentId, studentId), eq(enrollments.organizationId, orgId)),
+      columns: { instrument: true, lessonType: true, teacherId: true, status: true },
+    });
+    const isDuplicate = siblings.some(
+      (e) =>
+        e.status !== 'withdrawn' &&
+        e.lessonType === dto.lessonType &&
+        (e.teacherId ?? null) === (dto.teacherId ?? null) &&
+        e.instrument.trim().toLowerCase() === instrument.toLowerCase(),
+    );
+    if (isDuplicate) {
+      throw new ConflictException(
+        `This student already has a ${dto.lessonType} ${instrument} enrolment${dto.teacherId ? ' with this teacher' : ''}.`,
+      );
+    }
+
     const { duration, ...rest } = dto;
     const [enrollment] = await this.db.db
       .insert(enrollments)
       .values({
         ...rest,
+        instrument,
         ...(duration != null ? { defaultDuration: duration } : {}),
         studentId,
         organizationId: orgId,
