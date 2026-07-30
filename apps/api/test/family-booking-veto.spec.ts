@@ -63,6 +63,11 @@ function makeService() {
   // The lesson under review is still scheduled unless a test says otherwise.
   s.getLesson = jest.fn().mockResolvedValue({ id: 'lesson-1', status: 'scheduled', studentId: 'stu-1' });
   s.notifyRecurringCancelled = jest.fn().mockResolvedValue(undefined);
+  s.notifyRecurringMoved = jest.fn().mockResolvedValue(undefined);
+  // A moved series lands in a free slot within the teacher's hours by default.
+  s.teacherUnavailableReason = jest.fn().mockResolvedValue(null);
+  s.hasConflict = jest.fn().mockResolvedValue(false);
+  s.resolveStaffId = jest.fn().mockResolvedValue('staff-1');
 
   return { svc, s, db, inserted, updates };
 }
@@ -189,6 +194,39 @@ describe('SchedulingService.decideLessonRequest — auto_confirmed (family veto)
     // A bulk status flip to cancelled_teacher for the future rows, plus one notice.
     expect(updates.some(u => u.set.status === 'cancelled_teacher')).toBe(true);
     expect(s.notifyRecurringCancelled).toHaveBeenCalledTimes(1);
+  });
+
+  it('MOVE SERIES retargets the weekly rule, drops old weeks, and regenerates', async () => {
+    const { svc, s, db, updates } = makeService();
+    (db.db.query.lessonRequests.findFirst as jest.Mock).mockResolvedValue({ ...baseReq(), isRecurring: true });
+    (db.db.query.enrollments.findFirst as jest.Mock).mockResolvedValue({ scheduleRule: { weekday: 'monday', startTime: '09:00', endDate: '2026-12-31' } });
+
+    const res = await svc.moveRecurringSeries('org-1', 'req-1', '2026-09-03T15:00:00', staff);
+    expect(res).toMatchObject({ status: 'confirmed' });
+    // Old future occurrences cancelled, then a fresh rule written (end date kept).
+    expect(updates.some(u => u.set.status === 'cancelled_teacher')).toBe(true);
+    const ruleWrite = updates.find(u => 'scheduleRule' in u.set);
+    expect((ruleWrite!.set.scheduleRule as { endDate?: string }).endDate).toBe('2026-12-31');
+    expect(s.materializeEnrollment).toHaveBeenCalledWith('org-1', 'en-1');
+    expect(s.notifyRecurringMoved).toHaveBeenCalledTimes(1);
+  });
+
+  it('MOVE SERIES rejects a non-recurring booking', async () => {
+    const { svc, db } = makeService();
+    (db.db.query.lessonRequests.findFirst as jest.Mock).mockResolvedValue(baseReq()); // isRecurring: false
+    await expect(
+      svc.moveRecurringSeries('org-1', 'req-1', '2026-09-03T15:00:00', staff),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('MOVE SERIES rejects a clashing new time', async () => {
+    const { svc, s, db } = makeService();
+    (db.db.query.lessonRequests.findFirst as jest.Mock).mockResolvedValue({ ...baseReq(), isRecurring: true });
+    (s.hasConflict as jest.Mock).mockResolvedValue(true);
+    await expect(
+      svc.moveRecurringSeries('org-1', 'req-1', '2026-09-03T15:00:00', staff),
+    ).rejects.toThrow(BadRequestException);
+    expect(s.materializeEnrollment).not.toHaveBeenCalled();
   });
 
   it('resolves the request without acting when the family already cancelled the lesson', async () => {

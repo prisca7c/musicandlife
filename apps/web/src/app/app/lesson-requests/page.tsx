@@ -72,6 +72,25 @@ export default function LessonRequestsPage() {
     finally { setBusyId(null); }
   }
 
+  // Moving a recurring series to a different weekly time (no family back-ups exist
+  // for a series, so the teacher picks the new slot).
+  const [movingSeries, setMovingSeries] = useState<string | null>(null);
+  const [seriesTime, setSeriesTime] = useState('');
+
+  async function moveSeries(id: string) {
+    if (!seriesTime) { setError('Pick a new weekly time'); return; }
+    setBusyId(id); setError('');
+    try {
+      // datetime-local is a naive wall-clock string; the API reads it in the studio tz.
+      await apiFetch(`/lesson-requests/${id}/move-series`, {
+        method: 'POST', token: tok(), body: JSON.stringify({ newStartsAt: seriesTime }),
+      });
+      setMovingSeries(null); setSeriesTime('');
+      load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not move the series'); }
+    finally { setBusyId(null); }
+  }
+
   async function decline(id: string) {
     // Declining an auto-booked request cancels a lesson that's ALREADY on the
     // family's calendar, so guard against a mis-click. (Front-desk proposals
@@ -195,6 +214,43 @@ export default function LessonRequestsPage() {
                   </div>
                 ))}
               </div>
+
+              {/* A recurring series has no family back-ups to move to, so let the
+                  teacher rehome the whole series to a weekly time that suits them
+                  instead of declining and making the family start over. */}
+              {r.status === 'auto_confirmed' && r.isRecurring && (
+                movingSeries === r.id ? (
+                  <div className="mt-3 rounded-xl p-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
+                    <p className="text-xs font-semibold mb-2" style={{ color: 'var(--txt3)' }}>
+                      Move the weekly lesson to a new day &amp; time
+                    </p>
+                    <input type="datetime-local" value={seriesTime}
+                      onChange={(e) => setSeriesTime(e.target.value)} className="ui-input mb-2 text-sm" />
+                    <p className="text-[11px] mb-2" style={{ color: 'var(--txt4)' }}>
+                      The whole series moves to this weekday &amp; time every week. The family is notified.
+                    </p>
+                    <div className="flex gap-2">
+                      <button onClick={() => moveSeries(r.id)} disabled={busyId === r.id}
+                        className="ui-btn-primary text-xs disabled:opacity-50">
+                        {busyId === r.id ? 'Moving…' : 'Move the series'}
+                      </button>
+                      <button onClick={() => { setMovingSeries(null); setError(''); }}
+                        className="text-xs font-semibold rounded-lg px-3 py-1.5"
+                        style={{ border: '1px solid var(--bd)', color: 'var(--txt3)' }}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setMovingSeries(r.id); setSeriesTime(''); setError(''); }}
+                    className="mt-3 text-xs font-semibold rounded-lg px-3 py-1.5"
+                    style={{ border: '1.5px solid var(--sage)', color: 'var(--sage-dk)', background: '#fff' }}
+                  >
+                    Move to a different weekly time
+                  </button>
+                )
+              )}
 
               {/* Every proposed slot clashing is normal — the front desk is
                   guessing at the teacher's diary. Without this the only enabled

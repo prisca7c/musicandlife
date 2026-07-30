@@ -516,6 +516,22 @@ export class SchedulingService {
     }
   }
 
+  /** Emails the family once that their recurring weekly time changed. Best-effort. */
+  private async notifyRecurringMoved(orgId: string, studentId: string, newStartsAt: Date) {
+    const { firstName, emails } = await this.lessonNotifyRecipients(studentId);
+    if (emails.length === 0) return;
+    const when = new Date(newStartsAt).toLocaleString('en-GB', {
+      weekday: 'long', hour: '2-digit', minute: '2-digit',
+    });
+    for (const email of emails) {
+      await this.notifications.trigger('lesson.rescheduled', {
+        orgId,
+        email,
+        body: `${firstName ?? 'Your child'}'s weekly lesson has moved to ${when} each week.`,
+      });
+    }
+  }
+
   // ─── Teacher availability ───────────────────────────────────────────────────
   private async getOrgTimezone(exec: Executor, orgId: string): Promise<string> {
     const org = await exec.query.organizations.findFirst({
@@ -957,6 +973,86 @@ export class SchedulingService {
       // with nothing having happened.
       await this.db.db.update(lessonRequests)
         .set({ status: 'auto_confirmed', decidedBy: null, decidedAt: null })
+        .where(eq(lessonRequests.id, req.id));
+      throw err;
+    }
+  }
+
+  /**
+   * Teacher-driven move of a whole recurring series to a different weekly time.
+   * A series has no family back-ups to move to, so the teacher picks a new weekly
+   * slot. Consistent with the one-off "Move to back-up" (teacher has authority,
+   * family is notified by email), there is no separate family confirmation step —
+   * families have no in-app request feed yet.
+   */
+  async moveRecurringSeries(orgId: string, id: string, newStartsAt: string, actor: Actor) {
+    const req = await this.db.db.query.lessonRequests.findFirst({
+      where: and(eq(lessonRequests.id, id), eq(lessonRequests.organizationId, orgId)),
+    });
+    if (!req) throw new NotFoundException('Request not found');
+    if (actor.role === 'teacher') {
+      const staffId = await this.resolveStaffId(orgId, actor.userId);
+      if (!staffId || req.teacherId !== staffId) throw new ForbiddenException('Not your request');
+    }
+    if (req.status !== 'auto_confirmed' || !req.isRecurring || !req.enrollmentId) {
+      throw new BadRequestException('Only a recurring booking can be moved to a new weekly time.');
+    }
+
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const target = parseZonedDateTime(newStartsAt, tz);
+    const targetISO = target.toISOString();
+
+    // The new weekly slot must sit in the teacher's hours and not clash.
+    const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, req.teacherId, targetISO, req.duration, tz);
+    if (unavailable) throw new BadRequestException(unavailable);
+    if (await this.hasConflict(this.db.db, orgId, targetISO, req.duration, req.teacherId)) {
+      throw new BadRequestException('That weekly time clashes with another lesson.');
+    }
+
+    // Keep any end date the family set when they created the series.
+    const enrollment = await this.db.db.query.enrollments.findFirst({
+      where: and(eq(enrollments.id, req.enrollmentId), eq(enrollments.organizationId, orgId)),
+      columns: { scheduleRule: true },
+    });
+    const endDate = (enrollment?.scheduleRule as { endDate?: string } | null)?.endDate;
+
+    // Claim the review so a double-tap / two-teacher race resolves once.
+    const claimed = await this.db.db.update(lessonRequests)
+      .set({ status: 'confirmed', decidedBy: actor.userId, decidedAt: new Date(), proposedStartsAt: target })
+      .where(and(
+        eq(lessonRequests.id, id),
+        eq(lessonRequests.organizationId, orgId),
+        eq(lessonRequests.status, 'auto_confirmed'),
+      ))
+      .returning({ id: lessonRequests.id });
+    if (claimed.length === 0) throw new BadRequestException('This booking has already been reviewed.');
+
+    try {
+      // Drop the old future occurrences, retarget the weekly rule (preserving the
+      // end date), and regenerate the series at the new time.
+      const now = new Date();
+      await this.db.db.update(lessons)
+        .set({ status: 'cancelled_teacher', cancelledAt: now, updatedAt: now })
+        .where(and(
+          eq(lessons.enrollmentId, req.enrollmentId),
+          eq(lessons.organizationId, orgId),
+          eq(lessons.status, 'scheduled'),
+          gte(lessons.startsAt, now),
+        ));
+
+      const rule = { ...zonedWeekdayAndTime(target, tz), endDate };
+      await this.db.db.update(enrollments)
+        .set({ scheduleRule: rule, updatedAt: new Date() })
+        .where(and(eq(enrollments.id, req.enrollmentId), eq(enrollments.organizationId, orgId)));
+      await this.materializeEnrollment(orgId, req.enrollmentId);
+
+      await this.notifyRecurringMoved(orgId, req.studentId, target).catch((e) =>
+        this.logger.warn(`recurring move notify failed for enrollment ${req.enrollmentId}: ${e}`),
+      );
+      return { id: req.id, status: 'confirmed' as const };
+    } catch (err) {
+      await this.db.db.update(lessonRequests)
+        .set({ status: 'auto_confirmed', decidedBy: null, decidedAt: null, proposedStartsAt: req.proposedStartsAt })
         .where(eq(lessonRequests.id, req.id));
       throw err;
     }
