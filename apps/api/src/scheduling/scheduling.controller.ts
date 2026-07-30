@@ -5,7 +5,7 @@ import { UpdateLessonDto } from './dto/update-lesson.dto';
 import { CancelLessonDto } from './dto/cancel-lesson.dto';
 import { GenerateRecurringDto } from './dto/generate-recurring.dto';
 import { CreateRescheduleRequestDto, DecideRescheduleDto } from './dto/reschedule-request.dto';
-import { CreateLessonRequestDto, DecideLessonRequestDto, CounterProposeLessonRequestDto } from './dto/lesson-request.dto';
+import { CreateLessonRequestDto, DecideLessonRequestDto, CounterProposeLessonRequestDto, MoveRecurringSeriesDto } from './dto/lesson-request.dto';
 import { RescheduleLessonDto } from './dto/reschedule-lesson.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -135,6 +135,14 @@ export class SchedulingController {
   @Roles('teacher')
   declineLessonRequest(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: DecideLessonRequestDto) {
     return this.scheduling.decideLessonRequest(user.orgId, id, 'declined', { role: user.role, userId: user.userId }, undefined, dto.reason);
+  }
+
+  // A recurring series has no family back-ups; the teacher can move the whole
+  // series to a different weekly time instead of declining it.
+  @Post('lesson-requests/:id/move-series')
+  @Roles('teacher')
+  moveRecurringSeries(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: MoveRecurringSeriesDto) {
+    return this.scheduling.moveRecurringSeries(user.orgId, id, dto.newStartsAt, { role: user.role, userId: user.userId });
   }
 
   // ─── Reschedule requests ──────────────────────────────────────────────────

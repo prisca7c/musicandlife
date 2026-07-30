@@ -201,6 +201,9 @@ export const enrollments = pgTable(
     groupName: text('group_name'),
     teacherId: uuid('teacher_id').references(() => staffMembers.id),
     rate: integer('rate').notNull().default(0),
+    // Flat price for a trial lesson on this enrolment (same minor units as `rate`).
+    // Null = no special trial price; a trial is charged the normal (prorated) rate.
+    trialRate: integer('trial_rate'),
     // Duration (minutes) that `rate` corresponds to — lessons of a different length are prorated against this.
     defaultDuration: integer('default_duration').notNull().default(60),
     scheduleRule: jsonb('schedule_rule'),

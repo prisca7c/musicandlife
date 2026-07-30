@@ -254,12 +254,15 @@ export class SchedulingService {
     });
     if (!enrollment) throw new NotFoundException('Enrollment not found');
 
-    const rule = enrollment.scheduleRule as { weekday?: string; startTime?: string } | null;
+    const rule = enrollment.scheduleRule as { weekday?: string; startTime?: string; endDate?: string } | null;
     if (!rule?.weekday || !rule?.startTime) {
       throw new BadRequestException('This enrollment has no weekly schedule (weekday + time) set');
     }
 
     const tz = await this.getOrgTimezone(this.db.db, orgId);
+    // A recurring series can carry a last date — never generate past the end of
+    // that studio-local day.
+    const endCap = rule.endDate ? parseZonedDateTime(`${rule.endDate}T23:59:59`, tz) : null;
     // A supplied start date is a studio-local wall-clock date; interpret it in the
     // studio zone. Never generate lessons in the past: clamp to now so back-dated
     // enrollments don't create historical rows.
@@ -284,6 +287,7 @@ export class SchedulingService {
     let created = 0, skippedExisting = 0, skippedConflicts = 0;
     for (const naive of occurrences) {
       const instant = parseZonedDateTime(naive, tz);
+      if (endCap && instant.getTime() > endCap.getTime()) break; // occurrences are ascending
       if (existingTimes.has(instant.getTime())) { skippedExisting++; continue; }
       try {
         await this.createLesson(orgId, {
@@ -495,6 +499,35 @@ export class SchedulingService {
         orgId,
         email,
         body: `${firstName ?? 'Your child'}'s lesson on ${when} has been cancelled.`,
+      });
+    }
+  }
+
+  /** Emails the family once that a whole recurring series was cancelled. Best-effort. */
+  private async notifyRecurringCancelled(orgId: string, studentId: string) {
+    const { firstName, emails } = await this.lessonNotifyRecipients(studentId);
+    if (emails.length === 0) return;
+    for (const email of emails) {
+      await this.notifications.trigger('lesson.cancelled', {
+        orgId,
+        email,
+        body: `${firstName ?? 'Your child'}'s recurring weekly lessons have been cancelled by the teacher. There's no charge — please book a new time if you'd like to continue.`,
+      });
+    }
+  }
+
+  /** Emails the family once that their recurring weekly time changed. Best-effort. */
+  private async notifyRecurringMoved(orgId: string, studentId: string, newStartsAt: Date) {
+    const { firstName, emails } = await this.lessonNotifyRecipients(studentId);
+    if (emails.length === 0) return;
+    const when = new Date(newStartsAt).toLocaleString('en-GB', {
+      weekday: 'long', hour: '2-digit', minute: '2-digit',
+    });
+    for (const email of emails) {
+      await this.notifications.trigger('lesson.rescheduled', {
+        orgId,
+        email,
+        body: `${firstName ?? 'Your child'}'s weekly lesson has moved to ${when} each week.`,
       });
     }
   }
@@ -753,7 +786,7 @@ export class SchedulingService {
     dto: {
       studentId: string; teacherId: string; enrollmentId: string; termId?: string;
       startsAt: string; startsAt2?: string; startsAt3?: string;
-      duration: number; isTrialLesson?: boolean; recurring?: boolean; notes?: string;
+      duration: number; isTrialLesson?: boolean; recurring?: boolean; recurringEndDate?: string; notes?: string;
     },
     requestedBy: string,
   ) {
@@ -768,6 +801,18 @@ export class SchedulingService {
       throw new BadRequestException(
         `Lessons booked online must be at least ${SchedulingService.FAMILY_BOOKING_LEAD_HOURS} hours ahead. For anything sooner, please contact the studio.`,
       );
+    }
+
+    // Group classes meet at a fixed shared time — they aren't self-bookable as
+    // individual slots. Guard the API even though the picker hides them, so a
+    // stale client or a crafted request can't turn a group enrolment into a 1:1.
+    const enrollment = await this.db.db.query.enrollments.findFirst({
+      where: and(eq(enrollments.id, dto.enrollmentId), eq(enrollments.organizationId, orgId)),
+      columns: { lessonType: true },
+    });
+    if (!enrollment) throw new BadRequestException('Enrolment not found.');
+    if (enrollment.lessonType === 'group') {
+      throw new BadRequestException('Group classes are arranged by the studio, not booked online. Please contact us to join a group.');
     }
 
     // Instant-book the 1st choice — runs the shared advisory lock + conflict
@@ -787,7 +832,15 @@ export class SchedulingService {
     // enrolment; materialise the near-term window now so the series shows up
     // immediately, not only after the 2 AM top-up.
     if (dto.recurring) {
-      const rule = zonedWeekdayAndTime(ranked[0]!, tz);
+      // An end date (if given) must be after the first lesson, else the series
+      // would generate nothing — reject rather than silently book an empty run.
+      if (dto.recurringEndDate) {
+        const endCap = parseZonedDateTime(`${dto.recurringEndDate}T23:59:59`, tz);
+        if (endCap.getTime() < ranked[0]!.getTime()) {
+          throw new BadRequestException('The end date must be on or after the first lesson.');
+        }
+      }
+      const rule = { ...zonedWeekdayAndTime(ranked[0]!, tz), endDate: dto.recurringEndDate };
       await this.db.db.update(enrollments)
         .set({ scheduleRule: rule, updatedAt: new Date() })
         .where(and(eq(enrollments.id, dto.enrollmentId), eq(enrollments.organizationId, orgId)));
@@ -831,6 +884,22 @@ export class SchedulingService {
     const lessonId = req.createdLessonId;
     if (!lessonId) throw new BadRequestException('This booking has no lesson to act on');
 
+    // The family may have cancelled or moved this lesson between booking it and the
+    // teacher reviewing. Acting on a non-scheduled lesson would either no-op an
+    // "Accept" onto a dead lesson or reschedule a cancelled one, so treat the
+    // review as moot: resolve the request and take it out of the queue.
+    const existingLesson = await this.getLesson(orgId, lessonId).catch(() => null);
+    if (!existingLesson || existingLesson.status !== 'scheduled') {
+      await this.db.db.update(lessonRequests)
+        .set({ status: 'declined', decidedBy: actor.userId, decidedAt: new Date(), reason: 'Lesson no longer active' })
+        .where(and(
+          eq(lessonRequests.id, req.id),
+          eq(lessonRequests.organizationId, orgId),
+          eq(lessonRequests.status, 'auto_confirmed'),
+        ));
+      throw new BadRequestException('This lesson was already changed or cancelled by the family, so there’s nothing to review. It has been cleared from your list.');
+    }
+
     // Atomically claim the review so a double-tap or two-teacher race resolves once.
     const claimed = await this.db.db.update(lessonRequests)
       .set({ status: decision, decidedBy: actor.userId, decidedAt: new Date(), reason })
@@ -847,11 +916,40 @@ export class SchedulingService {
         // cancelled_teacher = no charge, no credit lost, teacher not paid; also
         // notifies the family. NOT the family-cancel path (which can charge).
         await this.cancelLesson(orgId, lessonId, { reason: 'cancelled_teacher', notes: reason }, actor.userId, actor);
-        // Declining a recurring booking stops the whole series, not just this occurrence.
+        // Declining a recurring booking stops the whole series, not just this
+        // occurrence. Booking already materialised the near-term window (up to
+        // RECURRENCE_WINDOW_WEEKS of real rows), so nulling the rule alone would
+        // strand weeks 2-N on everyone's calendar — cancel every future
+        // occurrence of this enrolment too, on the same no-charge teacher path.
         if (req.isRecurring && req.enrollmentId) {
           await this.db.db.update(enrollments)
             .set({ scheduleRule: null, updatedAt: new Date() })
             .where(and(eq(enrollments.id, req.enrollmentId), eq(enrollments.organizationId, orgId)));
+
+          const now = new Date();
+          const future = await this.db.db.query.lessons.findMany({
+            where: and(
+              eq(lessons.enrollmentId, req.enrollmentId),
+              eq(lessons.organizationId, orgId),
+              eq(lessons.status, 'scheduled'),
+              gte(lessons.startsAt, now),
+            ),
+            columns: { id: true, studentId: true, startsAt: true },
+          });
+          if (future.length) {
+            await this.db.db.update(lessons)
+              .set({ status: 'cancelled_teacher', cancelledAt: now, notes: reason, updatedAt: now })
+              .where(and(
+                eq(lessons.enrollmentId, req.enrollmentId),
+                eq(lessons.organizationId, orgId),
+                eq(lessons.status, 'scheduled'),
+                gte(lessons.startsAt, now),
+              ));
+            // One notice for the series, not one email per week.
+            await this.notifyRecurringCancelled(orgId, future[0]!.studentId).catch((e) =>
+              this.logger.warn(`recurring cancel notify failed for enrollment ${req.enrollmentId}: ${e}`),
+            );
+          }
         }
         return { id: req.id, status: 'declined' as const, lessonId };
       }
@@ -875,6 +973,86 @@ export class SchedulingService {
       // with nothing having happened.
       await this.db.db.update(lessonRequests)
         .set({ status: 'auto_confirmed', decidedBy: null, decidedAt: null })
+        .where(eq(lessonRequests.id, req.id));
+      throw err;
+    }
+  }
+
+  /**
+   * Teacher-driven move of a whole recurring series to a different weekly time.
+   * A series has no family back-ups to move to, so the teacher picks a new weekly
+   * slot. Consistent with the one-off "Move to back-up" (teacher has authority,
+   * family is notified by email), there is no separate family confirmation step —
+   * families have no in-app request feed yet.
+   */
+  async moveRecurringSeries(orgId: string, id: string, newStartsAt: string, actor: Actor) {
+    const req = await this.db.db.query.lessonRequests.findFirst({
+      where: and(eq(lessonRequests.id, id), eq(lessonRequests.organizationId, orgId)),
+    });
+    if (!req) throw new NotFoundException('Request not found');
+    if (actor.role === 'teacher') {
+      const staffId = await this.resolveStaffId(orgId, actor.userId);
+      if (!staffId || req.teacherId !== staffId) throw new ForbiddenException('Not your request');
+    }
+    if (req.status !== 'auto_confirmed' || !req.isRecurring || !req.enrollmentId) {
+      throw new BadRequestException('Only a recurring booking can be moved to a new weekly time.');
+    }
+
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const target = parseZonedDateTime(newStartsAt, tz);
+    const targetISO = target.toISOString();
+
+    // The new weekly slot must sit in the teacher's hours and not clash.
+    const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, req.teacherId, targetISO, req.duration, tz);
+    if (unavailable) throw new BadRequestException(unavailable);
+    if (await this.hasConflict(this.db.db, orgId, targetISO, req.duration, req.teacherId)) {
+      throw new BadRequestException('That weekly time clashes with another lesson.');
+    }
+
+    // Keep any end date the family set when they created the series.
+    const enrollment = await this.db.db.query.enrollments.findFirst({
+      where: and(eq(enrollments.id, req.enrollmentId), eq(enrollments.organizationId, orgId)),
+      columns: { scheduleRule: true },
+    });
+    const endDate = (enrollment?.scheduleRule as { endDate?: string } | null)?.endDate;
+
+    // Claim the review so a double-tap / two-teacher race resolves once.
+    const claimed = await this.db.db.update(lessonRequests)
+      .set({ status: 'confirmed', decidedBy: actor.userId, decidedAt: new Date(), proposedStartsAt: target })
+      .where(and(
+        eq(lessonRequests.id, id),
+        eq(lessonRequests.organizationId, orgId),
+        eq(lessonRequests.status, 'auto_confirmed'),
+      ))
+      .returning({ id: lessonRequests.id });
+    if (claimed.length === 0) throw new BadRequestException('This booking has already been reviewed.');
+
+    try {
+      // Drop the old future occurrences, retarget the weekly rule (preserving the
+      // end date), and regenerate the series at the new time.
+      const now = new Date();
+      await this.db.db.update(lessons)
+        .set({ status: 'cancelled_teacher', cancelledAt: now, updatedAt: now })
+        .where(and(
+          eq(lessons.enrollmentId, req.enrollmentId),
+          eq(lessons.organizationId, orgId),
+          eq(lessons.status, 'scheduled'),
+          gte(lessons.startsAt, now),
+        ));
+
+      const rule = { ...zonedWeekdayAndTime(target, tz), endDate };
+      await this.db.db.update(enrollments)
+        .set({ scheduleRule: rule, updatedAt: new Date() })
+        .where(and(eq(enrollments.id, req.enrollmentId), eq(enrollments.organizationId, orgId)));
+      await this.materializeEnrollment(orgId, req.enrollmentId);
+
+      await this.notifyRecurringMoved(orgId, req.studentId, target).catch((e) =>
+        this.logger.warn(`recurring move notify failed for enrollment ${req.enrollmentId}: ${e}`),
+      );
+      return { id: req.id, status: 'confirmed' as const };
+    } catch (err) {
+      await this.db.db.update(lessonRequests)
+        .set({ status: 'auto_confirmed', decidedBy: null, decidedAt: null, proposedStartsAt: req.proposedStartsAt })
         .where(eq(lessonRequests.id, req.id));
       throw err;
     }

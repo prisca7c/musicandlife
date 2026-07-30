@@ -61,6 +61,8 @@ export default function BookLessonPage() {
   const [weekStart, setWeekStart] = useState(() => weekMonday(new Date()));
   const [isTrial, setIsTrial] = useState(false);
   const [recurring, setRecurring] = useState(false);
+  // Optional last date for a recurring series (studio-local YYYY-MM-DD); '' = open-ended.
+  const [recurringEnd, setRecurringEnd] = useState('');
   // Ranked picks (1st = booked now, 2nd/3rd = fallbacks). All must belong to the
   // same enrolment — you book one lesson, not a mix of teachers.
   const [picks, setPicks] = useState<Slot[]>([]);
@@ -88,7 +90,9 @@ export default function BookLessonPage() {
     const out: { studentId: string; studentName: string; enrollmentId: string; instrument: string; rate: number; duration: number; teacherId: string }[] = [];
     for (const s of chosen) {
       for (const e of s.enrollments ?? []) {
-        if (!((e.status === 'active' || e.status === 'trial') && e.teacherId)) continue;
+        // Group classes meet at a fixed shared time — they aren't self-bookable
+        // as individual slots, so keep them out of the picker entirely.
+        if (!((e.status === 'active' || e.status === 'trial') && e.teacherId && e.lessonType !== 'group')) continue;
         // Collapse enrolments that would book the identical lesson — same child,
         // teacher, instrument (case-insensitive: "piano"/"Piano" are one thing),
         // length AND price. Anything that still differs (e.g. two piano rates) is
@@ -195,7 +199,7 @@ export default function BookLessonPage() {
 
   // Clear picks whenever the scope/week changes — stale picks would point at slots
   // no longer shown.
-  useEffect(() => { setPicks([]); setRecurring(false); }, [enrollFetchKey, ws]);
+  useEffect(() => { setPicks([]); setRecurring(false); setRecurringEnd(''); }, [enrollFetchKey, ws]);
 
   const lockedEnrollment = picks[0]?.enrollmentId ?? null;
   const cutoff = Date.now() + LEAD_HOURS * 3600000;
@@ -252,6 +256,7 @@ export default function BookLessonPage() {
           duration: first.duration,
           isTrialLesson: isTrial,
           recurring,
+          recurringEndDate: recurring && recurringEnd ? recurringEnd : undefined,
         }),
       });
       setDone({ recurring });
@@ -274,7 +279,7 @@ export default function BookLessonPage() {
           : 'Your first-choice time is booked. Your teacher will confirm it, or move it to one of your other choices if they need to.'}
       </p>
       <div className="flex gap-3">
-        <button onClick={() => { setDone(null); setPicks([]); setRecurring(false); }}
+        <button onClick={() => { setDone(null); setPicks([]); setRecurring(false); setRecurringEnd(''); }}
           className="px-4 py-2 rounded-xl border border-[var(--bd2)] text-sm font-medium hover:bg-[var(--surf)]">
           Book another
         </button>
@@ -473,22 +478,44 @@ export default function BookLessonPage() {
 
                 <label className="flex items-center gap-2.5 text-sm cursor-pointer mb-2">
                   <input type="checkbox" checked={recurring}
-                    onChange={e => { setRecurring(e.target.checked); if (e.target.checked) setPicks(p => p.slice(0, 1)); }}
+                    // A weekly series and a one-off trial are mutually exclusive —
+                    // turning one on turns the other off.
+                    onChange={e => { setRecurring(e.target.checked); if (e.target.checked) { setPicks(p => p.slice(0, 1)); setIsTrial(false); } }}
                     className="rounded border-[var(--bd2)]" />
                   <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--txt)' }}>
                     <Repeat size={13} /> Repeat weekly
                   </span>
                 </label>
                 {recurring && (
-                  <p className="text-xs mb-2 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)' }}>
-                    Books this time every week — no need to rebook. Back-up times don&apos;t apply to a weekly series.
-                  </p>
+                  <div className="mb-2">
+                    <p className="text-xs mb-2 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)' }}>
+                      Books this time every week — no need to rebook. Back-up times don&apos;t apply to a weekly series.
+                    </p>
+                    <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--txt2)' }}>
+                      <span className="whitespace-nowrap">Ends on (optional):</span>
+                      <input type="date" value={recurringEnd}
+                        min={picks[0] ? studioDayString(picks[0].startsAt) : undefined}
+                        onChange={e => setRecurringEnd(e.target.value)}
+                        className="ui-input text-xs py-1" />
+                      {recurringEnd && (
+                        <button type="button" onClick={() => setRecurringEnd('')}
+                          className="text-[var(--txt4)] hover:text-[var(--txt)]" aria-label="Clear end date">
+                          <X size={13} />
+                        </button>
+                      )}
+                    </label>
+                    <p className="text-[11px] mt-1" style={{ color: 'var(--txt4)' }}>
+                      Leave blank to keep going until you cancel.
+                    </p>
+                  </div>
                 )}
 
-                <label className="flex items-center gap-2.5 text-sm cursor-pointer mb-3">
-                  <input type="checkbox" checked={isTrial} onChange={e => setIsTrial(e.target.checked)} className="rounded border-[var(--bd2)]" />
-                  <span style={{ color: 'var(--txt)' }}>This is a trial lesson</span>
-                </label>
+                {!recurring && (
+                  <label className="flex items-center gap-2.5 text-sm cursor-pointer mb-3">
+                    <input type="checkbox" checked={isTrial} onChange={e => setIsTrial(e.target.checked)} className="rounded border-[var(--bd2)]" />
+                    <span style={{ color: 'var(--txt)' }}>This is a trial lesson</span>
+                  </label>
+                )}
 
                 <button onClick={book} disabled={booking}
                   className="w-full bg-[var(--sage)] text-white font-bold text-sm py-2.5 rounded-xl hover:bg-[var(--sage-dk)] disabled:opacity-50 flex items-center justify-center gap-2">

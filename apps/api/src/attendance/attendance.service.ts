@@ -8,7 +8,7 @@ import { DbService } from '../db/db.service';
 // whichever is passed so they share the mark-attendance transaction.
 type Executor = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
 import type { MarkAttendanceDto } from './dto/mark-attendance.dto';
-import { proratedAmount } from '../billing/billing.service';
+import { effectiveLessonAmount } from '../billing/billing.service';
 import type { Actor } from '../scheduling/scheduling.service';
 
 // Maps attendance status → lesson table status
@@ -203,7 +203,7 @@ export class AttendanceService {
   private async applyLessonBilling(
     tx: Executor,
     orgId: string,
-    lesson: { id: string; enrollmentId: string | null; studentId: string; duration: number; enrollment: { id: string; lessonType: string } | null },
+    lesson: { id: string; enrollmentId: string | null; studentId: string; duration: number; isTrialLesson?: boolean | null; enrollment: { id: string; lessonType: string } | null },
     status: string,
   ) {
     // A cancellation with ≥24h notice (absent_makeup) and a no-charge absence
@@ -303,7 +303,7 @@ export class AttendanceService {
       .where(eq(lessonCredits.id, credit.id));
   }
 
-  private async postAutoCharge(tx: Executor, orgId: string, lesson: { id: string; enrollmentId: string | null; studentId: string; duration: number }) {
+  private async postAutoCharge(tx: Executor, orgId: string, lesson: { id: string; enrollmentId: string | null; studentId: string; duration: number; isTrialLesson?: boolean | null }) {
     if (!lesson.enrollmentId) return;
 
     const enrollment = await tx.query.enrollments.findFirst({
@@ -343,14 +343,16 @@ export class AttendanceService {
       .for('update');
     if (!family) return;
 
-    // A GROUP class is a set price for a set length — everyone in the room pays
-    // the same whether the session ran five minutes over or not. Only private
-    // lessons are prorated, where a 30-minute lesson on a 60-minute rate really
-    // is half the fee.
-    const isGroup = enrollment.lessonType === 'group';
-    const amount = -(isGroup
-      ? (enrollment.rate ?? 0)
-      : proratedAmount(enrollment.rate, enrollment.defaultDuration, lesson.duration));
+    // Trial flat price → group flat rate → prorated private rate, all decided in
+    // billing's effectiveLessonAmount so this charge matches the invoice exactly.
+    const amount = -effectiveLessonAmount({
+      isTrialLesson: lesson.isTrialLesson,
+      lessonType: enrollment.lessonType,
+      rate: enrollment.rate,
+      trialRate: enrollment.trialRate,
+      defaultDuration: enrollment.defaultDuration,
+      duration: lesson.duration,
+    });
     const newBalance = family.balanceCached + amount;
 
     await tx.insert(ledgerEntries).values({

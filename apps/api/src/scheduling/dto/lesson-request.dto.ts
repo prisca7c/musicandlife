@@ -46,6 +46,12 @@ export class DecideLessonRequestDto {
   chosenStartsAt?: string;
 }
 
+/** The teacher's new weekly time for a recurring series (move, not counter). */
+export class MoveRecurringSeriesDto {
+  @IsDateString()
+  newStartsAt!: string;
+}
+
 /**
  * The teacher's own suggested times, offered when none of the front desk's
  * proposals work. Up to three, validated against the teacher's availability and
