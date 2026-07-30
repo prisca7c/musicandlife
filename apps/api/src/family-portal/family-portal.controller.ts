@@ -41,6 +41,9 @@ class BookLessonDto {
   // Set up a weekly recurring series from this slot (autobooks going forward)
   // rather than a one-off lesson.
   @IsOptional() @IsBoolean() @Type(() => Boolean) recurring?: boolean;
+  // Optional last date (studio-local YYYY-MM-DD) for a recurring series — no
+  // occurrences are generated after it. Omitted = open-ended (rolling window).
+  @IsOptional() @IsDateString() recurringEndDate?: string;
 }
 
 class CancelLessonDto {
@@ -565,6 +568,7 @@ export class FamilyPortalController {
         duration: dto.duration,
         isTrialLesson: dto.isTrialLesson ?? false,
         recurring: dto.recurring ?? false,
+        recurringEndDate: dto.recurringEndDate,
       },
       user.userId,
     );

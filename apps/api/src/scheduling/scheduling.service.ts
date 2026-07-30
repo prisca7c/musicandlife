@@ -254,12 +254,15 @@ export class SchedulingService {
     });
     if (!enrollment) throw new NotFoundException('Enrollment not found');
 
-    const rule = enrollment.scheduleRule as { weekday?: string; startTime?: string } | null;
+    const rule = enrollment.scheduleRule as { weekday?: string; startTime?: string; endDate?: string } | null;
     if (!rule?.weekday || !rule?.startTime) {
       throw new BadRequestException('This enrollment has no weekly schedule (weekday + time) set');
     }
 
     const tz = await this.getOrgTimezone(this.db.db, orgId);
+    // A recurring series can carry a last date — never generate past the end of
+    // that studio-local day.
+    const endCap = rule.endDate ? parseZonedDateTime(`${rule.endDate}T23:59:59`, tz) : null;
     // A supplied start date is a studio-local wall-clock date; interpret it in the
     // studio zone. Never generate lessons in the past: clamp to now so back-dated
     // enrollments don't create historical rows.
@@ -284,6 +287,7 @@ export class SchedulingService {
     let created = 0, skippedExisting = 0, skippedConflicts = 0;
     for (const naive of occurrences) {
       const instant = parseZonedDateTime(naive, tz);
+      if (endCap && instant.getTime() > endCap.getTime()) break; // occurrences are ascending
       if (existingTimes.has(instant.getTime())) { skippedExisting++; continue; }
       try {
         await this.createLesson(orgId, {
@@ -766,7 +770,7 @@ export class SchedulingService {
     dto: {
       studentId: string; teacherId: string; enrollmentId: string; termId?: string;
       startsAt: string; startsAt2?: string; startsAt3?: string;
-      duration: number; isTrialLesson?: boolean; recurring?: boolean; notes?: string;
+      duration: number; isTrialLesson?: boolean; recurring?: boolean; recurringEndDate?: string; notes?: string;
     },
     requestedBy: string,
   ) {
@@ -812,7 +816,15 @@ export class SchedulingService {
     // enrolment; materialise the near-term window now so the series shows up
     // immediately, not only after the 2 AM top-up.
     if (dto.recurring) {
-      const rule = zonedWeekdayAndTime(ranked[0]!, tz);
+      // An end date (if given) must be after the first lesson, else the series
+      // would generate nothing — reject rather than silently book an empty run.
+      if (dto.recurringEndDate) {
+        const endCap = parseZonedDateTime(`${dto.recurringEndDate}T23:59:59`, tz);
+        if (endCap.getTime() < ranked[0]!.getTime()) {
+          throw new BadRequestException('The end date must be on or after the first lesson.');
+        }
+      }
+      const rule = { ...zonedWeekdayAndTime(ranked[0]!, tz), endDate: dto.recurringEndDate };
       await this.db.db.update(enrollments)
         .set({ scheduleRule: rule, updatedAt: new Date() })
         .where(and(eq(enrollments.id, dto.enrollmentId), eq(enrollments.organizationId, orgId)));

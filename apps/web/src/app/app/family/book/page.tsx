@@ -61,6 +61,8 @@ export default function BookLessonPage() {
   const [weekStart, setWeekStart] = useState(() => weekMonday(new Date()));
   const [isTrial, setIsTrial] = useState(false);
   const [recurring, setRecurring] = useState(false);
+  // Optional last date for a recurring series (studio-local YYYY-MM-DD); '' = open-ended.
+  const [recurringEnd, setRecurringEnd] = useState('');
   // Ranked picks (1st = booked now, 2nd/3rd = fallbacks). All must belong to the
   // same enrolment — you book one lesson, not a mix of teachers.
   const [picks, setPicks] = useState<Slot[]>([]);
@@ -197,7 +199,7 @@ export default function BookLessonPage() {
 
   // Clear picks whenever the scope/week changes — stale picks would point at slots
   // no longer shown.
-  useEffect(() => { setPicks([]); setRecurring(false); }, [enrollFetchKey, ws]);
+  useEffect(() => { setPicks([]); setRecurring(false); setRecurringEnd(''); }, [enrollFetchKey, ws]);
 
   const lockedEnrollment = picks[0]?.enrollmentId ?? null;
   const cutoff = Date.now() + LEAD_HOURS * 3600000;
@@ -254,6 +256,7 @@ export default function BookLessonPage() {
           duration: first.duration,
           isTrialLesson: isTrial,
           recurring,
+          recurringEndDate: recurring && recurringEnd ? recurringEnd : undefined,
         }),
       });
       setDone({ recurring });
@@ -276,7 +279,7 @@ export default function BookLessonPage() {
           : 'Your first-choice time is booked. Your teacher will confirm it, or move it to one of your other choices if they need to.'}
       </p>
       <div className="flex gap-3">
-        <button onClick={() => { setDone(null); setPicks([]); setRecurring(false); }}
+        <button onClick={() => { setDone(null); setPicks([]); setRecurring(false); setRecurringEnd(''); }}
           className="px-4 py-2 rounded-xl border border-[var(--bd2)] text-sm font-medium hover:bg-[var(--surf)]">
           Book another
         </button>
@@ -484,9 +487,27 @@ export default function BookLessonPage() {
                   </span>
                 </label>
                 {recurring && (
-                  <p className="text-xs mb-2 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)' }}>
-                    Books this time every week — no need to rebook. Back-up times don&apos;t apply to a weekly series.
-                  </p>
+                  <div className="mb-2">
+                    <p className="text-xs mb-2 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)' }}>
+                      Books this time every week — no need to rebook. Back-up times don&apos;t apply to a weekly series.
+                    </p>
+                    <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--txt2)' }}>
+                      <span className="whitespace-nowrap">Ends on (optional):</span>
+                      <input type="date" value={recurringEnd}
+                        min={picks[0] ? studioDayString(picks[0].startsAt) : undefined}
+                        onChange={e => setRecurringEnd(e.target.value)}
+                        className="ui-input text-xs py-1" />
+                      {recurringEnd && (
+                        <button type="button" onClick={() => setRecurringEnd('')}
+                          className="text-[var(--txt4)] hover:text-[var(--txt)]" aria-label="Clear end date">
+                          <X size={13} />
+                        </button>
+                      )}
+                    </label>
+                    <p className="text-[11px] mt-1" style={{ color: 'var(--txt4)' }}>
+                      Leave blank to keep going until you cancel.
+                    </p>
+                  </div>
                 )}
 
                 {!recurring && (

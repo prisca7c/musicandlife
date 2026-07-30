@@ -112,6 +112,29 @@ describe('SchedulingService.createFamilyBooking', () => {
     expect(s.materializeEnrollment).toHaveBeenCalledWith('org-1', 'en-1');
   });
 
+  it('stores a recurring end date on the weekly rule when given', async () => {
+    const { svc, updates } = makeService();
+    await svc.createFamilyBooking('org-1', {
+      studentId: 'stu-1', teacherId: 't-1', enrollmentId: 'en-1',
+      startsAt: iso(72), duration: 60, recurring: true, recurringEndDate: '2026-12-31',
+    }, 'u-1');
+    const ruleWrite = updates.find(u => 'scheduleRule' in u.set);
+    expect((ruleWrite!.set.scheduleRule as { endDate?: string }).endDate).toBe('2026-12-31');
+  });
+
+  it('rejects a recurring end date that falls before the first lesson', async () => {
+    const { svc, s } = makeService();
+    await expect(
+      svc.createFamilyBooking('org-1', {
+        studentId: 'stu-1', teacherId: 't-1', enrollmentId: 'en-1',
+        startsAt: iso(72), duration: 60, recurring: true, recurringEndDate: '2000-01-01',
+      }, 'u-1'),
+    ).rejects.toThrow(BadRequestException);
+    // The lesson is instant-booked before the rule is validated, so createLesson
+    // ran — but no schedule rule should have been written.
+    expect(s.materializeEnrollment).not.toHaveBeenCalled();
+  });
+
   it('rejects a group enrolment — group classes are not self-bookable', async () => {
     const { svc, s, db } = makeService();
     (db.db.query.enrollments.findFirst as jest.Mock).mockResolvedValue({ lessonType: 'group' });
