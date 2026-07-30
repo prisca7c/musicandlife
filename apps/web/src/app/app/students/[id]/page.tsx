@@ -20,6 +20,7 @@ interface StudentDetail {
   family: { id: string; name: string; phone: string | null; email: string | null } | null;
   enrollments: {
     id: string; instrument: string; lessonType: string; status: string; rate: number;
+    trialRate: number | null;
     defaultDuration: number;
     teacher: { id: string; firstName: string; lastName: string } | null;
     term: { id: string; name: string; status: string } | null;
@@ -231,6 +232,7 @@ function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
 }) {
   const [teacherId, setTeacherId] = useState('');
   const [rateText, setRateText] = useState('');
+  const [trialRateText, setTrialRateText] = useState('');
   const [duration, setDuration] = useState(60);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -242,6 +244,7 @@ function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
     if (!open || !enrollment) return;
     setTeacherId(enrollment.teacher?.id ?? '');
     setRateText((enrollment.rate / 100).toFixed(2));
+    setTrialRateText(enrollment.trialRate != null ? (enrollment.trialRate / 100).toFixed(2) : '');
     setDuration(enrollment.defaultDuration ?? 60);
     setError('');
   }, [open, enrollment]);
@@ -250,12 +253,19 @@ function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
     const pence = Math.round(parseFloat(rateText) * 100);
     if (!Number.isFinite(pence) || pence < 0) { setError('Enter a valid rate.'); return; }
     if (!Number.isInteger(duration) || duration < 5 || duration > 240) { setError('Duration must be 5–240 minutes.'); return; }
+    // Blank trial rate = clear it (trials fall back to the normal rate).
+    let trialRate: number | null = null;
+    if (trialRateText.trim() !== '') {
+      const tp = Math.round(parseFloat(trialRateText) * 100);
+      if (!Number.isFinite(tp) || tp < 0) { setError('Enter a valid trial rate, or leave it blank.'); return; }
+      trialRate = tp;
+    }
     if (!enrollment) return;
     setSaving(true); setError('');
     try {
       await apiFetch(`/enrollments/${enrollment.id}`, {
         method: 'PATCH', token: tok(),
-        body: JSON.stringify({ teacherId: teacherId || null, rate: pence, duration }),
+        body: JSON.stringify({ teacherId: teacherId || null, rate: pence, trialRate, duration }),
       });
       onSaved(); onClose();
     } catch (err) { setError(err instanceof Error ? err.message : 'Could not save'); }
@@ -285,9 +295,15 @@ function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
               onChange={e => setDuration(parseInt(e.target.value || '0', 10))} className="ui-input w-full" />
           </div>
         </div>
+        <div>
+          <label className="ui-label">Trial rate (£) — optional</label>
+          <input type="number" step="0.01" min="0" value={trialRateText} placeholder="Leave blank for normal rate"
+            onChange={e => setTrialRateText(e.target.value)} className="ui-input w-full" />
+        </div>
         <p className="text-xs" style={{ color: 'var(--txt4)' }}>
           The rate is what the family is charged for this enrollment; a lesson of a different length is prorated against the duration.
           {enrollment?.lessonType === 'group' && ' For a group class, this is the set price and length.'}
+          {' '}A trial rate is a flat price charged for a lesson marked as a trial; leave it blank to charge trials the normal rate.
         </p>
         <div className="flex gap-3 pt-1">
           <button onClick={save} disabled={saving} className="ui-btn-primary">{saving ? 'Saving…' : 'Save changes'}</button>

@@ -42,6 +42,14 @@ export class CreateEnrollmentDto {
   @Max(1_000_000) // £10,000
   rate?: number;
 
+  // Optional flat price (pence) for a trial lesson on this enrolment. Omitted /
+  // null = a trial is charged the normal (prorated) rate.
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(1_000_000)
+  trialRate?: number;
+
   // The UI sends the chosen lesson length as `duration`; it's persisted on the
   // enrollment as `defaultDuration` (the column name) by the service.
   @IsOptional()

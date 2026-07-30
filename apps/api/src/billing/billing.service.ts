@@ -17,6 +17,28 @@ export function proratedAmount(rate: number | undefined, defaultDuration: number
 }
 
 /**
+ * The fee for one lesson, honouring the three pricing rules in one place so the
+ * invoice, the attendance charge, and the pay-now preview never diverge:
+ *  - a TRIAL lesson with an explicit `trialRate` is a flat intro price (a trial
+ *    is a fixed offer, not prorated, and it overrides the group rule too);
+ *  - a GROUP class is a flat set price (everyone pays the same regardless of a
+ *    few minutes over);
+ *  - a private lesson is prorated against its default duration.
+ */
+export function effectiveLessonAmount(opts: {
+  isTrialLesson?: boolean | null;
+  lessonType?: string | null;
+  rate?: number | null;
+  trialRate?: number | null;
+  defaultDuration?: number | null;
+  duration: number;
+}): number {
+  if (opts.isTrialLesson && opts.trialRate != null) return opts.trialRate;
+  if (opts.lessonType === 'group') return opts.rate ?? 0;
+  return proratedAmount(opts.rate ?? undefined, opts.defaultDuration ?? undefined, opts.duration);
+}
+
+/**
  * Split a pot of on-account money into whole prepaid lessons across a family's
  * active private enrolments, proportionally by lesson rate.
  *
@@ -210,7 +232,7 @@ export class BillingService {
       ),
       with: {
         teacher: { columns: { firstName: true, lastName: true } },
-        enrollment: { columns: { instrument: true, rate: true, defaultDuration: true, lessonType: true } },
+        enrollment: { columns: { instrument: true, rate: true, trialRate: true, defaultDuration: true, lessonType: true } },
       },
     });
     // No completed lessons → nothing to itemise. Returning here also avoids
@@ -258,6 +280,18 @@ export class BillingService {
       };
       const rate = l.enrollment?.rate;
       const standard = l.enrollment?.defaultDuration;
+      const trialRate = l.enrollment?.trialRate;
+
+      // A trial with its own flat price bills a single, clearly-labelled line at
+      // that price — no proration, no overrun split (a trial is a fixed offer).
+      if (l.isTrialLesson && trialRate != null) {
+        return [{
+          ...base,
+          description: [instrument, `trial ${kind} · ${l.duration} min`].filter(Boolean).join(' '),
+          amount: trialRate,
+        }];
+      }
+
       const total = proratedAmount(rate, standard, l.duration);
 
       // A lesson that ran long is still charged pro-rata, but showing it as one
@@ -571,7 +605,7 @@ export class BillingService {
     const lesson = await this.db.db.query.lessons.findFirst({
       where: and(eq(lessons.id, lessonId), eq(lessons.organizationId, orgId)),
       with: {
-        enrollment: { columns: { instrument: true, rate: true, defaultDuration: true, lessonType: true } },
+        enrollment: { columns: { instrument: true, rate: true, trialRate: true, defaultDuration: true, lessonType: true } },
         student: { columns: { id: true }, with: { family: { columns: { id: true } } } },
       },
     });
@@ -602,10 +636,14 @@ export class BillingService {
       throw new BadRequestException('This lesson was covered by a prepaid credit — there is nothing to pay.');
     }
 
-    const isGroup = lesson.enrollment.lessonType === 'group';
-    const amount = isGroup
-      ? (lesson.enrollment.rate ?? 0)
-      : proratedAmount(lesson.enrollment.rate, lesson.enrollment.defaultDuration, lesson.duration);
+    const amount = effectiveLessonAmount({
+      isTrialLesson: lesson.isTrialLesson,
+      lessonType: lesson.enrollment.lessonType,
+      rate: lesson.enrollment.rate,
+      trialRate: lesson.enrollment.trialRate,
+      defaultDuration: lesson.enrollment.defaultDuration,
+      duration: lesson.duration,
+    });
     if (amount <= 0) throw new BadRequestException('This lesson has no fee to take.');
 
     // Idempotent per lesson: a second tap returns the invoice the first one paid,
@@ -637,7 +675,8 @@ export class BillingService {
     const instrument = lesson.enrollment.instrument
       ? lesson.enrollment.instrument.charAt(0).toUpperCase() + lesson.enrollment.instrument.slice(1)
       : '';
-    const kind = isGroup ? 'group class' : 'lesson';
+    const isTrialPriced = !!lesson.isTrialLesson && lesson.enrollment.trialRate != null;
+    const kind = `${isTrialPriced ? 'trial ' : ''}${lesson.enrollment.lessonType === 'group' ? 'group class' : 'lesson'}`;
     const description = [instrument, `${kind} · ${lesson.duration} min — paid at the lesson`].filter(Boolean).join(' ');
     await this.addLineItem(orgId, inv.id, description, amount, lessonId);
     await this.sendInvoice(orgId, inv.id);
