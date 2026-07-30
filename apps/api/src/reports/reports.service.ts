@@ -439,6 +439,22 @@ export class ReportsService {
       .groupBy(enrollments.instrument, enrollments.lessonType)
       .orderBy(enrollments.instrument);
 
-    return { byInstrument: stats };
+    // `instrument` is free text, so "Piano" and "piano" arrive as two rows and
+    // fragment both the UI cards and the CSV. Merge case-insensitively per
+    // (instrument, lessonType); emit the label lowercased (the page capitalises it).
+    const merged = new Map<string, { instrument: string; lessonType: string; count: number }>();
+    for (const row of stats) {
+      const label = row.instrument.trim().toLowerCase();
+      if (!label) continue;
+      const key = `${label}|${row.lessonType}`;
+      const existing = merged.get(key);
+      if (existing) existing.count += row.count;
+      else merged.set(key, { instrument: label, lessonType: row.lessonType, count: row.count });
+    }
+    const byInstrument = [...merged.values()].sort(
+      (a, b) => a.instrument.localeCompare(b.instrument) || a.lessonType.localeCompare(b.lessonType),
+    );
+
+    return { byInstrument };
   }
 }
