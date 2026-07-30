@@ -84,10 +84,19 @@ export default function BookLessonPage() {
   // the calendar draws availability for.
   const scope = useMemo(() => {
     const chosen = selectedStudent === ALL ? students : students.filter(s => s.id === selectedStudent);
-    return chosen.flatMap(s =>
-      (s.enrollments ?? [])
-        .filter(e => (e.status === 'active' || e.status === 'trial') && e.teacherId)
-        .map(e => ({
+    const seen = new Set<string>();
+    const out: { studentId: string; studentName: string; enrollmentId: string; instrument: string; rate: number; duration: number; teacherId: string }[] = [];
+    for (const s of chosen) {
+      for (const e of s.enrollments ?? []) {
+        if (!((e.status === 'active' || e.status === 'trial') && e.teacherId)) continue;
+        // Collapse duplicate enrolments that would book the identical lesson
+        // (same child + teacher + instrument + length). Without this, a student
+        // with two matching enrolments makes every time appear twice on the
+        // calendar with nothing to tell the copies apart.
+        const key = `${s.id}:${e.teacherId}:${e.instrument}:${e.defaultDuration}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({
           studentId: s.id,
           studentName: `${s.firstName} ${s.lastName}`,
           enrollmentId: e.id,
@@ -95,8 +104,10 @@ export default function BookLessonPage() {
           rate: e.rate,
           duration: e.defaultDuration,
           teacherId: e.teacherId as string,
-        })),
-    );
+        });
+      }
+    }
+    return out;
   }, [selectedStudent, students]);
 
   // Distinct teachers in scope → the "see all / one at a time" filter.
@@ -115,6 +126,18 @@ export default function BookLessonPage() {
   const activeEnrollments = useMemo(
     () => scope.filter(e => teacherFilter === ALL || e.teacherId === teacherFilter),
     [scope, teacherFilter],
+  );
+
+  // When more than one kind of lesson (a different instrument, or a different
+  // child) shares the calendar, the time alone doesn't say which is which — so
+  // we label each slot. multiChild adds the child's name on top of that.
+  const multiKind = useMemo(
+    () => new Set(activeEnrollments.map(e => `${e.studentId}:${e.instrument}`)).size > 1,
+    [activeEnrollments],
+  );
+  const multiChild = useMemo(
+    () => new Set(activeEnrollments.map(e => e.studentId)).size > 1,
+    [activeEnrollments],
   );
 
   // ── Fan-out availability: one call per enrolment in view, merged. SWR can't key
@@ -165,6 +188,13 @@ export default function BookLessonPage() {
   const cutoff = Date.now() + LEAD_HOURS * 3600000;
   const slotKey = (s: Slot) => `${s.enrollmentId}@${s.startsAt}`;
   const pickRank = (s: Slot) => picks.findIndex(p => slotKey(p) === slotKey(s));
+  // A back-up that overlaps a time already picked is useless — the lesson can't
+  // sit in two places at once, so the teacher could never move it there. (Easy
+  // to hit with a 60-min lesson and 15-min slots: 09:30 falls inside 09:00.)
+  const overlapsPick = (s: Slot) =>
+    picks.some(p => p.enrollmentId === s.enrollmentId
+      && slotKey(p) !== slotKey(s)
+      && Math.abs(new Date(p.startsAt).getTime() - new Date(s.startsAt).getTime()) < s.duration * 60000);
 
   function toggleSlot(s: Slot) {
     const existing = pickRank(s);
@@ -345,10 +375,15 @@ export default function BookLessonPage() {
                             const rank = pickRank(s);
                             const picked = rank >= 0;
                             const tooSoon = new Date(s.startsAt).getTime() < cutoff;
+                            const overlaps = !picked && overlapsPick(s);
                             const c = colorFor(s.teacherId);
                             return (
-                              <button key={slotKey(s)} disabled={tooSoon} onClick={() => toggleSlot(s)}
-                                title={tooSoon ? `Online bookings need ${LEAD_HOURS}h notice — call the studio for sooner.` : `${s.studentName} · ${cap(s.instrument)} · ${s.teacherName}`}
+                              <button key={slotKey(s)} disabled={tooSoon || overlaps} onClick={() => toggleSlot(s)}
+                                title={tooSoon
+                                  ? `Online bookings need ${LEAD_HOURS}h notice — call the studio for sooner.`
+                                  : overlaps
+                                  ? 'Overlaps a time you’ve already picked.'
+                                  : `${s.studentName} · ${cap(s.instrument)} · ${s.teacherName}`}
                                 className="relative w-full rounded-lg text-xs font-semibold border py-1.5 px-1 transition disabled:opacity-35 disabled:cursor-not-allowed"
                                 style={picked
                                   ? { borderColor: 'var(--sage)', background: 'var(--sage)', color: '#fff' }
@@ -356,8 +391,16 @@ export default function BookLessonPage() {
                                 {multiTeacher && !picked && (
                                   <span className="absolute left-1 top-1 w-1.5 h-1.5 rounded-full" style={{ background: c }} />
                                 )}
-                                {fmtTime(s.startsAt)}
-                                {picked && <span className="ml-1 text-[10px] font-black">#{rank + 1}</span>}
+                                <span className="block leading-tight">
+                                  {fmtTime(s.startsAt)}
+                                  {picked && <span className="ml-1 text-[10px] font-black">#{rank + 1}</span>}
+                                </span>
+                                {multiKind && (
+                                  <span className="block text-[9px] font-medium leading-tight truncate"
+                                    style={{ color: picked ? 'rgba(255,255,255,0.85)' : 'var(--txt3)' }}>
+                                    {cap(s.instrument)}{multiChild ? ` · ${s.studentName.split(' ')[0]}` : ''}
+                                  </span>
+                                )}
                               </button>
                             );
                           })}

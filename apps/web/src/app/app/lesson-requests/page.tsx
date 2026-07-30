@@ -6,12 +6,13 @@ import { useApi } from '@/lib/swr';
 import { STUDIO_TZ } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
-import { Check, X, CalendarPlus } from 'lucide-react';
+import { Check, X, CalendarPlus, Repeat } from 'lucide-react';
 
 interface Option { rank: number; startsAt: string; ok: boolean; reason: string | null }
 interface Req {
   id: string;
   status: string;
+  isRecurring: boolean;
   createdAt: string;
   duration: number;
   notes: string | null;
@@ -72,6 +73,14 @@ export default function LessonRequestsPage() {
   }
 
   async function decline(id: string) {
+    // Declining an auto-booked request cancels a lesson that's ALREADY on the
+    // family's calendar, so guard against a mis-click. (Front-desk proposals
+    // aren't booked yet, so a lighter prompt is enough.)
+    const booked = requests.find(r => r.id === id)?.status === 'auto_confirmed';
+    const msg = booked
+      ? 'Decline this booking? The lesson will be removed from the family’s calendar and they’ll be asked to pick another time. There’s no charge and they keep any credit.'
+      : 'Decline this booking request?';
+    if (!window.confirm(msg)) return;
     setBusyId(id); setError('');
     try {
       await apiFetch(`/lesson-requests/${id}/decline`, { method: 'POST', token: tok(), body: JSON.stringify({}) });
@@ -86,10 +95,10 @@ export default function LessonRequestsPage() {
         title={
           <span className="flex items-center gap-2">
             Booking requests
-            <InfoTooltip text="When the front desk books a lesson for you, they propose up to three times inside your working hours. Pick the one that suits — we create the lesson the moment you confirm. Nothing is added to your calendar until you do." />
+            <InfoTooltip text="Two kinds land here. A booking a family made online is already on your calendar — keep it, move it to one of their back-up times, or decline it. A front-desk proposal isn't booked yet — pick one of the suggested times to create it." />
           </span>
         }
-        subtitle="Lessons the front desk has proposed for you — pick a time to confirm"
+        subtitle="Lessons your students booked online (already on your calendar) plus front-desk proposals — keep, move, or decline"
       />
 
       {error && (
@@ -112,8 +121,20 @@ export default function LessonRequestsPage() {
             <div key={r.id} className="rounded-2xl p-5" style={{ background: 'var(--card)', border: '1px solid var(--bd)' }}>
               <div className="flex items-start justify-between gap-4 mb-3">
                 <div>
-                  <p className="font-semibold" style={{ color: 'var(--txt)' }}>
+                  <p className="font-semibold flex flex-wrap items-center gap-2" style={{ color: 'var(--txt)' }}>
                     {r.student ? `${r.student.firstName} ${r.student.lastName}` : 'Student'}
+                    {r.status === 'auto_confirmed' && (
+                      <span className="text-[10px] font-bold uppercase tracking-wide rounded-full px-2 py-0.5"
+                        style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)' }}>
+                        Already booked
+                      </span>
+                    )}
+                    {r.isRecurring && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide rounded-full px-2 py-0.5"
+                        style={{ background: 'var(--surf)', color: 'var(--txt2)', border: '1px solid var(--bd2)' }}>
+                        <Repeat size={10} /> Repeats weekly
+                      </span>
+                    )}
                   </p>
                   <p className="text-xs" style={{ color: 'var(--txt3)' }}>
                     {r.enrollment?.instrument ? <span className="capitalize">{r.enrollment.instrument}</span> : 'Lesson'}
@@ -136,6 +157,10 @@ export default function LessonRequestsPage() {
               <p className="text-xs font-semibold mb-2" style={{ color: 'var(--txt3)' }}>
                 {r.status === 'counter_proposed'
                   ? 'Times the teacher suggested — confirm one to book it'
+                  : r.status === 'auto_confirmed'
+                  ? (r.isRecurring
+                      ? 'Booked weekly time — keep it, or move the series to a back-up'
+                      : 'Booked time & back-ups — keep it, or move to a back-up')
                   : 'Proposed times'}
               </p>
               <div className="space-y-2">
@@ -150,7 +175,9 @@ export default function LessonRequestsPage() {
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate" style={{ color: 'var(--txt)' }}>{fmt(o.startsAt)}</p>
                         <p className="text-[11px] flex items-center gap-1" style={{ color: o.ok ? 'var(--sage-dk)' : 'var(--coral)' }}>
-                          {o.ok ? <><Check size={12} /> Free &amp; within your hours</> : <><X size={12} /> {o.reason}</>}
+                          {o.ok
+                            ? <><Check size={12} /> {r.status === 'auto_confirmed' && o.rank === 1 ? 'Booked now — on the family’s calendar' : 'Free & within your hours'}</>
+                            : <><X size={12} /> {o.reason}</>}
                         </p>
                       </div>
                     </div>
@@ -159,7 +186,11 @@ export default function LessonRequestsPage() {
                       disabled={!o.ok || busyId === r.id}
                       className="ui-btn-primary text-xs shrink-0 disabled:opacity-40"
                     >
-                      {busyId === r.id ? '…' : 'Confirm this time'}
+                      {busyId === r.id
+                        ? '…'
+                        : r.status === 'auto_confirmed'
+                        ? (o.rank === 1 ? 'Keep this time' : 'Move here')
+                        : 'Confirm this time'}
                     </button>
                   </div>
                 ))}
