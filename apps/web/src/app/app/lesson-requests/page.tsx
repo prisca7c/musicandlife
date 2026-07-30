@@ -159,7 +159,7 @@ export default function LessonRequestsPage() {
                   ? 'Times the teacher suggested — confirm one to book it'
                   : r.status === 'auto_confirmed'
                   ? (r.isRecurring
-                      ? 'Booked weekly time — keep it, or move the series to a back-up'
+                      ? 'Booked weekly time — keep it, or decline to stop the series'
                       : 'Booked time & back-ups — keep it, or move to a back-up')
                   : 'Proposed times'}
               </p>
