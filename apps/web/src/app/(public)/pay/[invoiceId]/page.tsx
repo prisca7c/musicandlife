@@ -76,6 +76,23 @@ export default function PayInvoicePage() {
               {data.org.invoiceNotes && (
                 <p className="text-xs text-gray-500 whitespace-pre-line">{data.org.invoiceNotes}</p>
               )}
+
+              {/* Never strand a payer on a "Pay" page with no way to pay. If the
+                  studio hasn't configured bank details (and there's no card option
+                  yet) and there are no free-text payment notes, at least tell them
+                  to get in touch — with the reference so the studio can match it. */}
+              {data.status !== 'paid' &&
+                !data.org.bankAccountNumber &&
+                !data.org.bankSortCode &&
+                !data.org.invoiceNotes && (
+                  <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-sm text-gray-700">
+                    <p className="font-semibold text-gray-900 mb-1">How to pay</p>
+                    <p>
+                      Please contact {data.org.name} to arrange payment, quoting reference{' '}
+                      <span className="font-semibold">{data.number}</span>.
+                    </p>
+                  </div>
+                )}
             </>
           )}
         </div>
