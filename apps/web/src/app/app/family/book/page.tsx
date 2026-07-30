@@ -89,11 +89,11 @@ export default function BookLessonPage() {
     for (const s of chosen) {
       for (const e of s.enrollments ?? []) {
         if (!((e.status === 'active' || e.status === 'trial') && e.teacherId)) continue;
-        // Collapse duplicate enrolments that would book the identical lesson
-        // (same child + teacher + instrument + length). Without this, a student
-        // with two matching enrolments makes every time appear twice on the
-        // calendar with nothing to tell the copies apart.
-        const key = `${s.id}:${e.teacherId}:${e.instrument}:${e.defaultDuration}`;
+        // Collapse enrolments that would book the identical lesson — same child,
+        // teacher, instrument (case-insensitive: "piano"/"Piano" are one thing),
+        // length AND price. Anything that still differs (e.g. two piano rates) is
+        // a real choice, so we keep it and disambiguate it by price below.
+        const key = `${s.id}:${e.teacherId}:${e.instrument.trim().toLowerCase()}:${e.defaultDuration}:${e.rate}`;
         if (seen.has(key)) continue;
         seen.add(key);
         out.push({
@@ -131,14 +131,27 @@ export default function BookLessonPage() {
   // When more than one kind of lesson (a different instrument, or a different
   // child) shares the calendar, the time alone doesn't say which is which — so
   // we label each slot. multiChild adds the child's name on top of that.
+  const instrKey = (studentId: string, instrument: string) => `${studentId}:${instrument.trim().toLowerCase()}`;
   const multiKind = useMemo(
-    () => new Set(activeEnrollments.map(e => `${e.studentId}:${e.instrument}`)).size > 1,
+    () => new Set(activeEnrollments.map(e => instrKey(e.studentId, e.instrument))).size > 1,
     [activeEnrollments],
   );
   const multiChild = useMemo(
     () => new Set(activeEnrollments.map(e => e.studentId)).size > 1,
     [activeEnrollments],
   );
+  // Same child + same instrument but different prices (e.g. two piano rates) look
+  // identical on the calendar — flag those so the slot shows its price to tell
+  // them apart. Only kicks in on a genuine clash, so normal calendars stay clean.
+  const priceAmbiguous = useMemo(() => {
+    const rates = new Map<string, Set<number>>();
+    for (const e of activeEnrollments) {
+      const k = instrKey(e.studentId, e.instrument);
+      (rates.get(k) ?? rates.set(k, new Set()).get(k)!).add(e.rate);
+    }
+    return new Set([...rates].filter(([, r]) => r.size > 1).map(([k]) => k));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeEnrollments]);
 
   // ── Fan-out availability: one call per enrolment in view, merged. SWR can't key
   //    a dynamic number of requests, so this loads them in parallel by hand. ──
@@ -376,6 +389,8 @@ export default function BookLessonPage() {
                             const picked = rank >= 0;
                             const tooSoon = new Date(s.startsAt).getTime() < cutoff;
                             const overlaps = !picked && overlapsPick(s);
+                            const showPrice = priceAmbiguous.has(instrKey(s.studentId, s.instrument));
+                            const showLabel = multiKind || showPrice;
                             const c = colorFor(s.teacherId);
                             return (
                               <button key={slotKey(s)} disabled={tooSoon || overlaps} onClick={() => toggleSlot(s)}
@@ -383,7 +398,7 @@ export default function BookLessonPage() {
                                   ? `Online bookings need ${LEAD_HOURS}h notice — call the studio for sooner.`
                                   : overlaps
                                   ? 'Overlaps a time you’ve already picked.'
-                                  : `${s.studentName} · ${cap(s.instrument)} · ${s.teacherName}`}
+                                  : `${s.studentName} · ${cap(s.instrument)} · ${formatMoney(s.price)} · ${s.teacherName}`}
                                 className="relative w-full rounded-lg text-xs font-semibold border py-1.5 px-1 transition disabled:opacity-35 disabled:cursor-not-allowed"
                                 style={picked
                                   ? { borderColor: 'var(--sage)', background: 'var(--sage)', color: '#fff' }
@@ -395,10 +410,12 @@ export default function BookLessonPage() {
                                   {fmtTime(s.startsAt)}
                                   {picked && <span className="ml-1 text-[10px] font-black">#{rank + 1}</span>}
                                 </span>
-                                {multiKind && (
+                                {showLabel && (
                                   <span className="block text-[9px] font-medium leading-tight truncate"
                                     style={{ color: picked ? 'rgba(255,255,255,0.85)' : 'var(--txt3)' }}>
-                                    {cap(s.instrument)}{multiChild ? ` · ${s.studentName.split(' ')[0]}` : ''}
+                                    {cap(s.instrument)}
+                                    {showPrice ? ` · ${formatMoney(s.price)}` : ''}
+                                    {multiChild ? ` · ${s.studentName.split(' ')[0]}` : ''}
                                   </span>
                                 )}
                               </button>
