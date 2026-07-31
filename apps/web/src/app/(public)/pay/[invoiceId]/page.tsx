@@ -51,6 +51,20 @@ export default function PayInvoicePage() {
                 </p>
               </div>
             </>
+          ) : data && data.status === 'paid' ? (
+            // Already settled. Pay links live in emails and bookmarks forever, so
+            // a payer can easily re-open a paid invoice — never re-present the
+            // "Pay Invoice" call-to-action and bank details, or they may pay twice.
+            <>
+              <h1 className="text-xl font-bold text-gray-900 mb-1">Invoice {data.number}</h1>
+              <p className="text-sm text-gray-500 mb-6">{data.org.name}</p>
+              <div className="rounded-lg bg-green-50 border border-green-200 p-4">
+                <p className="text-xs text-green-700 uppercase tracking-wide mb-1">Paid</p>
+                <p className="text-sm text-gray-700">
+                  This invoice for <span className="font-semibold">{formatMoney(data.total)}</span> has been paid in full. There is nothing more to do.
+                </p>
+              </div>
+            </>
           ) : data && (
             <>
               <h1 className="text-xl font-bold text-gray-900 mb-1">Pay Invoice {data.number}</h1>
@@ -60,7 +74,6 @@ export default function PayInvoicePage() {
                 <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Total due</p>
                 <p className="text-2xl font-bold text-gray-900">{formatMoney(data.total)}</p>
                 <p className="text-xs text-gray-500 mt-1">Due {data.dueDate}</p>
-                {data.status === 'paid' && <p className="text-xs font-semibold text-green-700 mt-2">This invoice has already been paid.</p>}
               </div>
 
               {(data.org.bankAccountNumber || data.org.bankSortCode) && (
