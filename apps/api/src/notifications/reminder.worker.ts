@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { gte, lte, eq, and } from 'drizzle-orm';
+import { gte, lte, lt, eq, and } from 'drizzle-orm';
 import { lessons, students, families, lessonRequests } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { NotificationsService } from './notifications.service';
@@ -86,15 +86,21 @@ export class ReminderWorker {
     const now = new Date();
     const tzCache = new Map<string, string>();
 
-    // 24h window: lessons starting between 23h and 25h from now
-    const window24hStart = new Date(now.getTime() + 23 * 3600000);
+    // 24h window: lessons starting 24–25h from now. This MUST stay exactly one
+    // hour wide (and half-open) because the scan runs hourly and there is no
+    // per-lesson "reminded" flag — the notification log is written but never
+    // read back to dedupe. A wider window (the old 23–25h span) put each lesson
+    // inside two or three consecutive hourly scans, so every family got the
+    // "your lesson is tomorrow" email 2–3 times. A 1h half-open window lands on
+    // exactly one scan per lesson, matching scanBookingReviews above.
+    const window24hStart = new Date(now.getTime() + 24 * 3600000);
     const window24hEnd = new Date(now.getTime() + 25 * 3600000);
 
     const upcomingLessons = await this.db.db.query.lessons.findMany({
       where: and(
         eq(lessons.status, 'scheduled'),
         gte(lessons.startsAt, window24hStart),
-        lte(lessons.startsAt, window24hEnd),
+        lt(lessons.startsAt, window24hEnd),
       ),
       with: {
         student: {
@@ -108,7 +114,7 @@ export class ReminderWorker {
     let sent = 0;
     for (const lesson of upcomingLessons) {
       const hoursUntil = (lesson.startsAt.getTime() - now.getTime()) / 3600000;
-      if (hoursUntil < 23 || hoursUntil > 25) continue;
+      if (hoursUntil < 24 || hoursUntil >= 25) continue;
 
       const student = lesson.student as {
         email: string | null;
