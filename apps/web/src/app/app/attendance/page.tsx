@@ -238,11 +238,19 @@ export default function AttendancePage() {
   const { data: monthLessons = [], error: monthError, isLoading: monthLoading, mutate: reloadMonth } =
     useApi<Lesson[]>(view === 'month' ? `/lessons?from=${monthStart}&to=${monthEnd}` : null);
 
-  // Cached read of the week's lessons; the day's scheduled lessons are derived.
+  // Cached read of the week's lessons; the day's markable lessons are derived.
   // load() refreshes after saving attendance.
   const { data: allLessons = [], mutate } = useApi<Lesson[]>(`/lessons?weekStart=${weekStart}`);
   const load = () => mutate();
-  const lessons = allLessons.filter(l => l.startsAt.startsWith(date) && l.status === 'scheduled');
+  // Keep the day's still-scheduled lessons (to mark) *and* any already-marked
+  // ones (to correct, or to take a payment against). Marking flips a lesson's
+  // status off 'scheduled' (present → completed, absences → cancelled_*), so a
+  // plain `status === 'scheduled'` filter dropped every marked lesson — which
+  // silently starved the "Marked" section below of its correction and
+  // take-payment controls. Include lessons that carry an attendance record too.
+  const lessons = allLessons.filter(
+    l => l.startsAt.startsWith(date) && (l.status === 'scheduled' || !!l.attendance),
+  );
 
   // Seed the per-lesson "present" defaults when the set of lessons for the day
   // changes (date switch or new data) — keyed on the id signature so background
