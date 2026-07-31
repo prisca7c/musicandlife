@@ -112,6 +112,17 @@ export class AuthService {
     }
     if (new Date() > token.expiresAt) throw new UnauthorizedException('Refresh token expired');
 
+    // Defence in depth: a live refresh token is only valid while its session is.
+    // Any code path that revokes a session (logout, password reset, an admin
+    // kick) must invalidate its refresh chain too — checking the session here
+    // means a missed cascade can never leave a refresh token usable on its own.
+    const session = await this.db.db.query.sessions.findFirst({
+      where: eq(sessions.id, token.sessionId),
+    });
+    if (!session || session.revokedAt || new Date() > session.expiresAt) {
+      throw new UnauthorizedException('Session no longer valid');
+    }
+
     await this.db.db
       .update(refreshTokens)
       .set({ usedAt: new Date() })
@@ -233,11 +244,22 @@ export class AuthService {
       .set({ passwordHash, updatedAt: new Date() })
       .where(eq(users.id, record.userId));
 
-    // Revoke all sessions for this user
+    // A password reset is usually triggered precisely because the account may be
+    // compromised, so it must kick out anyone already holding credentials. Revoke
+    // both the user's sessions AND their refresh tokens. Revoking only sessions
+    // left the refresh chain alive: refresh() looks the token up by hash and
+    // checks that row's own revokedAt/usedAt — not the session — so a stolen
+    // refresh token could keep minting new 30-day access tokens indefinitely
+    // after the password had been changed.
     await this.db.db
       .update(sessions)
       .set({ revokedAt: new Date() })
       .where(and(eq(sessions.userId, record.userId), isNull(sessions.revokedAt)));
+
+    await this.db.db
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(refreshTokens.userId, record.userId), isNull(refreshTokens.revokedAt)));
 
     return { message: 'Password reset. Please log in with your new password.' };
   }
