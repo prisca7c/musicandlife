@@ -161,7 +161,13 @@ export default function BookLessonPage() {
   //    a dynamic number of requests, so this loads them in parallel by hand. ──
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
-  const ws = weekStart.toISOString().split('T')[0];
+  // The week's start date to fetch, as the STUDIO-zone day of the grid's first
+  // column. weekStart is local midnight Monday; `.toISOString()` would render it
+  // in UTC, which under BST (local = UTC+1) rolls back to Sunday — so the API
+  // fetched [Sun..Sat] while the grid drew [Mon..Sun], leaving the Sunday column
+  // permanently empty every summer (no Sunday slots bookable) and fetching a
+  // phantom prior Sunday. studioDayString matches the grid's day-0 key exactly.
+  const ws = studioDayString(weekStart);
   const enrollFetchKey = activeEnrollments.map(e => `${e.enrollmentId}:${e.teacherId}:${e.duration}`).join('|');
 
   const reqSeq = useRef(0);
