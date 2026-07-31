@@ -404,7 +404,7 @@ export class ReportsService {
 
     const ATTENDANCE_LABELS: Record<string, string> = {
       present: 'Present',
-      absent_makeup: 'Absent — makeup credit given',
+      absent_makeup: 'Absent — no charge (rebooking)',
       absent_no_makeup: 'Absent — late cancellation',
       absent_no_pay: 'Absent — no charge',
       cancelled_teacher: 'Cancelled (teacher)',

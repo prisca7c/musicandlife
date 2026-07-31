@@ -32,7 +32,7 @@ async function downloadBlob(blob: Blob, filename: string) {
 
 const STATUS_LABELS: Record<string, string> = {
   scheduled: 'Scheduled', completed: 'Completed',
-  cancelled_makeup: 'Lesson earned', cancelled_no_makeup: 'Late cancel',
+  cancelled_makeup: 'Cancelled — rebook', cancelled_no_makeup: 'Late cancel',
   cancelled_no_pay: 'No charge', cancelled_teacher: 'Teacher cancelled', makeup: 'Makeup lesson',
 };
 
