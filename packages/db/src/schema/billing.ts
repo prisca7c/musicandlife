@@ -184,7 +184,18 @@ export const payrollRuns = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('payroll_runs_staff_idx').on(t.organizationId, t.staffId)],
+  (t) => [
+    index('payroll_runs_staff_idx').on(t.organizationId, t.staffId),
+    // One payroll run per teacher per period. The service pre-checks for an
+    // existing run, but that check-then-insert races: two concurrent creates
+    // (or a batch overlapping a single create) could both pass it and draft two
+    // runs over the identical lessons — paying the teacher twice if both are
+    // approved. This constraint makes the database the single source of truth so
+    // the second insert can never land.
+    uniqueIndex('payroll_runs_period_uq').on(
+      t.organizationId, t.staffId, t.periodStart, t.periodEnd,
+    ),
+  ],
 );
 
 export const payrollItems = pgTable('payroll_items', {

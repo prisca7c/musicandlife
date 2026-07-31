@@ -153,6 +153,14 @@ export class PayrollService {
     orgId: string, staffId: string, periodStart: string, periodEnd: string, hourlyRate: number,
     computed: { items: { lessonId: string; type: 'lesson' | 'late_cancellation'; minutes: number; amount: number }[]; totalMinutes: number; gross: number },
   ) {
+    // `onConflictDoNothing()` (no target) is the atomic backstop for the racy
+    // pre-check in the callers: once the `payroll_runs_period_uq` index exists, a
+    // second concurrent insert for the same teacher+period conflicts and returns
+    // no row. Deliberately target-less so this is also safe to deploy BEFORE the
+    // migration lands — with no unique index there is simply no conflict, exactly
+    // today's behaviour, rather than a "no matching ON CONFLICT" error. A null
+    // return means "someone already has this period"; the caller decides whether
+    // that's a conflict (single create) or a skip (batch).
     const [run] = await this.db.db.insert(payrollRuns).values({
       organizationId: orgId,
       staffId,
@@ -162,7 +170,8 @@ export class PayrollService {
       hourlyRate,
       gross: computed.gross,
       status: 'draft',
-    }).returning();
+    }).onConflictDoNothing().returning();
+    if (!run) return null;
 
     for (const item of computed.items) {
       await this.db.db.insert(payrollItems).values({
@@ -175,7 +184,7 @@ export class PayrollService {
       });
     }
 
-    return { ...run!, items: computed.items };
+    return { ...run, items: computed.items };
   }
 
   async createPayrollRun(orgId: string, dto: CreatePayrollRunDto) {
@@ -200,7 +209,10 @@ export class PayrollService {
     if (existing) throw new ConflictException('A payroll run already exists for this teacher and period');
 
     const computed = await this.computeRunItems(orgId, dto.staffId, staff.hourlyRate, new Date(dto.periodStart), new Date(dto.periodEnd));
-    return this.persistRun(orgId, dto.staffId, dto.periodStart, dto.periodEnd, staff.hourlyRate, computed);
+    const run = await this.persistRun(orgId, dto.staffId, dto.periodStart, dto.periodEnd, staff.hourlyRate, computed);
+    // Lost the race against a concurrent create that slipped past the pre-check.
+    if (!run) throw new ConflictException('A payroll run already exists for this teacher and period');
+    return run;
   }
 
   // Batch: draft a payroll run for every active teacher over one period, in a
@@ -234,6 +246,9 @@ export class PayrollService {
       if (computed.items.length === 0) { skippedEmpty++; continue; }
 
       const run = await this.persistRun(orgId, s.id, periodStart, periodEnd, s.hourlyRate, computed);
+      // A run appeared between the pre-check and the insert (e.g. a concurrent
+      // batch or single create). Treat it as already-existing, not a hard error.
+      if (!run) { skippedExisting++; continue; }
       created.push({ staffId: s.id, name: `${s.firstName} ${s.lastName}`, runId: run.id, gross: computed.gross, items: computed.items.length });
     }
 
