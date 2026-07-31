@@ -5,6 +5,7 @@ import { lessons, students, families, lessonRequests } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { NotificationsService } from './notifications.service';
 import { withAdvisoryLock } from '../common/cron-lock';
+import { getOrgTimezone, formatInZone } from '../common/timezone';
 
 @Injectable()
 export class ReminderWorker {
@@ -30,8 +31,20 @@ export class ReminderWorker {
   // they still haven't a day later. The 24–25h creation window is one hour wide,
   // so the hourly scan catches each request exactly once without a "reminded"
   // flag; the status filter stops it firing after the teacher has decided.
+  // Resolve an org's studio timezone at most once per scan (a scan spans a single
+  // org today, but this stays correct if that ever changes).
+  private async tzFor(cache: Map<string, string>, orgId: string): Promise<string> {
+    let tz = cache.get(orgId);
+    if (tz === undefined) {
+      tz = await getOrgTimezone(this.db.db, orgId);
+      cache.set(orgId, tz);
+    }
+    return tz;
+  }
+
   private async scanBookingReviews() {
     const now = new Date();
+    const tzCache = new Map<string, string>();
     const windowStart = new Date(now.getTime() - 25 * 3600000);
     const windowEnd = new Date(now.getTime() - 24 * 3600000);
 
@@ -54,7 +67,8 @@ export class ReminderWorker {
       if (!email) continue;
       const student = req.student as { firstName: string | null; lastName: string | null } | null;
       const who = [student?.firstName, student?.lastName].filter(Boolean).join(' ') || 'A student';
-      const when = req.proposedStartsAt.toLocaleString('en-GB', {
+      const tz = await this.tzFor(tzCache, req.organizationId);
+      const when = formatInZone(req.proposedStartsAt, tz, {
         weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
       });
       await this.notifications.trigger('booking.review_reminder', {
@@ -70,6 +84,7 @@ export class ReminderWorker {
 
   private async scanReminders() {
     const now = new Date();
+    const tzCache = new Map<string, string>();
 
     // 24h window: lessons starting between 23h and 25h from now
     const window24hStart = new Date(now.getTime() + 23 * 3600000);
@@ -113,7 +128,8 @@ export class ReminderWorker {
           .filter((e): e is string => !!e),
       )];
 
-      const at = lesson.startsAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      const tz = await this.tzFor(tzCache, lesson.organizationId);
+      const at = formatInZone(lesson.startsAt, tz, { hour: '2-digit', minute: '2-digit' });
       for (const email of recipients) {
         await this.notifications.trigger('lesson.reminder_24h', {
           orgId: lesson.organizationId,

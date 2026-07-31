@@ -20,6 +20,7 @@ import { ReconciliationService } from '../billing/reconciliation.service';
 import { SchedulingService } from '../scheduling/scheduling.service';
 import { FilesService } from '../files/files.service';
 import { invoices } from '@music-life/db';
+import { getOrgTimezone, formatInZone } from '../common/timezone';
 import type { RequestUser } from '@music-life/types';
 
 // Shape of the entries stored in notes.attachments (see NotesController).
@@ -703,8 +704,9 @@ export class FamilyPortalController {
     instrument: string,
     isTrial: boolean,
   ) {
-    const dateStr = lesson.startsAt.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    const timeStr = lesson.startsAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const tz = await getOrgTimezone(this.db.db, orgId);
+    const dateStr = formatInZone(lesson.startsAt, tz, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const timeStr = formatInZone(lesson.startsAt, tz, { hour: '2-digit', minute: '2-digit' });
     const teacherName = `${teacher.firstName} ${teacher.lastName}`;
     const studentName = `${student.firstName} ${student.lastName}`;
     const trialNote = isTrial ? '<p><strong>This is a trial lesson.</strong></p>' : '';
