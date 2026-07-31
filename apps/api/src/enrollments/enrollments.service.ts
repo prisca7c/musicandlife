@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { eq, and, gte } from 'drizzle-orm';
 import { enrollments, students, staffMembers, terms, lessons } from '@music-life/db';
 import { DbService } from '../db/db.service';
@@ -29,6 +29,39 @@ export class EnrollmentsService {
     }
   }
 
+  // Reject a case-/whitespace-variant duplicate of an enrolment the student
+  // already holds. "Piano" and "piano" (or " piano ") were otherwise persisted
+  // as two separate enrolments for the same instrument+teacher+type — which
+  // fragments reports and billing and renders as two identical, indistinguishable
+  // bookable slots on the family calendar. Match case-insensitively on trimmed
+  // instrument + teacher + lessonType. A withdrawn enrolment never blocks (so
+  // re-enrolling is fine), and excludeId skips the row being updated in-place.
+  private async assertNoDuplicateEnrollment(
+    orgId: string,
+    studentId: string,
+    effective: { instrument: string; lessonType: 'private' | 'group'; teacherId: string | null },
+    excludeId?: string,
+  ) {
+    const instrument = effective.instrument.trim();
+    const siblings = await this.db.db.query.enrollments.findMany({
+      where: and(eq(enrollments.studentId, studentId), eq(enrollments.organizationId, orgId)),
+      columns: { id: true, instrument: true, lessonType: true, teacherId: true, status: true },
+    });
+    const isDuplicate = siblings.some(
+      (e) =>
+        (excludeId === undefined || e.id !== excludeId) &&
+        e.status !== 'withdrawn' &&
+        e.lessonType === effective.lessonType &&
+        (e.teacherId ?? null) === effective.teacherId &&
+        e.instrument.trim().toLowerCase() === instrument.toLowerCase(),
+    );
+    if (isDuplicate) {
+      throw new ConflictException(
+        `This student already has a ${effective.lessonType} ${instrument} enrolment${effective.teacherId ? ' with this teacher' : ''}.`,
+      );
+    }
+  }
+
   async create(orgId: string, studentId: string, dto: CreateEnrollmentDto) {
     const student = await this.db.db.query.students.findFirst({
       where: and(eq(students.id, studentId), eq(students.organizationId, orgId)),
@@ -37,11 +70,20 @@ export class EnrollmentsService {
 
     await this.assertTeacherAndTermInOrg(orgId, dto.teacherId, dto.termId);
 
+    // Store the instrument trimmed and reject a variant-duplicate.
+    const instrument = dto.instrument.trim();
+    await this.assertNoDuplicateEnrollment(orgId, studentId, {
+      instrument,
+      lessonType: dto.lessonType,
+      teacherId: dto.teacherId ?? null,
+    });
+
     const { duration, ...rest } = dto;
     const [enrollment] = await this.db.db
       .insert(enrollments)
       .values({
         ...rest,
+        instrument,
         ...(duration != null ? { defaultDuration: duration } : {}),
         studentId,
         organizationId: orgId,
@@ -58,14 +100,36 @@ export class EnrollmentsService {
 
     await this.assertTeacherAndTermInOrg(orgId, dto.teacherId, dto.termId);
 
+    // Renaming an instrument (or switching teacher/lessonType) can collide with
+    // a sibling enrolment just as create can. Compute the post-update effective
+    // values — each field falls back to the existing row when the DTO omits it —
+    // and reject a variant-duplicate, unless the result is itself withdrawn (a
+    // withdrawn enrolment can't own a bookable slot, so it can't collide).
+    const instrument = dto.instrument !== undefined ? dto.instrument.trim() : existing.instrument;
+    const effectiveStatus = dto.status ?? existing.status;
+    if (effectiveStatus !== 'withdrawn') {
+      await this.assertNoDuplicateEnrollment(
+        orgId,
+        existing.studentId,
+        {
+          instrument,
+          lessonType: dto.lessonType ?? existing.lessonType,
+          teacherId: dto.teacherId !== undefined ? (dto.teacherId ?? null) : (existing.teacherId ?? null),
+        },
+        id,
+      );
+    }
+
     // The DTO carries the lesson length as `duration`; the column is
     // `defaultDuration`. create() maps this, but update() spread the DTO raw, so
-    // a changed duration was silently dropped. Map it here the same way.
+    // a changed duration was silently dropped. Map it here the same way. Persist
+    // the instrument trimmed too, matching create().
     const { duration, ...rest } = dto;
     const [updated] = await this.db.db
       .update(enrollments)
       .set({
         ...rest,
+        ...(dto.instrument !== undefined ? { instrument } : {}),
         ...(duration != null ? { defaultDuration: duration } : {}),
         updatedAt: new Date(),
       })
