@@ -223,7 +223,7 @@ export class SchedulingService {
       // Interpret a naive wall-clock ("...T16:00:00") as the studio's local time.
       const startsAt = parseZonedDateTime(dto.startsAt, tz);
       await this.lockResources(tx, orgId, dto.teacherId);
-      await this.checkConflicts(tx, orgId, startsAt.toISOString(), dto.duration ?? 60, dto.teacherId);
+      await this.checkConflicts(tx, orgId, startsAt.toISOString(), dto.duration ?? 60, dto.teacherId, undefined, dto.studentId);
 
       const [lesson] = await tx
         .insert(lessons)
@@ -347,6 +347,7 @@ export class SchedulingService {
           dto.duration ?? existing.duration,
           teacherId,
           id,
+          existing.studentId ?? undefined,
         );
       }
       const [updated] = await tx
@@ -406,7 +407,7 @@ export class SchedulingService {
     return this.db.db.transaction(async (tx) => {
       const teacherId = lesson.teacherId ?? undefined;
       await this.lockResources(tx, orgId, teacherId);
-      await this.checkConflicts(tx, orgId, lesson.startsAt.toISOString(), lesson.duration, teacherId, id);
+      await this.checkConflicts(tx, orgId, lesson.startsAt.toISOString(), lesson.duration, teacherId, id, lesson.studentId ?? undefined);
 
       const [updated] = await tx.update(lessons)
         .set({ status: 'scheduled', cancelledAt: null, updatedAt: new Date() })
@@ -427,7 +428,7 @@ export class SchedulingService {
       const startsAt = parseZonedDateTime(newStartsAt, tz);
       const startsAtISO = startsAt.toISOString();
       await this.lockResources(tx, orgId, teacherId);
-      await this.checkConflicts(tx, orgId, startsAtISO, lesson.duration, teacherId, id);
+      await this.checkConflicts(tx, orgId, startsAtISO, lesson.duration, teacherId, id, lesson.studentId ?? undefined);
 
       // Reasonable-for-the-teacher check: the new slot must sit inside the
       // teacher's availability windows and not clash with their blocked time.
@@ -1011,7 +1012,7 @@ export class SchedulingService {
     // The new weekly slot must sit in the teacher's hours and not clash.
     const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, req.teacherId, targetISO, req.duration, tz);
     if (unavailable) throw new BadRequestException(unavailable);
-    if (await this.hasConflict(this.db.db, orgId, targetISO, req.duration, req.teacherId)) {
+    if (await this.hasConflict(this.db.db, orgId, targetISO, req.duration, req.teacherId, undefined, req.studentId)) {
       throw new BadRequestException('That weekly time clashes with another lesson.');
     }
 
@@ -1107,7 +1108,7 @@ export class SchedulingService {
         const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, r.teacherId, iso, r.duration, tz);
         // Exclude the request's own instant-booked lesson (auto_confirmed) so its
         // 1st choice doesn't read as clashing with itself.
-        const conflict = unavailable ? false : await this.hasConflict(this.db.db, orgId, iso, r.duration, r.teacherId, r.createdLessonId ?? undefined);
+        const conflict = unavailable ? false : await this.hasConflict(this.db.db, orgId, iso, r.duration, r.teacherId, r.createdLessonId ?? undefined, r.studentId);
         return {
           rank: i + 1,
           startsAt: iso,
@@ -1153,7 +1154,7 @@ export class SchedulingService {
       const target = new Date(t).toISOString();
       const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, req.teacherId, target, req.duration, tz);
       if (unavailable) throw new BadRequestException(unavailable);
-      if (await this.hasConflict(this.db.db, orgId, target, req.duration, req.teacherId)) {
+      if (await this.hasConflict(this.db.db, orgId, target, req.duration, req.teacherId, undefined, req.studentId)) {
         throw new BadRequestException('One of your suggested times clashes with another lesson.');
       }
       iso.push(target);
@@ -1294,10 +1295,10 @@ export class SchedulingService {
   /** Did this slot clash with an existing lesson? Non-throwing wrapper over checkConflicts. */
   private async hasConflict(
     exec: Executor, orgId: string, startsAt: string, duration: number,
-    teacherId?: string, excludeLessonId?: string,
+    teacherId?: string, excludeLessonId?: string, studentId?: string,
   ): Promise<boolean> {
     try {
-      await this.checkConflicts(exec, orgId, startsAt, duration, teacherId, excludeLessonId);
+      await this.checkConflicts(exec, orgId, startsAt, duration, teacherId, excludeLessonId, studentId);
       return false;
     } catch {
       return true;
@@ -1417,7 +1418,7 @@ export class SchedulingService {
   }
 
   // ─── Conflict check ────────────────────────────────────────────────────────
-  private async checkConflicts(db: Executor, orgId: string, startsAt: string, duration: number, teacherId?: string, excludeLessonId?: string) {
+  private async checkConflicts(db: Executor, orgId: string, startsAt: string, duration: number, teacherId?: string, excludeLessonId?: string, studentId?: string) {
     const start = new Date(startsAt);
     const end = new Date(start.getTime() + duration * 60000);
 
@@ -1436,17 +1437,25 @@ export class SchedulingService {
       ),
     });
 
-    const conflicts = overlapping.filter(l => {
-      if (excludeLessonId && l.id === excludeLessonId) return false;
+    // A clash is either resource being double-booked: the same teacher can't
+    // teach two lessons at once, and — just as important — a student can't be in
+    // two places at once. The student side was previously unchecked, so a child
+    // with two teachers (or a staff/portal booking that picked a second teacher)
+    // could be booked into overlapping lessons with nothing to stop it. Two
+    // instruments back-to-back are fine; only true time overlap counts.
+    let teacherClash = false;
+    let studentClash = false;
+    for (const l of overlapping) {
+      if (excludeLessonId && l.id === excludeLessonId) continue;
       const lEnd = new Date(l.startsAt.getTime() + l.duration * 60000);
-      const overlaps = l.startsAt < end && lEnd > start;
-      if (!overlaps) return false;
-      if (teacherId && l.teacherId === teacherId) return true;
-      return false;
-    });
-
-    if (conflicts.length > 0) {
-      throw new BadRequestException('Teacher already has a lesson at this time');
+      if (!(l.startsAt < end && lEnd > start)) continue;
+      if (teacherId && l.teacherId === teacherId) teacherClash = true;
+      if (studentId && l.studentId === studentId) studentClash = true;
     }
+
+    // Prefer the teacher message when both clash — it's the studio-facing
+    // constraint most booking surfaces already surface.
+    if (teacherClash) throw new BadRequestException('Teacher already has a lesson at this time');
+    if (studentClash) throw new BadRequestException('Student already has a lesson at this time');
   }
 }
