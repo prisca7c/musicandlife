@@ -10,6 +10,7 @@ import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { SearchableSelect } from '@/components/searchable-select';
 import { linkify } from '@/lib/linkify';
+import { useRole } from '@/lib/use-role';
 import { Search, Lock, Download, Play, FileText } from 'lucide-react';
 
 interface Resource {
@@ -24,14 +25,6 @@ interface Staff { id: string; firstName: string; lastName: string; }
 interface Student { id: string; firstName: string; lastName: string; }
 
 const SCOPE_COLORS: Record<string, string> = { studio: 'default', teacher: 'trial', family: 'active', student: 'planned' };
-
-function getRoleFromToken(token?: string): string {
-  try {
-    if (!token) return '';
-    const payload = JSON.parse(atob(token.split('.')[1]!));
-    return payload.role ?? '';
-  } catch { return ''; }
-}
 
 function AddResourceModal({ open, onClose, onCreated, role, staff, students }: {
   open: boolean; onClose: () => void; onCreated: () => void;
@@ -189,7 +182,7 @@ export default function ResourcesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [deleting, setDeleting] = useState<string|null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
-  const role = getRoleFromToken(tok());
+  const role = useRole();
 
   // The filter set is the cache key — changing a filter re-keys and refetches;
   // revisiting with the same filters renders instantly. A rejected read (403)
