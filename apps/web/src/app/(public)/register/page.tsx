@@ -134,6 +134,11 @@ export default function RegisterPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [tcAccepted, setTcAccepted] = useState(false);
+  // One idempotency key per form session (not per submit() call). Retries of the
+  // same registration — a double-click race, a back-then-resubmit, or a second
+  // tab — reuse this key so the API dedupes them instead of creating duplicate
+  // pending registrations. A fresh mount (page reload after success) gets a new key.
+  const idempotencyKey = useRef(`reg-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   // The instruments offered are editable from Settings, so they're fetched
   // rather than compiled in. The build-time constants stay as the fallback: if
@@ -243,7 +248,7 @@ export default function RegisterPage() {
         instruments: data.instruments,
         emailReminders: data.emailReminders,
         notes: data.notes || undefined,
-        idempotencyKey: `reg-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        idempotencyKey: idempotencyKey.current,
       };
       await apiFetch('/public/registrations', { method: 'POST', body: JSON.stringify(payload) });
       setStep('success');
