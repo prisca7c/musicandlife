@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { fmtTime, fmtTimeEnd, fmtDate, studioMinutesFromMidnight, studioDayString } from '@/lib/datetime';
+import { useRole } from '@/lib/use-role';
 import { Modal } from '@/components/modal';
 import { Badge } from '@/components/badge';
 import { SearchableSelect } from '@/components/searchable-select';
@@ -1043,7 +1044,7 @@ export default function CalendarPage() {
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   const weekStart = getWeekStart(anchorDate);
-  const role = getRoleFromToken(tok());
+  const role = useRole();
   // "Assign students" / "Add student" are front-desk tasks — only management
   // roles get them. Teachers, and any parent/student who lands here, do not.
   const isManagement = ['system_admin', 'admin', 'manager', 'receptionist'].includes(role);

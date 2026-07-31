@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { fmtTime } from '@/lib/datetime';
+import { useRole } from '@/lib/use-role';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
@@ -16,10 +17,6 @@ import { Check, X, AlertTriangle, Calendar, RefreshCw, Search, PoundSterling } f
 // but they don't handle payments — so the "paid at the lesson" control is theirs
 // to see, not press.
 const CAN_TAKE_PAYMENT = ['receptionist', 'manager', 'admin', 'system_admin'];
-function roleFromToken(token?: string): string {
-  try { return token ? (JSON.parse(atob(token.split('.')[1]!)).role ?? '') : ''; }
-  catch { return ''; }
-}
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string;
@@ -210,7 +207,7 @@ export default function AttendancePage() {
   const [paid, setPaid] = useState<Record<string, string>>({});
   const [payErr, setPayErr] = useState<Record<string, string>>({});
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
-  const canTakePayment = CAN_TAKE_PAYMENT.includes(roleFromToken(tok()));
+  const canTakePayment = CAN_TAKE_PAYMENT.includes(useRole());
 
   async function takePayment(lessonId: string, method: 'cash' | 'card') {
     setSaving(lessonId);

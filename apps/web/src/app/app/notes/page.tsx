@@ -8,6 +8,7 @@ import { InfoTooltip } from '@/components/info-tooltip';
 import { SearchableSelect } from '@/components/searchable-select';
 import { linkify } from '@/lib/linkify';
 import { uploadFile } from '@/lib/upload';
+import { useRole } from '@/lib/use-role';
 import { Lock, Users, Paperclip, X as XIcon, FileText, Download, Check } from 'lucide-react';
 
 interface Student { id: string; firstName: string; lastName: string; }
@@ -24,14 +25,6 @@ interface Note {
 // A file the teacher has picked to attach: tracks upload progress until it has a fileId.
 interface PendingAttachment { localId: string; name: string; mime: string; size: number; fileId?: string; error?: string }
 
-function getRoleFromToken(token?: string): string {
-  try {
-    if (!token) return '';
-    const payload = JSON.parse(atob(token.split('.')[1]!));
-    return payload.role ?? '';
-  } catch { return ''; }
-}
-
 export default function NotesPage() {
   const [studentId, setStudentId] = useState('');
   const [lessonId, setLessonId] = useState('');
@@ -41,7 +34,7 @@ export default function NotesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
-  const isTeacher = getRoleFromToken(tok()) === 'teacher';
+  const isTeacher = useRole() === 'teacher';
 
   // Cached reads. The student list loads once; lessons and notes are keyed on
   // the selected student (null key = don't fetch until one is picked).
