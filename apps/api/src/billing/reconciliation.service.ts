@@ -212,7 +212,14 @@ export class ReconciliationService {
     const iDesc = find('description', 'details', 'narrative', 'payee', 'counterparty', 'memo');
     // Banks use either one signed Amount column, or separate In/Out columns.
     const iIn = find('paid in', 'money in', 'credit', 'received');
-    const iAmount = find('amount', 'value');
+    // "value" catches NatWest/RBS, whose amount column is literally "Value" — but
+    // it must NOT swallow a "Value Date" column. Without the date guard that
+    // column wins (it sorts before "Amount"), and every row's amount becomes its
+    // date parsed as a number: "01/07/2026" → 1072026 → £1,072,026 credited on
+    // account to any family whose reference matches. Exclude any date column.
+    const iAmount = headers.findIndex(
+      (h) => (h.includes('amount') || h.includes('value')) && !h.includes('date'),
+    );
 
     if (iDate === -1 || (iIn === -1 && iAmount === -1)) {
       throw new BadRequestException(
