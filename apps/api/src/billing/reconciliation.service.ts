@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
-import { eq, and, isNull, desc } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, desc } from 'drizzle-orm';
 import { createHash, randomBytes } from 'crypto';
 import { families, invoices, paymentClaims, bankTransactions } from '@music-life/db';
 import { DbService } from '../db/db.service';
@@ -141,12 +141,70 @@ export class ReconciliationService {
     if (!claim) throw new NotFoundException('Claim not found');
     if (claim.status !== 'pending') throw new BadRequestException('This claim has already been decided');
 
+    // The money may have already landed and been auto-credited (an imported
+    // statement line for this family+amount that no claim is tied to yet). If
+    // so, settle the claim against THAT existing payment — recording a fresh
+    // one here would credit the same transfer twice. Only fall through to a
+    // genuine staff override (new payment) when nothing is already banked.
+    const banked = await this.findUnclaimedBankPayment(orgId, claim.familyId, claim.amount);
+    if (banked) {
+      await this.linkClaimToBankedPayment(claim, banked, userId);
+      return { status: 'confirmed', paymentId: banked.paymentId };
+    }
+
     const payment = await this.settleClaim(orgId, claim, {
       notes: 'Confirmed by staff without a matching statement line.',
       manual: true,
       confirmedBy: userId,
     });
     return { status: 'confirmed', paymentId: payment.id };
+  }
+
+  /**
+   * An imported statement line for this family+amount that already has a payment
+   * (credited on account or against an invoice) but isn't yet tied to a claim.
+   * This is the money a later claim should settle against rather than paying
+   * again.
+   */
+  private async findUnclaimedBankPayment(orgId: string, familyId: string, amount: number) {
+    return this.db.db.query.bankTransactions.findFirst({
+      where: and(
+        eq(bankTransactions.organizationId, orgId),
+        eq(bankTransactions.matchedFamilyId, familyId),
+        eq(bankTransactions.amount, amount),
+        eq(bankTransactions.status, 'matched'),
+        isNull(bankTransactions.matchedClaimId),
+        isNotNull(bankTransactions.paymentId),
+      ),
+      orderBy: [desc(bankTransactions.bookedOn)],
+    });
+  }
+
+  /**
+   * Settle a claim against a bank line whose money is already banked: point the
+   * claim at the existing payment and stamp the claim onto the line so a second
+   * claim can't attach to the same transfer. No new payment — the ledger already
+   * moved when the line was imported.
+   */
+  private async linkClaimToBankedPayment(
+    claim: typeof paymentClaims.$inferSelect,
+    txn: typeof bankTransactions.$inferSelect,
+    confirmedBy?: string,
+  ) {
+    await this.db.db.update(bankTransactions).set({
+      matchedClaimId: claim.id, updatedAt: new Date(),
+    }).where(eq(bankTransactions.id, txn.id));
+
+    await this.db.db.update(paymentClaims).set({
+      status: 'confirmed',
+      paymentId: txn.paymentId,
+      matchedTransactionId: txn.id,
+      confirmedBy: confirmedBy ?? null,
+      confirmedAt: new Date(),
+      resolvedManually: false,
+      notes: `Matched to bank statement line of ${txn.bookedOn}, already credited on import.`,
+      updatedAt: new Date(),
+    }).where(eq(paymentClaims.id, claim.id));
   }
 
   async rejectClaim(orgId: string, claimId: string, userId: string, reason?: string) {
@@ -380,27 +438,26 @@ export class ReconciliationService {
     }).where(eq(bankTransactions.id, txnId));
   }
 
-  /** A claim raised after the money already landed still needs to settle. */
+  /**
+   * A claim raised after the money already landed still needs to settle.
+   *
+   * When a transfer arrives before the family taps "I've paid", the importer has
+   * no claim to match, so it credits the family on account and marks the line
+   * `matched` (never `unmatched` — a `matched_family_id` is only ever set on a
+   * line that then gets settled). The old lookup here required an `unmatched`
+   * line WITH a family, a combination the importer never produces, so this never
+   * fired: the claim sat `pending` forever and a staffer confirming it recorded a
+   * SECOND payment for money already banked. Point the claim at the existing
+   * payment instead — no new money moves.
+   */
   private async tryMatchClaimAgainstImported(orgId: string, claimId: string) {
     const claim = await this.db.db.query.paymentClaims.findFirst({ where: eq(paymentClaims.id, claimId) });
     if (!claim || claim.status !== 'pending') return;
 
-    const txn = await this.db.db.query.bankTransactions.findFirst({
-      where: and(
-        eq(bankTransactions.organizationId, orgId),
-        eq(bankTransactions.matchedFamilyId, claim.familyId),
-        eq(bankTransactions.amount, claim.amount),
-        eq(bankTransactions.status, 'unmatched'),
-      ),
-    });
+    const txn = await this.findUnclaimedBankPayment(orgId, claim.familyId, claim.amount);
     if (!txn) return;
 
-    const payment = await this.settleClaim(orgId, claim, {
-      notes: `Matched to bank statement line of ${txn.bookedOn}.`,
-      manual: false,
-      transactionId: txn.id,
-    });
-    await this.markTxnMatched(txn.id, claim.id, payment.id);
+    await this.linkClaimToBankedPayment(claim, txn);
   }
 
   /** The exceptions queue — the only thing staff routinely need to look at. */
