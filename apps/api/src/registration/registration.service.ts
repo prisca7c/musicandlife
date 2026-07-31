@@ -48,12 +48,31 @@ export class RegistrationService {
     }
 
     const iKey = dto.idempotencyKey ?? randomBytes(16).toString('hex');
+    // The findFirst pre-check above catches the common case (a resubmit seconds
+    // or minutes later), but it is not atomic: two identical submits racing in
+    // parallel — a double-click, or a client retry that now reuses the same
+    // idempotencyKey — both see no existing row and both insert, and the unique
+    // index on idempotency_key rejects the loser as a 500. onConflictDoNothing
+    // makes the DB constraint the source of truth: the loser inserts nothing and
+    // we return the winner's row with the same idempotent response, so a parent
+    // who double-clicks Submit never sees an error for a registration that
+    // actually went through.
     const [reg] = await this.db.db.insert(registrations).values({
       organizationId: org.id,
       payload: dto as unknown as Record<string, unknown>,
       status: 'pending',
       idempotencyKey: iKey,
-    }).returning();
+    }).onConflictDoNothing().returning();
+
+    if (!reg) {
+      const existing = await this.db.db.query.registrations.findFirst({
+        where: eq(registrations.idempotencyKey, iKey),
+      });
+      if (existing) return { id: existing.id, status: existing.status, message: 'Already submitted' };
+      // Conflict with no recoverable row is not something a retry with the same
+      // key can fix — surface it clearly rather than as an opaque 500.
+      throw new ConflictException('Could not save your registration. Please try again.');
+    }
 
     // Notify admin
     this.notifications.trigger('registration.received', {
