@@ -8,6 +8,40 @@
  * interpret it in the server's local zone (UTC on Render). These helpers convert
  * such a wall-clock string into the correct absolute instant for the studio zone.
  */
+import { eq } from 'drizzle-orm';
+import { organizations, type Db } from '@music-life/db';
+
+type Executor = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
+
+/**
+ * The studio's IANA timezone for an org (e.g. "Europe/London"), defaulting to
+ * Europe/London when unset. Every user-facing render of a lesson time must be
+ * formatted in this zone: the API server runs in UTC (Render), so formatting an
+ * instant with the default locale shows the server's wall clock — 1h wrong all
+ * summer during BST. Pair with {@link formatInZone}.
+ */
+export async function getOrgTimezone(exec: Executor, orgId: string): Promise<string> {
+  const org = await exec.query.organizations.findFirst({
+    where: eq(organizations.id, orgId),
+    columns: { timezone: true },
+  });
+  return org?.timezone ?? 'Europe/London';
+}
+
+/**
+ * Format an instant for display in the studio's timezone. The backend mirror of
+ * the web `datetime.ts` helpers — the missing `timeZone` on `toLocale*String`
+ * calls is exactly what rendered lesson times in server-UTC. Always pass the org
+ * tz from {@link getOrgTimezone}.
+ */
+export function formatInZone(
+  instant: Date,
+  timeZone: string,
+  opts: Intl.DateTimeFormatOptions,
+  locale = 'en-GB',
+): string {
+  return new Intl.DateTimeFormat(locale, { timeZone, ...opts }).format(instant);
+}
 
 /** Offset (ms) of `timeZone` at the given absolute instant. Positive = ahead of UTC. */
 function tzOffsetMs(instant: Date, timeZone: string): number {

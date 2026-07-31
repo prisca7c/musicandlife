@@ -7,6 +7,7 @@ import {
 } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { proratedAmount } from '../billing/billing.service';
+import { getOrgTimezone, formatInZone } from '../common/timezone';
 
 @Injectable()
 export class ReportsService {
@@ -270,6 +271,7 @@ export class ReportsService {
     if (!student) throw new NotFoundException('Student not found');
 
     const org = await this.db.db.query.organizations.findFirst({ where: eq(organizations.id, orgId) });
+    const tz = await getOrgTimezone(this.db.db, orgId);
 
     const periodLessons = await this.db.db.query.lessons.findMany({
       where: and(
@@ -289,7 +291,7 @@ export class ReportsService {
       .filter(l => l.status !== 'cancelled_no_pay' && l.status !== 'cancelled_teacher')
       .map(l => ({
         id: l.id,
-        date: l.startsAt.toLocaleDateString('en-GB'),
+        date: formatInZone(l.startsAt, tz, {}),
         description: `${l.isTrialLesson ? 'Trial: ' : ''}${l.enrollment?.instrument ?? 'Lesson'} — ${l.duration} min${l.status === 'cancelled_no_makeup' ? ' (late cancellation)' : ''}`,
         amount: proratedAmount(l.enrollment?.rate, l.enrollment?.defaultDuration, l.duration),
         status: l.status,
@@ -324,6 +326,7 @@ export class ReportsService {
     if (!staff) throw new NotFoundException('Staff member not found');
 
     const org = await this.db.db.query.organizations.findFirst({ where: eq(organizations.id, orgId) });
+    const tz = await getOrgTimezone(this.db.db, orgId);
 
     const periodLessons = await this.db.db.query.lessons.findMany({
       where: and(
@@ -351,7 +354,7 @@ export class ReportsService {
         const amount = Math.round((minutes / 60) * staff.hourlyRate);
         return {
           id: l.id,
-          date: l.startsAt.toLocaleDateString('en-GB'),
+          date: formatInZone(l.startsAt, tz, {}),
           studentName: l.student ? `${l.student.firstName} ${l.student.lastName}` : '—',
           instrument: l.enrollment?.instrument ?? '—',
           minutes,
@@ -382,6 +385,8 @@ export class ReportsService {
     });
     if (!student) throw new NotFoundException('Student not found');
 
+    const tz = await getOrgTimezone(this.db.db, orgId);
+
     const periodLessons = await this.db.db.query.lessons.findMany({
       where: and(
         eq(lessons.organizationId, orgId),
@@ -407,8 +412,8 @@ export class ReportsService {
 
     const rows = periodLessons.map(l => ({
       id: l.id,
-      date: l.startsAt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
-      time: l.startsAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+      date: formatInZone(l.startsAt, tz, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
+      time: formatInZone(l.startsAt, tz, { hour: '2-digit', minute: '2-digit' }),
       teacher: l.teacher ? `${l.teacher.firstName} ${l.teacher.lastName}` : '—',
       instrument: l.enrollment?.instrument ?? '—',
       duration: l.duration,

@@ -10,7 +10,7 @@ import type { CreateRescheduleRequestDto } from './dto/reschedule-request.dto';
 import type { CreateLessonRequestDto } from './dto/lesson-request.dto';
 import type { BaseRole } from '@music-life/types';
 import { NotificationsService } from '../notifications/notifications.service';
-import { parseZonedDateTime, zonedWeekdayAndTime } from '../common/timezone';
+import { parseZonedDateTime, zonedWeekdayAndTime, formatInZone } from '../common/timezone';
 
 // Resolves to the caller's own staffId when their role is exactly 'teacher' (so service
 // methods can scope/ownership-check); higher roles (receptionist+) act unrestricted.
@@ -476,7 +476,8 @@ export class SchedulingService {
   private async notifyRescheduled(orgId: string, lesson: { studentId: string; startsAt: Date }) {
     const { firstName, emails } = await this.lessonNotifyRecipients(lesson.studentId);
     if (emails.length === 0) return;
-    const when = new Date(lesson.startsAt).toLocaleString('en-GB', {
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const when = formatInZone(new Date(lesson.startsAt), tz, {
       weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
     });
     for (const email of emails) {
@@ -492,7 +493,8 @@ export class SchedulingService {
   private async notifyCancelled(orgId: string, lesson: { studentId: string; startsAt: Date }) {
     const { firstName, emails } = await this.lessonNotifyRecipients(lesson.studentId);
     if (emails.length === 0) return;
-    const when = new Date(lesson.startsAt).toLocaleString('en-GB', {
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const when = formatInZone(new Date(lesson.startsAt), tz, {
       weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
     });
     for (const email of emails) {
@@ -521,7 +523,8 @@ export class SchedulingService {
   private async notifyRecurringMoved(orgId: string, studentId: string, newStartsAt: Date) {
     const { firstName, emails } = await this.lessonNotifyRecipients(studentId);
     if (emails.length === 0) return;
-    const when = new Date(newStartsAt).toLocaleString('en-GB', {
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const when = formatInZone(new Date(newStartsAt), tz, {
       weekday: 'long', hour: '2-digit', minute: '2-digit',
     });
     for (const email of emails) {
