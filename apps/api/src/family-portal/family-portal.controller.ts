@@ -582,7 +582,7 @@ export class FamilyPortalController {
   }
 
   // ─── Cancel a lesson (family portal) ─────────────────────────────────────
-  // Choice: absent_makeup (≥24h, get a credit) or absent_no_pay (≥24h, no credit no charge).
+  // Choice: absent_makeup (≥24h, no charge, wants to rebook the slot) or absent_no_pay (≥24h, no charge, no rebook).
   // <24h: auto absent_no_makeup (teacher paid, no credit).
   @Post('lessons/:id/cancel')
   @Roles('student')
