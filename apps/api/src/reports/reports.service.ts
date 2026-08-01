@@ -207,9 +207,15 @@ export class ReportsService {
       ))
       .groupBy(ledgerEntries.type);
 
-    // Headline figure: cash mode = money actually received (payments); accrual = revenue earned (charges).
+    // Headline figure: cash mode = money actually received (payments); accrual =
+    // revenue earned (charges). `charge` ledger entries are stored NEGATIVE (they
+    // debit the family's balance — see billing.service / attendance.service), so
+    // summing them straight gives a negative accrual "revenue", which then
+    // rendered as e.g. "-£5,000" on the reports page. Negate the charge sum so
+    // accrual revenue reads positive; payments are already positive for cash.
     const headlineType = accountingMode === 'cash' ? 'payment' : 'charge';
-    const total = Number(entries.find(e => e.type === headlineType)?.total ?? 0);
+    const signedTotal = Number(entries.find(e => e.type === headlineType)?.total ?? 0);
+    const total = accountingMode === 'accrual' ? -signedTotal : signedTotal;
 
     // "Earned from completed lessons" — the value of the lessons actually taught
     // (or late-cancelled) in the period, independent of how they were paid for
