@@ -4,7 +4,7 @@ import { resources, guardians, students, families, staffMembers, teacherAssignme
 import { DbService } from '../db/db.service';
 import { FilesService } from '../files/files.service';
 import type { CreateResourceDto } from './dto/create-resource.dto';
-import type { BaseRole } from '@music-life/types';
+import { ROLE_LEVEL, type BaseRole } from '@music-life/types';
 
 // What each role is allowed to SEE.
 const ROLE_SCOPES: Record<BaseRole, string[]> = {
@@ -278,11 +278,25 @@ export class ResourcesService {
     };
   }
 
-  async remove(orgId: string, id: string) {
-    const [removed] = await this.db.db.delete(resources)
-      .where(and(eq(resources.id, id), eq(resources.organizationId, orgId)))
-      .returning();
-    if (!removed) throw new NotFoundException('Resource not found');
+  async remove(orgId: string, role: BaseRole, userId: string, id: string) {
+    const resource = await this.db.db.query.resources.findFirst({
+      where: and(eq(resources.id, id), eq(resources.organizationId, orgId)),
+      columns: { id: true, ownerId: true },
+    });
+    if (!resource) throw new NotFoundException('Resource not found');
+
+    // Only the owner may delete their resource — or management (manager+), who
+    // administer the shared library. Every READ path already scopes a teacher to
+    // their own and their own students' resources; without the same ownership
+    // check here, any teacher could delete a colleague's — or a studio-wide —
+    // resource just by holding its id, a destructive gap the read scoping hides.
+    const isManagement = ROLE_LEVEL[role] >= ROLE_LEVEL['manager'];
+    if (!isManagement && resource.ownerId !== userId) {
+      throw new ForbiddenException('You can only delete resources you created.');
+    }
+
+    await this.db.db.delete(resources)
+      .where(and(eq(resources.id, id), eq(resources.organizationId, orgId)));
     return { id };
   }
 }
