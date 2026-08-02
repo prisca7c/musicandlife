@@ -281,6 +281,22 @@ export class BillingService {
       const rate = l.enrollment?.rate;
       const standard = l.enrollment?.defaultDuration;
       const trialRate = l.enrollment?.trialRate;
+      const isGroup = l.enrollment?.lessonType === 'group';
+
+      // Single source of truth for the fee — the exact amount the attendance
+      // auto-charge already debited the family's balance (billing's
+      // effectiveLessonAmount): a trial's flat intro price, a group class's flat
+      // set price, or a prorated private rate. Computing the line any other way
+      // (e.g. prorating a group class by its minutes) makes the statement
+      // disagree with the running balance the family was actually charged.
+      const total = effectiveLessonAmount({
+        isTrialLesson: l.isTrialLesson,
+        lessonType: l.enrollment?.lessonType,
+        rate,
+        trialRate,
+        defaultDuration: standard,
+        duration: l.duration,
+      });
 
       // A trial with its own flat price bills a single, clearly-labelled line at
       // that price — no proration, no overrun split (a trial is a fixed offer).
@@ -288,18 +304,18 @@ export class BillingService {
         return [{
           ...base,
           description: [instrument, `trial ${kind} · ${l.duration} min`].filter(Boolean).join(' '),
-          amount: trialRate,
+          amount: total,
         }];
       }
 
-      const total = proratedAmount(rate, standard, l.duration);
-
-      // A lesson that ran long is still charged pro-rata, but showing it as one
-      // inflated line ("Piano lesson · 75 min — £56.25") invites the "why is
-      // this more than usual?" email. Split the overrun onto its own line so the
-      // bill explains itself. The overtime amount is the remainder rather than a
-      // second prorate, so the two lines always sum to exactly the same total.
-      if (rate != null && standard && l.duration > standard) {
+      // A PRIVATE lesson that ran long is still charged pro-rata, but showing it
+      // as one inflated line ("Piano lesson · 75 min — £56.25") invites the "why
+      // is this more than usual?" email. Split the overrun onto its own line so
+      // the bill explains itself. The overtime amount is the remainder rather
+      // than a second prorate, so the two lines always sum to exactly the same
+      // total. A group class is a flat set price regardless of a few minutes
+      // over, so it never splits — it bills the flat rate, matching the charge.
+      if (!isGroup && rate != null && standard && l.duration > standard) {
         const extra = l.duration - standard;
         return [
           {
