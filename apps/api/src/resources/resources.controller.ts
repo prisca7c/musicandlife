@@ -42,6 +42,6 @@ export class ResourcesController {
   @Delete(':id')
   @Roles('teacher')
   remove(@CurrentUser() user: RequestUser, @Param('id') id: string) {
-    return this.resources.remove(user.orgId, id);
+    return this.resources.remove(user.orgId, user.role, user.userId, id);
   }
 }
