@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { RegistrationService } from './registration.service';
 import { SubmitRegistrationDto } from './dto/submit-registration.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -17,14 +18,25 @@ export class RegistrationController {
     private readonly db: DbService,
   ) {}
 
-  // Public — no auth
+  // Public — no auth. Each submit emails BOTH the admin and the caller-supplied
+  // contactEmail, so without its own limit the endpoint is a limited open relay:
+  // an attacker could email-bomb an arbitrary address (or flood the admin inbox)
+  // off the studio's sending reputation, up to the 120/min global default. A
+  // human fills this form once; 5/min per IP leaves ample room for a retry or a
+  // shared connection while removing the abuse headroom. Mirrors auth's public
+  // POSTs, which are all individually throttled.
   @Post('public/registrations')
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   submit(@Body() dto: SubmitRegistrationDto) {
     return this.registration.submit('music-and-life', dto);
   }
 
-  // Public family search by email — returns minimal info (privacy-safe)
+  // Public family search by email — returns minimal info (privacy-safe). Exact
+  // match only, but unauthenticated: without a tighter limit it is an
+  // email-existence + family-name oracle testable at the 120/min global default.
+  // A sibling confirming their family looks up once; 10/min per IP is plenty.
   @Get('public/families/search')
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
   async searchFamilies(@Query('q') q: string) {
     if (!q || q.length < 3) return [];
     const org = await this.db.db.query.organizations.findFirst({
