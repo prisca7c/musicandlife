@@ -54,10 +54,23 @@ export class BroadcastService {
       ),
       with: { user: { columns: { email: true } } },
     });
-    const emails = rows
-      .map((r) => r.user?.email?.trim().toLowerCase())
-      .filter((e): e is string => !!e);
-    return [...new Set(emails)];
+    const emails: (string | null | undefined)[] = rows.map((r) => r.user?.email);
+
+    // A family created by staff or bulk import keeps its contact address on the
+    // family record and often has no guardian *login* at all — so a
+    // membership-only lookup silently skips it. The office sees "sent to N" and
+    // never learns those families got nothing. Fold in the family contact
+    // address for any audience that includes families, exactly as the subgroup
+    // (filtered) path already does, so "message all families" really reaches all.
+    if (audience === 'families' || audience === 'everyone') {
+      const famRows = await this.db.db.query.families.findMany({
+        where: eq(families.organizationId, orgId),
+        columns: { email: true },
+      });
+      emails.push(...famRows.map((f) => f.email));
+    }
+
+    return BroadcastService.dedupe(emails);
   }
 
   /** How many people each audience would reach — powers the pre-send count. */
