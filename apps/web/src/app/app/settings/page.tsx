@@ -135,7 +135,7 @@ export default function SettingsPage() {
     finally { setTemplateSaving(null); }
   }
 
-  async function saveSection(section: string, data: Record<string, string | number>) {
+  async function saveSection(section: string, data: Record<string, unknown>) {
     setSaving(section);
     try {
       await apiFetch('/organizations/me', { method: 'PATCH', token: tok(), body: JSON.stringify(data) });
@@ -175,11 +175,14 @@ export default function SettingsPage() {
           const f = new FormData(e.currentTarget);
           await saveSection('studio', {
             name: f.get('name') as string,
-            settings: JSON.stringify({
+            // settings is a jsonb column — send the merged object, NOT a JSON
+            // string. The API's UpdateOrgDto requires @IsObject, so a stringified
+            // value 400s and the save silently fails (see saveSection catch).
+            settings: {
               ...s,
               address: f.get('address'), contactEmail: f.get('contactEmail'),
               contactPhone: f.get('contactPhone'),
-            }),
+            },
           });
         }} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="sm:col-span-2"><label className={labelCls}>Studio name</label>
@@ -205,7 +208,9 @@ export default function SettingsPage() {
           e.preventDefault();
           const f = new FormData(e.currentTarget);
           await saveSection('invoice', {
-            settings: JSON.stringify({
+            // Send the merged settings object, not a JSON string — see the studio
+            // form above and the API's @IsObject requirement.
+            settings: {
               ...s,
               invoiceDueDays: parseInt(f.get('invoiceDueDays') as string) || 7,
               bankAccountName: f.get('bankAccountName'),
@@ -213,7 +218,7 @@ export default function SettingsPage() {
               bankAccountNumber: f.get('bankAccountNumber'),
               invoiceNotes: f.get('invoiceNotes'),
               accountingMode: f.get('accountingMode'),
-            }),
+            },
           });
         }} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div><label className={labelCls}>Payment due (days)</label>
