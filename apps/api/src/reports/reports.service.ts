@@ -6,7 +6,7 @@ import {
   payrollRuns, payrollItems, organizations,
 } from '@music-life/db';
 import { DbService } from '../db/db.service';
-import { proratedAmount, effectiveLessonAmount } from '../billing/billing.service';
+import { effectiveLessonAmount } from '../billing/billing.service';
 import { periodEndInclusive } from '../payroll/payroll.service';
 import { getOrgTimezone, formatInZone } from '../common/timezone';
 
@@ -232,10 +232,25 @@ export class ReportsService {
         lte(lessons.startsAt, periodEndInclusive(new Date(to))),
         inArray(lessons.status, ['completed', 'cancelled_no_makeup']),
       ),
-      with: { enrollment: { columns: { rate: true, defaultDuration: true } } },
+      with: { enrollment: { columns: { rate: true, defaultDuration: true, lessonType: true, trialRate: true } } },
     });
+    // Value each lesson exactly as the authoritative charge does
+    // (effectiveLessonAmount): a trial bills its flat trialRate, a group class
+    // its flat rate, a private lesson prorated. Raw proratedAmount here priced
+    // trials at the FULL rate (ignoring trialRate — trials are usually free or
+    // discounted) and prorated group classes by the minute, so this admin
+    // "Earned from completed lessons" headline overstated revenue and disagreed
+    // with what families were actually charged — the same divergence PR #163/#170
+    // fixed on the invoice and the student-invoice PDF, missed here.
     const earnedFromLessons = earnedLessons.reduce(
-      (s, l) => s + proratedAmount(l.enrollment?.rate, l.enrollment?.defaultDuration, l.duration),
+      (s, l) => s + effectiveLessonAmount({
+        isTrialLesson: l.isTrialLesson,
+        lessonType: l.enrollment?.lessonType,
+        rate: l.enrollment?.rate,
+        trialRate: l.enrollment?.trialRate,
+        defaultDuration: l.enrollment?.defaultDuration,
+        duration: l.duration,
+      }),
       0,
     );
 
