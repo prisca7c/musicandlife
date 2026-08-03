@@ -96,6 +96,31 @@ export class FamilyPortalController {
     return family;
   }
 
+  // ─── Who the caller may see/act on ──────────────────────────────────────────
+  /**
+   * The student ids the CALLER is allowed to see or act on. A GUARDIAN gets
+   * every child in the family; a STUDENT gets only their own record.
+   *
+   * The dashboard already draws this line ("a student sees only their own row"),
+   * but the lesson history, the family-visible notes, the note-attachment
+   * download, and the book/cancel actions all keyed off the WHOLE family — so a
+   * child logging in could read a sibling's lesson history and the teacher's
+   * notes about them (and download the media attached to those notes), and even
+   * book or cancel a sibling's lessons. Scoping every one of those through here
+   * keeps a student inside their own record while leaving guardians unchanged.
+   */
+  private async callerStudentIds(
+    user: RequestUser,
+    family: { students: { id: string }[] },
+  ): Promise<string[]> {
+    if (user.role !== 'student') return family.students.map(s => s.id);
+    const self = await this.db.db.query.students.findFirst({
+      where: and(eq(students.studentUserId, user.userId), eq(students.organizationId, user.orgId)),
+      columns: { id: true },
+    });
+    return self ? [self.id] : [];
+  }
+
   // ─── Lesson history ───────────────────────────────────────────────────────
   @Get('lessons')
   @Roles('student')
@@ -105,7 +130,7 @@ export class FamilyPortalController {
     @Query('to') to?: string,
   ) {
     const family = await this.requireFamily(user.userId, user.orgId);
-    const studentIds = family.students.map(s => s.id);
+    const studentIds = await this.callerStudentIds(user, family);
     if (studentIds.length === 0) return [];
 
     const rows = await this.db.db.query.lessons.findMany({
@@ -424,7 +449,7 @@ export class FamilyPortalController {
   @Roles('student')
   async getNotes(@CurrentUser() user: RequestUser) {
     const family = await this.requireFamily(user.userId, user.orgId);
-    const studentIds = family.students.map(s => s.id);
+    const studentIds = await this.callerStudentIds(user, family);
     if (studentIds.length === 0) return [];
 
     const rows = await this.db.db.query.notes.findMany({
@@ -465,7 +490,7 @@ export class FamilyPortalController {
     @Param('fileId') fileId: string,
   ) {
     const family = await this.requireFamily(user.userId, user.orgId);
-    const studentIds = family.students.map(s => s.id);
+    const studentIds = await this.callerStudentIds(user, family);
 
     const note = await this.db.db.query.notes.findFirst({
       where: and(eq(notes.id, noteId), eq(notes.organizationId, user.orgId)),
@@ -519,8 +544,12 @@ export class FamilyPortalController {
   async bookLesson(@CurrentUser() user: RequestUser, @Body() dto: BookLessonDto) {
     const family = await this.requireFamily(user.userId, user.orgId);
 
-    // Verify student belongs to this family
-    if (!family.students.some(s => s.id === dto.studentId)) {
+    // Verify the student is one the caller may book for: a guardian may book for
+    // any child in the family; a logged-in student only for themselves — not a
+    // sibling (whose lesson would be charged to the family and land on a teacher's
+    // timetable without the parent ever asking).
+    const bookableStudentIds = await this.callerStudentIds(user, family);
+    if (!bookableStudentIds.includes(dto.studentId)) {
       throw new BadRequestException('Student does not belong to your family');
     }
 
@@ -603,7 +632,7 @@ export class FamilyPortalController {
     @Body() dto: CancelLessonDto,
   ) {
     const family = await this.requireFamily(user.userId, user.orgId);
-    const studentIds = family.students.map(s => s.id);
+    const studentIds = await this.callerStudentIds(user, family);
 
     const lesson = await this.db.db.query.lessons.findFirst({
       where: and(eq(lessons.id, lessonId), eq(lessons.organizationId, user.orgId)),
