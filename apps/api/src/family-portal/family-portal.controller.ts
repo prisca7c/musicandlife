@@ -759,14 +759,20 @@ export class FamilyPortalController {
     const studentName = `${student.firstName} ${student.lastName}`;
     const trialNote = isTrial ? '<p><strong>This is a trial lesson.</strong></p>' : '';
 
+    // The student name (and instrument) are family/guardian-supplied and this
+    // body is sent as raw HTML to the teacher AND every org admin, so escape
+    // them to prevent stored HTML injection into a staff inbox. dateStr/timeStr
+    // come from formatInZone and duration is numeric — no user content there.
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
     const html = `
       <h2 style="color:#2A5A3D">Lesson Confirmed</h2>
       ${trialNote}
       <p>A ${isTrial ? 'trial ' : ''}lesson has been booked:</p>
       <table>
-        <tr><td><strong>Student:</strong></td><td>${studentName}</td></tr>
-        <tr><td><strong>Teacher:</strong></td><td>${teacherName}</td></tr>
-        <tr><td><strong>Instrument:</strong></td><td style="text-transform:capitalize">${instrument}</td></tr>
+        <tr><td><strong>Student:</strong></td><td>${esc(studentName)}</td></tr>
+        <tr><td><strong>Teacher:</strong></td><td>${esc(teacherName)}</td></tr>
+        <tr><td><strong>Instrument:</strong></td><td style="text-transform:capitalize">${esc(instrument)}</td></tr>
         <tr><td><strong>Date:</strong></td><td>${dateStr}</td></tr>
         <tr><td><strong>Time:</strong></td><td>${timeStr}</td></tr>
         <tr><td><strong>Duration:</strong></td><td>${lesson.duration} minutes</td></tr>
