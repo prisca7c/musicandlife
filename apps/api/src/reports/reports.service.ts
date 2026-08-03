@@ -6,7 +6,7 @@ import {
   payrollRuns, payrollItems, organizations,
 } from '@music-life/db';
 import { DbService } from '../db/db.service';
-import { proratedAmount } from '../billing/billing.service';
+import { proratedAmount, effectiveLessonAmount } from '../billing/billing.service';
 import { periodEndInclusive } from '../payroll/payroll.service';
 import { getOrgTimezone, formatInZone } from '../common/timezone';
 
@@ -288,7 +288,7 @@ export class ReportsService {
         lte(lessons.startsAt, periodEndInclusive(new Date(to))),
       ),
       with: {
-        enrollment: { columns: { instrument: true, rate: true, defaultDuration: true } },
+        enrollment: { columns: { instrument: true, rate: true, defaultDuration: true, lessonType: true, trialRate: true } },
         attendance: { columns: { status: true } },
       },
       orderBy: (l, { asc }) => [asc(l.startsAt)],
@@ -300,7 +300,20 @@ export class ReportsService {
         id: l.id,
         date: formatInZone(l.startsAt, tz, {}),
         description: `${l.isTrialLesson ? 'Trial: ' : ''}${l.enrollment?.instrument ?? 'Lesson'} — ${l.duration} min${l.status === 'cancelled_no_makeup' ? ' (late cancellation)' : ''}`,
-        amount: proratedAmount(l.enrollment?.rate, l.enrollment?.defaultDuration, l.duration),
+        // Price each line exactly as the authoritative invoice/attendance charge
+        // does (billing's effectiveLessonAmount): a trial bills its flat trialRate,
+        // a group class its flat rate, a private lesson prorated. Using raw
+        // proratedAmount here priced trials at the full rate and prorated group
+        // classes by the minute, so this family-facing PDF disagreed with the
+        // actual balance and invoice (the same divergence PR #163 fixed there).
+        amount: effectiveLessonAmount({
+          isTrialLesson: l.isTrialLesson,
+          lessonType: l.enrollment?.lessonType,
+          rate: l.enrollment?.rate,
+          trialRate: l.enrollment?.trialRate,
+          defaultDuration: l.enrollment?.defaultDuration,
+          duration: l.duration,
+        }),
         status: l.status,
         attended: l.status === 'completed',
       }));
