@@ -319,13 +319,32 @@ export class SchedulingService {
       where: orgId
         ? and(eq(enrollments.status, 'active'), eq(enrollments.organizationId, orgId))
         : eq(enrollments.status, 'active'),
-      columns: { id: true, organizationId: true, scheduleRule: true },
+      columns: { id: true, organizationId: true, scheduleRule: true, teacherId: true },
     });
+
+    // When a teacher leaves, the office deactivates them (staffMembers.status =
+    // 'inactive'); the roster and calendar drop them at once. But nothing
+    // cascades to their enrolments, and this worker keys on the ENROLMENT's
+    // status alone — so without this guard it would keep generating a fresh week
+    // of lessons under a teacher who has gone, which autoCompleteOverdue then
+    // marks present and BILLS the family. Skip any enrolment whose teacher is no
+    // longer active. Generation resumes on its own once the student is reassigned
+    // to an active teacher (or the teacher is reactivated) — nothing destructive.
+    const teacherIds = [...new Set(active.map((e) => e.teacherId).filter((t): t is string => !!t))];
+    const inactiveTeachers = new Set<string>();
+    if (teacherIds.length) {
+      const rows = await this.db.db.query.staffMembers.findMany({
+        where: and(inArray(staffMembers.id, teacherIds), ne(staffMembers.status, 'active')),
+        columns: { id: true },
+      });
+      for (const r of rows) inactiveTeachers.add(r.id);
+    }
 
     let created = 0, skippedExisting = 0, skippedConflicts = 0;
     for (const e of active) {
       const rule = e.scheduleRule as { weekday?: string; startTime?: string } | null;
       if (!rule?.weekday || !rule?.startTime) continue;
+      if (e.teacherId && inactiveTeachers.has(e.teacherId)) continue;
       const r = await this.materializeEnrollment(e.organizationId, e.id);
       created += r.created; skippedExisting += r.skippedExisting; skippedConflicts += r.skippedConflicts;
     }
