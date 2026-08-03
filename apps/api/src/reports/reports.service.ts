@@ -7,6 +7,7 @@ import {
 } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { proratedAmount } from '../billing/billing.service';
+import { periodEndInclusive } from '../payroll/payroll.service';
 import { getOrgTimezone, formatInZone } from '../common/timezone';
 
 @Injectable()
@@ -183,7 +184,7 @@ export class ReportsService {
       .where(and(
         eq(lessons.organizationId, orgId),
         gte(lessons.startsAt, new Date(from)),
-        lte(lessons.startsAt, new Date(to)),
+        lte(lessons.startsAt, periodEndInclusive(new Date(to))),
       ))
       .groupBy(lessons.status);
 
@@ -203,7 +204,7 @@ export class ReportsService {
       .where(and(
         eq(ledgerEntries.organizationId, orgId),
         gte(ledgerEntries.occurredAt, new Date(from)),
-        lte(ledgerEntries.occurredAt, new Date(to)),
+        lte(ledgerEntries.occurredAt, periodEndInclusive(new Date(to))),
       ))
       .groupBy(ledgerEntries.type);
 
@@ -228,7 +229,7 @@ export class ReportsService {
       where: and(
         eq(lessons.organizationId, orgId),
         gte(lessons.startsAt, new Date(from)),
-        lte(lessons.startsAt, new Date(to)),
+        lte(lessons.startsAt, periodEndInclusive(new Date(to))),
         inArray(lessons.status, ['completed', 'cancelled_no_makeup']),
       ),
       with: { enrollment: { columns: { rate: true, defaultDuration: true } } },
@@ -284,7 +285,7 @@ export class ReportsService {
         eq(lessons.organizationId, orgId),
         eq(lessons.studentId, studentId),
         gte(lessons.startsAt, new Date(from)),
-        lte(lessons.startsAt, new Date(to)),
+        lte(lessons.startsAt, periodEndInclusive(new Date(to))),
       ),
       with: {
         enrollment: { columns: { instrument: true, rate: true, defaultDuration: true } },
@@ -339,7 +340,7 @@ export class ReportsService {
         eq(lessons.organizationId, orgId),
         eq(lessons.teacherId, staffId),
         gte(lessons.startsAt, new Date(from)),
-        lte(lessons.startsAt, new Date(to)),
+        lte(lessons.startsAt, periodEndInclusive(new Date(to))),
       ),
       with: {
         student: { columns: { firstName: true, lastName: true } },
@@ -398,7 +399,7 @@ export class ReportsService {
         eq(lessons.organizationId, orgId),
         eq(lessons.studentId, studentId),
         gte(lessons.startsAt, new Date(from)),
-        lte(lessons.startsAt, new Date(to)),
+        lte(lessons.startsAt, periodEndInclusive(new Date(to))),
       ),
       with: {
         teacher: { columns: { firstName: true, lastName: true } },
