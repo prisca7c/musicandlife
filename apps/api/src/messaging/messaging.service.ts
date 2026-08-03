@@ -409,7 +409,7 @@ export class MessagingService {
       }
     }
 
-    const openingAttachments = await this.resolveAttachments(orgId, dto.attachments);
+    const openingAttachments = await this.resolveAttachments(orgId, userId, dto.attachments);
 
     const [thread] = await this.db.db.insert(threads).values({
       organizationId: orgId, subject: dto.subject, createdBy: userId,
@@ -544,16 +544,37 @@ export class MessagingService {
    * The client sends {fileId, name, mime, size}; only the id is trusted. A file
    * id from another studio would otherwise be pinned into this org's thread,
    * and a spoofed name/mime would be rendered to the recipient as fact.
+   *
+   * Ownership matters here because a thread attachment becomes downloadable by
+   * every participant through signThreadAttachment, which signs via
+   * signDownloadForOrg — the org-scoped signer that deliberately SKIPS the
+   * per-file owner check and trusts THIS method to have authorised access. So
+   * an org-membership check alone is not enough: any participant could pin an
+   * arbitrary org file id (an expense receipt, another family's lesson
+   * recording) onto a message and then download it, re-opening the very
+   * owner-or-management IDOR (BUG-012) the files service closes. You may
+   * therefore only attach a file you uploaded, or one already present on this
+   * thread. Same class as the note-attachment ownership fix.
    */
-  private async resolveAttachments(orgId: string, input?: { fileId: string }[]) {
+  private async resolveAttachments(
+    orgId: string,
+    callerUserId: string,
+    input?: { fileId: string }[],
+    existingFileIds: Set<string> = new Set(),
+  ) {
     if (!input?.length) return [];
     const ids = [...new Set(input.map(a => a.fileId))];
     const rows = await this.db.db.query.files.findMany({
       where: and(eq(files.organizationId, orgId), inArray(files.id, ids)),
-      columns: { id: true, originalName: true, mime: true, size: true },
+      columns: { id: true, ownerId: true, originalName: true, mime: true, size: true },
     });
     if (rows.length !== ids.length) {
       throw new NotFoundException('One or more attachments could not be found');
+    }
+    for (const f of rows) {
+      if (f.ownerId !== callerUserId && !existingFileIds.has(f.id)) {
+        throw new ForbiddenException('You can only attach files you uploaded');
+      }
     }
     return rows.map(f => ({ fileId: f.id, name: f.originalName, mime: f.mime, size: f.size }));
   }
@@ -582,7 +603,14 @@ export class MessagingService {
   ) {
     const thread = await this.loadThread(orgId, threadId, userId);
 
-    const resolved = await this.resolveAttachments(orgId, attachments);
+    // Files already on this thread stay attachable (e.g. quoting one back) even
+    // though the caller may not have uploaded them — they can already see them.
+    const existingFileIds = new Set(
+      thread.messages.flatMap(m =>
+        ((m.attachments ?? []) as { fileId: string }[]).map(a => a.fileId),
+      ),
+    );
+    const resolved = await this.resolveAttachments(orgId, userId, attachments, existingFileIds);
     if (!body.trim() && resolved.length === 0) {
       throw new BadRequestException('Write a message or attach a file.');
     }
