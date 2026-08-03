@@ -1287,13 +1287,19 @@ export class SchedulingService {
     // their OWN family — otherwise anyone could submit reschedule requests against
     // another family's lessons (the request is only scoped by org). 404, not 403,
     // so we don't confirm the lesson exists. Staff (receptionist+) are unrestricted.
+    //
+    // A GUARDIAN covers the whole family; a logged-in STUDENT is scoped to their
+    // OWN lesson, not a sibling's — mirroring the family-portal student/guardian
+    // split (a student shouldn't be able to meddle with a sibling's schedule).
     if (actor.role === 'guardian' || actor.role === 'student') {
       const familyId = await this.resolveFamilyId(orgId, actor.userId);
       const student = await this.db.db.query.students.findFirst({
         where: and(eq(students.id, lesson.studentId), eq(students.organizationId, orgId)),
-        columns: { familyId: true },
+        columns: { familyId: true, studentUserId: true },
       });
-      if (!familyId || !student || student.familyId !== familyId) {
+      const ownedByFamily = !!familyId && !!student && student.familyId === familyId;
+      const ownedByStudent = actor.role === 'student' ? student?.studentUserId === actor.userId : true;
+      if (!ownedByFamily || !ownedByStudent) {
         throw new NotFoundException('Lesson not found');
       }
     }
