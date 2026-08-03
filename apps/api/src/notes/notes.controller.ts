@@ -5,7 +5,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { DbService } from '../db/db.service';
-import { notes, staffMembers, teacherAssignments, enrollments, students, lessons } from '@music-life/db';
+import { notes, staffMembers, teacherAssignments, enrollments, students, lessons, files } from '@music-life/db';
 import { eq, and, inArray } from 'drizzle-orm';
 import type { RequestUser } from '@music-life/types';
 
@@ -32,6 +32,36 @@ function cleanAttachments(input: unknown): NoteAttachment[] {
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class NotesController {
   constructor(private readonly db: DbService) {}
+
+  // Guard which files a note may reference. The download endpoint
+  // (family-portal signNoteAttachment) checks a fileId is listed on a
+  // family-visible note "never trusting the fileId alone" — but that trust is
+  // only sound if the fileId got onto the note legitimately. Nothing validated
+  // the fileId at attach time, so a staff member could reference ANY file in the
+  // org (another child's lesson recording, a colleague's expense receipt) on
+  // their own student's family-visible note, and that family could then download
+  // it. Accept a fileId only if the caller uploaded it (org-scoped) OR it is
+  // already an attachment on this note (so a later editor re-saving the note,
+  // possibly a different teacher, keeps the existing attachments).
+  private async assertAttachmentsAllowed(
+    orgId: string,
+    userId: string,
+    attachments: NoteAttachment[],
+    existingFileIds: Set<string>,
+  ): Promise<void> {
+    const ids = [...new Set(attachments.map((a) => a.fileId))].filter((id) => !existingFileIds.has(id));
+    if (ids.length === 0) return;
+    const owned = await this.db.db.query.files.findMany({
+      where: and(eq(files.organizationId, orgId), inArray(files.id, ids)),
+      columns: { id: true, ownerId: true },
+    });
+    const ownedByCaller = new Set(owned.filter((f) => f.ownerId === userId).map((f) => f.id));
+    for (const id of ids) {
+      if (!ownedByCaller.has(id)) {
+        throw new ForbiddenException('You can only attach files you uploaded');
+      }
+    }
+  }
 
   private async resolveStaffId(orgId: string, userId: string): Promise<string | null> {
     const staff = await this.db.db.query.staffMembers.findFirst({
@@ -154,6 +184,9 @@ export class NotesController {
       if (!lesson) throw new ForbiddenException('Lesson not found');
     }
 
+    const attachments = cleanAttachments(body.attachments);
+    await this.assertAttachmentsAllowed(user.orgId, user.userId, attachments, new Set());
+
     const [note] = await this.db.db.insert(notes).values({
       organizationId: user.orgId,
       studentId: body.studentId,
@@ -161,7 +194,7 @@ export class NotesController {
       authorId: user.userId,
       body: body.body,
       visibility: body.visibility ?? 'family',
-      attachments: cleanAttachments(body.attachments),
+      attachments,
     }).returning();
     return note!;
   }
@@ -173,22 +206,35 @@ export class NotesController {
     @Param('id') id: string,
     @Body() body: UpdateNoteDto,
   ) {
+    const existing = await this.db.db.query.notes.findFirst({
+      where: and(eq(notes.id, id), eq(notes.organizationId, user.orgId)),
+      columns: { studentId: true, attachments: true },
+    });
+    if (!existing) throw new ForbiddenException('Not your student');
+
     if (user.role === 'teacher') {
-      const existing = await this.db.db.query.notes.findFirst({
-        where: and(eq(notes.id, id), eq(notes.organizationId, user.orgId)),
-        columns: { studentId: true },
-      });
       const staffId = await this.resolveStaffId(user.orgId, user.userId);
       const assignedIds = staffId ? await this.getAssignedStudentIds(user.orgId, staffId) : [];
-      if (!existing || !assignedIds.includes(existing.studentId)) throw new ForbiddenException('Not your student');
+      if (!assignedIds.includes(existing.studentId)) throw new ForbiddenException('Not your student');
     }
 
     const { body: text, visibility, attachments } = body;
+    let cleaned: NoteAttachment[] | undefined;
+    if (attachments !== undefined) {
+      cleaned = cleanAttachments(attachments);
+      // Files already on the note are allowed to remain even if a different
+      // teacher is doing the edit; genuinely new fileIds must be caller-owned.
+      const existingFileIds = new Set(
+        ((existing.attachments as NoteAttachment[] | null) ?? []).map((a) => a.fileId),
+      );
+      await this.assertAttachmentsAllowed(user.orgId, user.userId, cleaned, existingFileIds);
+    }
+
     const [updated] = await this.db.db.update(notes)
       .set({
         ...(text !== undefined ? { body: text } : {}),
         ...(visibility !== undefined ? { visibility } : {}),
-        ...(attachments !== undefined ? { attachments: cleanAttachments(attachments) } : {}),
+        ...(cleaned !== undefined ? { attachments: cleaned } : {}),
         updatedAt: new Date(),
       })
       .where(and(eq(notes.id, id), eq(notes.organizationId, user.orgId)))
