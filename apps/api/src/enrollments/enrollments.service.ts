@@ -107,6 +107,16 @@ export class EnrollmentsService {
     // withdrawn enrolment can't own a bookable slot, so it can't collide).
     const instrument = dto.instrument !== undefined ? dto.instrument.trim() : existing.instrument;
     const effectiveStatus = dto.status ?? existing.status;
+    // Withdrawing an enrolment ends its series, exactly like stopRecurring — but
+    // this generic update only flipped the status, leaving the recurrence rule
+    // and every already-generated future lesson on the books. The worker keys on
+    // status='active' so it stops making NEW lessons, but the materialised future
+    // ones sat 'scheduled' on the teacher's diary and the family portal (and were
+    // one attendance-mark away from being charged). Staff had to remember to also
+    // hit "Stop weekly". A withdraw now clears the rule and cancels future lessons
+    // itself. Same class as the student-withdraw fix: to end a series, tear down
+    // the enrolment's recurrence, not just its status.
+    const isWithdrawing = effectiveStatus === 'withdrawn' && existing.status !== 'withdrawn';
     if (effectiveStatus !== 'withdrawn') {
       await this.assertNoDuplicateEnrollment(
         orgId,
@@ -131,11 +141,37 @@ export class EnrollmentsService {
         ...rest,
         ...(dto.instrument !== undefined ? { instrument } : {}),
         ...(duration != null ? { defaultDuration: duration } : {}),
+        // On withdraw, clear the recurrence rule too (wins over any scheduleRule
+        // the DTO carried) so a later re-activation can't silently resume a stale
+        // series.
+        ...(isWithdrawing ? { scheduleRule: null } : {}),
         updatedAt: new Date(),
       })
       .where(and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)))
       .returning();
+
+    // Clear the diary of lessons that will never happen now the enrolment has ended.
+    if (isWithdrawing) await this.cancelFutureLessons(orgId, id);
+
     return updated!;
+  }
+
+  // Cancel every already-generated FUTURE scheduled lesson for an enrollment at
+  // no charge. Past/completed lessons are untouched. Shared by stopRecurring and
+  // by a withdraw (both end the series, so both must clear the diary of lessons
+  // that will never happen). Returns how many were cancelled.
+  private async cancelFutureLessons(orgId: string, enrollmentId: string, now = new Date()) {
+    const cancelled = await this.db.db
+      .update(lessons)
+      .set({ status: 'cancelled_no_pay', cancelledAt: now, updatedAt: now })
+      .where(and(
+        eq(lessons.organizationId, orgId),
+        eq(lessons.enrollmentId, enrollmentId),
+        eq(lessons.status, 'scheduled'),
+        gte(lessons.startsAt, now),
+      ))
+      .returning({ id: lessons.id });
+    return cancelled.length;
   }
 
   // Stop an ongoing weekly series: clear the recurrence rule (so the worker stops
@@ -152,18 +188,7 @@ export class EnrollmentsService {
       .set({ scheduleRule: null, updatedAt: new Date() })
       .where(and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)));
 
-    const now = new Date();
-    const cancelled = await this.db.db
-      .update(lessons)
-      .set({ status: 'cancelled_no_pay', cancelledAt: now, updatedAt: now })
-      .where(and(
-        eq(lessons.organizationId, orgId),
-        eq(lessons.enrollmentId, id),
-        eq(lessons.status, 'scheduled'),
-        gte(lessons.startsAt, now),
-      ))
-      .returning({ id: lessons.id });
-
-    return { stopped: true, cancelledLessons: cancelled.length };
+    const cancelledLessons = await this.cancelFutureLessons(orgId, id);
+    return { stopped: true, cancelledLessons };
   }
 }
