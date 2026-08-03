@@ -526,7 +526,11 @@ export class FamilyPortalController {
     // bookLesson) so the three booking surfaces can never disagree about who "your
     // teacher" is.
     const family = await this.requireFamily(user.userId, user.orgId);
-    const teacherIds = await this.familyTeacherIds(user.orgId, family.students.map(s => s.id));
+    // Scope to the CALLER's students, not the whole family: a guardian covers
+    // every child, but a logged-in student only their own teachers — so a student
+    // can't read a sibling's teacher's free/busy schedule (same student/guardian
+    // split as #178, applied to the last booking surfaces #178 didn't cover).
+    const teacherIds = await this.familyTeacherIds(user.orgId, await this.callerStudentIds(user, family));
     if (!teacherIds.includes(teacherId)) {
       throw new NotFoundException('Teacher not found');
     }
@@ -688,7 +692,10 @@ export class FamilyPortalController {
       where: eq(families.id, familyId),
       with: { students: { columns: { id: true } } },
     });
-    const teacherIds = await this.familyTeacherIds(user.orgId, family?.students.map(s => s.id) ?? []);
+    // A guardian sees every child's teachers; a logged-in student only their own,
+    // never a sibling's (matches the booking-surface scoping and #178).
+    const studentIds = family ? await this.callerStudentIds(user, family) : [];
+    const teacherIds = await this.familyTeacherIds(user.orgId, studentIds);
     if (teacherIds.length === 0) return [];
 
     return this.db.db.query.staffMembers.findMany({
@@ -714,7 +721,8 @@ export class FamilyPortalController {
       where: eq(families.id, familyId),
       with: { students: { columns: { id: true } } },
     });
-    const studentIds = family?.students.map(s => s.id) ?? [];
+    // Student caller → own teachers only; guardian → the whole family's (#178).
+    const studentIds = family ? await this.callerStudentIds(user, family) : [];
     const teacherIds = await this.familyTeacherIds(user.orgId, studentIds);
     if (teacherIds.length === 0) return [];
 
