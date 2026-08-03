@@ -144,7 +144,15 @@ export class InvoiceSchedulerWorker {
     const adminEmails = admins.map(a => a.user?.email).filter((e): e is string => !!e);
     if (adminEmails.length === 0) return;
 
-    const body = `<ul>${familiesDue.map(f => `<li>${f.name}</li>`).join('')}</ul>`;
+    // Escape the family name before embedding — it is user-supplied (a parent
+    // types familyName/contactName on the public registration form, or it comes
+    // from a CSV import) and this summary body is rendered as HTML by the branded
+    // email template (invoice.preview_summary embeds ctx.body raw). Without
+    // escaping, a family named e.g. `<a href="…">click</a>` or a tracking pixel
+    // renders live in the admin's inbox — stored HTML injection. Same class as
+    // the message sender-name fix (#176).
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const body = `<ul>${familiesDue.map(f => `<li>${esc(f.name)}</li>`).join('')}</ul>`;
     for (const email of adminEmails) {
       await this.notifications.trigger('invoice.preview_summary', {
         orgId, email,
