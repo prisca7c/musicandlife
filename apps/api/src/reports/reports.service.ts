@@ -382,8 +382,17 @@ export class ReportsService {
     const rows = periodLessons
       .filter(l => payableStatuses.has(l.status))
       .map(l => {
+        // Mirror the payroll RUN (computeRunItems) exactly: actual elapsed time
+        // overrides the scheduled duration ONLY for a lesson that was actually
+        // taught (completed). A late cancellation is always paid at the scheduled
+        // duration — the lesson never happened, so any actualStartedAt/EndedAt
+        // left on its attendance row (a mis-mark correction from 'present' to
+        // 'absent_no_makeup' preserves the old times, see attendance.service) is
+        // stale and must not move the pay. Without this status gate the payroll
+        // record a manager downloads showed a different gross than the run
+        // actually pays.
         let minutes = l.duration;
-        if (l.attendance?.actualStartedAt && l.attendance?.actualEndedAt) {
+        if (l.status === 'completed' && l.attendance?.actualStartedAt && l.attendance?.actualEndedAt) {
           minutes = Math.round((l.attendance.actualEndedAt.getTime() - l.attendance.actualStartedAt.getTime()) / 60000);
         }
         const amount = Math.round((minutes / 60) * staff.hourlyRate);
