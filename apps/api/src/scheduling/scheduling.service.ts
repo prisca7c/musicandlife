@@ -488,7 +488,13 @@ export class SchedulingService {
         .map((e) => e?.trim().toLowerCase())
         .filter((e): e is string => !!e),
     )];
-    return { firstName: student?.firstName ?? null, emails };
+    // firstName is family-supplied and rendered as raw HTML in the notification
+    // body, so escape it before it reaches an email. Self-targeted here (goes to
+    // the family/student) but escaped for defence-in-depth and consistency.
+    const firstName = student?.firstName
+      ? student.firstName.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      : null;
+    return { firstName, emails };
   }
 
   /** Emails the student's family (and the student) that their lesson time changed. Best-effort. */
