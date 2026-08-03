@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { eq, and, ilike, or, inArray, sql, type SQL } from 'drizzle-orm';
-import { students, teacherAssignments, enrollments, families, staffMembers } from '@music-life/db';
+import { eq, and, ne, gte, ilike, or, inArray, sql, type SQL } from 'drizzle-orm';
+import { students, teacherAssignments, enrollments, families, staffMembers, lessons } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateStudentDto } from './dto/create-student.dto';
 import type { UpdateStudentDto } from './dto/update-student.dto';
@@ -143,12 +143,47 @@ export class StudentsService {
 
   async remove(orgId: string, id: string) {
     await this.findOne(orgId, id);
-    const [updated] = await this.db.db
-      .update(students)
-      .set({ status: 'withdrawn', updatedAt: new Date() })
-      .where(and(eq(students.id, id), eq(students.organizationId, orgId)))
-      .returning();
-    return updated!;
+
+    // Withdrawing a student must also end their enrolments and clear their diary.
+    // Flipping only students.status left every enrolment 'active' with its weekly
+    // scheduleRule intact — and the nightly recurrence worker scans on
+    // enrolment.status alone (materializeAllRecurring), never the student's — so
+    // it kept generating lessons for a child who had left, which autoCompleteOverdue
+    // then marked present and CHARGED the family. Already-scheduled future lessons
+    // billed the same way. Stop the series and cancel every future scheduled lesson
+    // at no charge (mirrors enrollments.stopRecurring). Past/completed lessons are
+    // untouched — they happened and are billed as normal. All in one transaction so
+    // a withdrawn student can never be left with a live schedule.
+    return this.db.db.transaction(async (tx) => {
+      const now = new Date();
+      const [updated] = await tx
+        .update(students)
+        .set({ status: 'withdrawn', updatedAt: now })
+        .where(and(eq(students.id, id), eq(students.organizationId, orgId)))
+        .returning();
+
+      await tx
+        .update(enrollments)
+        .set({ status: 'withdrawn', scheduleRule: null, updatedAt: now })
+        .where(and(
+          eq(enrollments.organizationId, orgId),
+          eq(enrollments.studentId, id),
+          ne(enrollments.status, 'withdrawn'),
+        ));
+
+      const cancelled = await tx
+        .update(lessons)
+        .set({ status: 'cancelled_no_pay', cancelledAt: now, updatedAt: now })
+        .where(and(
+          eq(lessons.organizationId, orgId),
+          eq(lessons.studentId, id),
+          eq(lessons.status, 'scheduled'),
+          gte(lessons.startsAt, now),
+        ))
+        .returning({ id: lessons.id });
+
+      return { ...updated!, cancelledLessons: cancelled.length };
+    });
   }
 
   async getEnrollments(orgId: string, studentId: string, teacherScope?: { userId: string }) {
