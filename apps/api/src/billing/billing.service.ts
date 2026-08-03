@@ -245,8 +245,17 @@ export class BillingService {
         inArray(invoiceLineItems.lessonId, candidateLessons.map(l => l.id)),
       ),
       columns: { lessonId: true },
+      with: { invoice: { columns: { status: true } } },
     });
-    const billedLessonIds = new Set(alreadyBilled.map(i => i.lessonId));
+    // A voided invoice's line items are kept for history but its charge was
+    // reversed, so its lessons are NOT billed — they must stay eligible, or
+    // voiding an invoice to reissue it would leave those lessons permanently
+    // un-billable and the corrected invoice would come out empty.
+    const billedLessonIds = new Set(
+      alreadyBilled
+        .filter(i => i.invoice?.status !== 'void')
+        .map(i => i.lessonId),
+    );
 
     const start = periodStart ? new Date(periodStart) : null;
     const end = periodEnd ? new Date(`${periodEnd}T23:59:59`) : null;
