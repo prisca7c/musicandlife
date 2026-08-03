@@ -15,6 +15,12 @@ import type { SubmitRegistrationDto } from './dto/submit-registration.dto';
 // with the registration-approval claim (all-or-nothing).
 type Executor = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
 
+// User-typed values (names from the public registration form) land in HTML
+// emails whose templates render the body raw (notifications.service TEMPLATES /
+// brandedEmail). Escape before embedding so a contact/student name containing
+// markup can't inject a link or tracking pixel into the recipient's inbox.
+const escapeHtml = (s: string) => s.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!));
+
 type CreationPayload = {
   studentFirstName: string; studentLastName: string; studentDob?: string; studentEmail?: string;
   familyName: string; contactName: string; contactEmail?: string; contactPhone?: string; address?: string;
@@ -74,11 +80,14 @@ export class RegistrationService {
       throw new ConflictException('Could not save your registration. Please try again.');
     }
 
-    // Notify admin
+    // Notify admin. The contact + student names are unauthenticated public-form
+    // input and this body is rendered as raw HTML in the admin's email, so escape
+    // them — otherwise a registrant could inject markup straight into the studio
+    // admin's inbox (phishing link, tracking pixel) with no login at all.
     this.notifications.trigger('registration.received', {
       orgId: org.id,
       email: process.env.SEED_ADMIN_EMAIL,
-      body: `New registration from ${dto.contactName} for ${dto.studentFirstName} ${dto.studentLastName}.`,
+      body: `New registration from ${escapeHtml(dto.contactName)} for ${escapeHtml(dto.studentFirstName)} ${escapeHtml(dto.studentLastName)}.`,
     }).catch(e => this.logger.warn('Notification failed', e));
 
     // Confirmation to the registrant. This is also what auto-subscribes them to
@@ -89,7 +98,7 @@ export class RegistrationService {
       this.notifications.trigger('registration.submitted', {
         orgId: org.id,
         email: dto.contactEmail,
-        body: `We've received ${dto.studentFirstName} ${dto.studentLastName}'s registration and will be in touch soon.`,
+        body: `We've received ${escapeHtml(dto.studentFirstName)} ${escapeHtml(dto.studentLastName)}'s registration and will be in touch soon.`,
       }).catch(e => this.logger.warn('Registration confirmation email failed', e));
     }
 
@@ -247,8 +256,7 @@ export class RegistrationService {
    * "set your password" call to action, a returning family gets "log in".
    */
   private sendWelcome(w: { to: string; contactName: string; link: string; isNewAccount: boolean }) {
-    const esc = (s: string) => s.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!));
-    const name = esc(w.contactName || 'there');
+    const name = escapeHtml(w.contactName || 'there');
     const body = w.isNewAccount
       ? `<p>Hi ${name},</p><p>Your registration has been approved &mdash; welcome to Music &amp; Life! Set your portal password to get started, then you can view lessons, book sessions, and see the notes and materials your teacher shares.</p>`
       : `<p>Hi ${name},</p><p>Good news &mdash; your new registration has been approved and added to your existing Music &amp; Life account. Just log in to see everything in one place.</p>`;
