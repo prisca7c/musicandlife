@@ -38,6 +38,8 @@ class BookLessonDto {
   @IsOptional() @IsDateString() startsAt2?: string;
   @IsOptional() @IsDateString() startsAt3?: string;
   @IsInt() @Min(15) @Max(240) duration!: number;
+  // Accepted for backward compatibility but IGNORED: trial pricing is decided
+  // server-side from the enrolment's status (see bookLesson), never the client.
   @IsOptional() @IsBoolean() @Type(() => Boolean) isTrialLesson?: boolean;
   // Set up a weekly recurring series from this slot (autobooks going forward)
   // rather than a one-off lesson.
@@ -551,6 +553,15 @@ export class FamilyPortalController {
       with: { family: { columns: { email: true, name: true } } },
     });
 
+    // Trial pricing is decided by the ENROLMENT's state, never the client. The
+    // portal used to pass dto.isTrialLesson straight through, so a crafted
+    // booking request could flag ANY lesson as a trial and be billed the flat
+    // (often free or discounted) trialRate from effectiveLessonAmount instead of
+    // the real rate — an unlimited cheap-lessons bypass. A self-booked lesson is
+    // a trial only while the enrolment itself is still a trial; once the studio
+    // converts it to 'active', bookings are priced normally.
+    const isTrialLesson = enrollment.status === 'trial';
+
     // Book the 1st choice immediately (under the shared lock + conflict checks)
     // and open a teacher-veto review holding the ranked fallbacks. The ≥48h lead
     // time and the "future only" guard live in the scheduling service so every
@@ -567,7 +578,7 @@ export class FamilyPortalController {
         startsAt2: dto.startsAt2,
         startsAt3: dto.startsAt3,
         duration: dto.duration,
-        isTrialLesson: dto.isTrialLesson ?? false,
+        isTrialLesson,
         recurring: dto.recurring ?? false,
         recurringEndDate: dto.recurringEndDate,
       },
@@ -575,7 +586,7 @@ export class FamilyPortalController {
     );
 
     // Send confirmation emails (non-blocking)
-    this.sendBookingConfirmations(user.orgId, lesson, teacher, student!, enrollment.instrument, !!dto.isTrialLesson)
+    this.sendBookingConfirmations(user.orgId, lesson, teacher, student!, enrollment.instrument, isTrialLesson)
       .catch(err => console.warn('Booking email failed:', err));
 
     return lesson;
