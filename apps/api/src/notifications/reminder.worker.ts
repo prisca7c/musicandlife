@@ -66,7 +66,11 @@ export class ReminderWorker {
       const email = teacher?.user?.email?.trim();
       if (!email) continue;
       const student = req.student as { firstName: string | null; lastName: string | null } | null;
-      const who = [student?.firstName, student?.lastName].filter(Boolean).join(' ') || 'A student';
+      // The student name is family/guardian-supplied (public self-booking / registration)
+      // and the notification body is rendered as raw HTML in the teacher's email, so it
+      // must be escaped to prevent stored HTML injection into a staff inbox.
+      const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const who = esc([student?.firstName, student?.lastName].filter(Boolean).join(' ') || 'A student');
       const tz = await this.tzFor(tzCache, req.organizationId);
       const when = formatInZone(req.proposedStartsAt, tz, {
         weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
