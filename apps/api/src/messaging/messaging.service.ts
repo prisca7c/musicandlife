@@ -56,14 +56,18 @@ export class MessagingService {
       ? `${sender.name}${sender.roleLabel ? ` (${sender.roleLabel})` : ''}`
       : 'Someone at Music & Life';
 
-    // Escape before embedding — a message is user-typed and lands in an HTML
-    // email — then keep the author's line breaks.
-    const safe = body
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/\r?\n/g, '<br>');
+    // Escape before embedding — both the message AND the sender name are
+    // user-typed (the name is the family's own contactName from the public
+    // registration form) and land in an HTML email. Escaping the body but not
+    // the name still let a family set contactName to markup (a phishing link, a
+    // tracking pixel) that renders in their teacher's inbox. The subject is a
+    // mail header, not HTML, so it keeps the raw name.
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const senderNameHtml = esc(senderName);
+    const safe = esc(body).replace(/\r?\n/g, '<br>');
     const preview = safe.trim()
-      ? `<strong>${senderName}</strong> wrote:<br><br>${safe}`
-      : `<strong>${senderName}</strong> sent you an attachment.`;
+      ? `<strong>${senderNameHtml}</strong> wrote:<br><br>${safe}`
+      : `<strong>${senderNameHtml}</strong> sent you an attachment.`;
 
     for (const t of targets) {
       try {
