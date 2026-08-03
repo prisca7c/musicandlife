@@ -60,15 +60,22 @@ export class PublicLibraryService {
       where: and(eq(resourceSubscribers.organizationId, org.id), eq(resourceSubscribers.email, email)),
     });
 
-    // An already-active subscriber re-submitting shouldn't be knocked back to
-    // pending — leave their access intact and just acknowledge.
+    // A genuinely active subscriber re-submitting shouldn't be knocked back to
+    // pending — leave their access intact and just acknowledge. But "active" must
+    // mean access they can actually use: a lapsed row keeps status='active' with
+    // a past paidUntil (subscriberByToken rejects it), so keying off status alone
+    // told a lapsed subscriber "active" while leaving them with no access AND no
+    // pending record for staff to renew — they were stuck. Treat lapsed the same
+    // as any other non-active state, exactly as list() computes true-active.
     if (existing) {
-      if (existing.status !== 'active') {
+      const isTrulyActive =
+        existing.status === 'active' && !!existing.paidUntil && existing.paidUntil >= this.today();
+      if (!isTrulyActive) {
         await this.db.db.update(resourceSubscribers)
           .set({ status: 'pending', name: dto.name ?? existing.name, updatedAt: new Date() })
           .where(eq(resourceSubscribers.id, existing.id));
       }
-      return { status: existing.status === 'active' ? 'active' : 'pending', email };
+      return { status: isTrulyActive ? 'active' : 'pending', email };
     }
 
     await this.db.db.insert(resourceSubscribers).values({
