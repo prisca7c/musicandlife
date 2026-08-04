@@ -19,6 +19,9 @@ function makeService(status: 'active' | 'trial' | 'paused' | 'withdrawn') {
         enrollments: {
           findFirst: async () => ({ lessonType: 'private', status }),
         },
+        staffMembers: {
+          findFirst: async () => ({ status: 'active' }),
+        },
       },
       insert: () => ({ values: () => ({ returning: async () => [{ id: 'req-1' }] }) }),
     },

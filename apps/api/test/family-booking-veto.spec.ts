@@ -40,6 +40,8 @@ function makeService() {
         // Booking checks the enrolment is live and isn't a group class; decline of
         // a recurring series scans for the future rows it materialised.
         enrollments: { findFirst: jest.fn().mockResolvedValue({ lessonType: 'private', status: 'active' }) },
+        // Booking also checks the teacher is still active before creating a lesson.
+        staffMembers: { findFirst: jest.fn().mockResolvedValue({ status: 'active' }) },
         lessons: { findMany: jest.fn().mockResolvedValue([]) },
       },
       insert: jest.fn(() => ({

@@ -855,6 +855,24 @@ export class SchedulingService {
       throw new BadRequestException('Group classes are arranged by the studio, not booked online. Please contact us to join a group.');
     }
 
+    // The teacher must still be active. A departed teacher is deactivated
+    // (staffMembers.status='inactive'); the recurrence worker already refuses to
+    // generate their lessons (recurrence-skips-inactive-teacher). But an enrolment
+    // whose teacherId still points at that teacher stays 'active', so a family can
+    // reach this path — via a stale picker or a crafted request — and self-book a
+    // fresh one-off onto a teacher who has left: it lands on their timetable and
+    // pays them at payroll for a studio they no longer work for. The picker
+    // (getTeachers) already filters to active staff; guard the API to match, same
+    // reasoning as the enrolment checks above.
+    const teacher = await this.db.db.query.staffMembers.findFirst({
+      where: and(eq(staffMembers.id, dto.teacherId), eq(staffMembers.organizationId, orgId)),
+      columns: { status: true },
+    });
+    if (!teacher) throw new NotFoundException('Teacher not found.');
+    if (teacher.status !== 'active') {
+      throw new BadRequestException('That teacher is no longer taking online bookings. Please contact the studio to be reassigned.');
+    }
+
     // Instant-book the 1st choice — runs the shared advisory lock + conflict
     // checks, so self-service can't double-book a teacher.
     const lesson = await this.createLesson(orgId, {
