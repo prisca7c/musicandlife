@@ -54,23 +54,26 @@ export class ResourcesService {
   // The student ids that belong to the caller's own family (empty for staff or an
   // unlinked account). Used to isolate personal-scoped resources per family.
   private async callerStudentIds(orgId: string, role: BaseRole, userId: string): Promise<string[]> {
-    let familyId: string | null = null;
-    if (role === 'guardian') {
-      const guardian = await this.db.db.query.guardians.findFirst({
-        where: and(eq(guardians.userId, userId), eq(guardians.organizationId, orgId)),
-        columns: { familyId: true },
-      });
-      familyId = guardian?.familyId ?? null;
-    } else if (role === 'student') {
-      const student = await this.db.db.query.students.findFirst({
+    // A logged-in STUDENT is scoped to their OWN record only — never a sibling's
+    // — so a personal (student-scoped) resource a teacher targeted at a sibling
+    // stays invisible to them (and, via signResourceFile→findAll, undownloadable).
+    // A guardian oversees the whole family, so they cover every child. Same
+    // guardian→all / student→self split as the family-portal sibling scoping.
+    if (role === 'student') {
+      const self = await this.db.db.query.students.findFirst({
         where: and(eq(students.studentUserId, userId), eq(students.organizationId, orgId)),
-        columns: { familyId: true },
+        columns: { id: true },
       });
-      familyId = student?.familyId ?? null;
+      return self ? [self.id] : [];
     }
-    if (!familyId) return [];
+    if (role !== 'guardian') return [];
+    const guardian = await this.db.db.query.guardians.findFirst({
+      where: and(eq(guardians.userId, userId), eq(guardians.organizationId, orgId)),
+      columns: { familyId: true },
+    });
+    if (!guardian?.familyId) return [];
     const kids = await this.db.db.query.students.findMany({
-      where: and(eq(students.familyId, familyId), eq(students.organizationId, orgId)),
+      where: and(eq(students.familyId, guardian.familyId), eq(students.organizationId, orgId)),
       columns: { id: true },
     });
     return kids.map(k => k.id);
