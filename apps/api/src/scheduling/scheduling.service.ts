@@ -1247,7 +1247,12 @@ export class SchedulingService {
       const tz = await this.getOrgTimezone(this.db.db, orgId);
       const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, req.teacherId, target, req.duration, tz);
       if (unavailable) throw new BadRequestException(unavailable);
-      if (await this.hasConflict(this.db.db, orgId, target, req.duration, req.teacherId)) {
+      // Include the student in the pre-check, matching createLesson's own conflict
+      // check (below). Otherwise confirming this request into a slot where the
+      // student is already booked passes here, the request is claimed 'confirmed'
+      // (committed just below), then createLesson throws the student clash — leaving
+      // the request stuck 'confirmed' with no lesson created and no way to re-decide.
+      if (await this.hasConflict(this.db.db, orgId, target, req.duration, req.teacherId, undefined, req.studentId ?? undefined)) {
         throw new BadRequestException('That time clashes with another lesson.');
       }
     }
@@ -1372,7 +1377,10 @@ export class SchedulingService {
       const options = await Promise.all(ranked.map(async (t, i) => {
         const iso = t.toISOString();
         const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, teacherId, iso, duration, tz);
-        const conflict = unavailable ? false : await this.hasConflict(this.db.db, orgId, iso, duration, teacherId, r.lessonId);
+        // Flag the student clash too, so the "ok" badge staff pick from matches
+        // what the approval actually enforces — a slot green here but student-busy
+        // would otherwise be chosen and then fail on decide.
+        const conflict = unavailable ? false : await this.hasConflict(this.db.db, orgId, iso, duration, teacherId, r.lessonId, lesson?.studentId ?? undefined);
         return {
           rank: i + 1,
           startsAt: iso,
@@ -1413,7 +1421,14 @@ export class SchedulingService {
       const tz = await this.getOrgTimezone(this.db.db, orgId);
       const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, lesson.teacherId ?? undefined, target, lesson.duration, tz);
       if (unavailable) throw new BadRequestException(unavailable);
-      if (await this.hasConflict(this.db.db, orgId, target, lesson.duration, lesson.teacherId ?? undefined, req.lessonId)) {
+      // Include the student in the pre-check, exactly as directReschedule does
+      // (checkConflicts at the mutation, below). directReschedule rejects a slot
+      // where THIS student is already booked with another teacher; if that check
+      // is skipped here, the student clash slips past, the request is claimed as
+      // 'approved' (committed just below), and then directReschedule throws —
+      // leaving the request permanently 'approved' with the lesson unmoved and no
+      // way to re-decide it. Catch it before the claim so the decide fails cleanly.
+      if (await this.hasConflict(this.db.db, orgId, target, lesson.duration, lesson.teacherId ?? undefined, req.lessonId, lesson.studentId ?? undefined)) {
         throw new BadRequestException('That time clashes with another lesson.');
       }
     }
