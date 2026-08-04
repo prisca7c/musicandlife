@@ -9,7 +9,7 @@ import { NotFoundException } from '@nestjs/common';
  * module.
  */
 
-type Lesson = { id: string; studentId: string; startsAt: Date };
+type Lesson = { id: string; studentId: string; startsAt: Date; status: string };
 type StudentRow = { familyId: string; studentUserId: string | null };
 
 const FUTURE = () => new Date(Date.now() + 72 * 3600_000); // >24h ahead
@@ -44,7 +44,7 @@ const dto = (lessonId: string) => ({
 describe('SchedulingService.createRescheduleRequest — student sibling scope', () => {
   it('rejects a student rescheduling a sibling\'s lesson', async () => {
     const svc = makeService(
-      { id: 'l-sib', studentId: 's-sibling', startsAt: FUTURE() },
+      { id: 'l-sib', studentId: 's-sibling', startsAt: FUTURE(), status: 'scheduled' },
       { familyId: 'fam-1', studentUserId: 'sibling-user' }, // lesson belongs to the sibling
       { familyId: 'fam-1', studentUserId: 'me-user' },      // caller is a different student
     );
@@ -55,7 +55,7 @@ describe('SchedulingService.createRescheduleRequest — student sibling scope', 
 
   it('allows a student rescheduling their own lesson', async () => {
     const svc = makeService(
-      { id: 'l-mine', studentId: 's-me', startsAt: FUTURE() },
+      { id: 'l-mine', studentId: 's-me', startsAt: FUTURE(), status: 'scheduled' },
       { familyId: 'fam-1', studentUserId: 'me-user' },
       { familyId: 'fam-1', studentUserId: 'me-user' },
     );
@@ -65,7 +65,7 @@ describe('SchedulingService.createRescheduleRequest — student sibling scope', 
 
   it('still lets a guardian reschedule any child in the family', async () => {
     const svc = makeService(
-      { id: 'l-sib', studentId: 's-sibling', startsAt: FUTURE() },
+      { id: 'l-sib', studentId: 's-sibling', startsAt: FUTURE(), status: 'scheduled' },
       { familyId: 'fam-1', studentUserId: 'sibling-user' },
       { familyId: 'fam-1', studentUserId: null },
     );

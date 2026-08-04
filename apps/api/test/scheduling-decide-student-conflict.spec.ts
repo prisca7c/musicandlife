@@ -18,7 +18,7 @@ type Row = Record<string, unknown>;
 const TARGET = '2026-08-01T10:00:00.000Z'; // proposed slot: 10:00–10:30
 
 // The lesson being rescheduled: student stu-1 with teacher tea-A.
-const theLesson = { id: 'les-A', studentId: 'stu-1', teacherId: 'tea-A', duration: 30, startsAt: new Date('2026-07-30T09:00:00.000Z') };
+const theLesson = { id: 'les-A', studentId: 'stu-1', teacherId: 'tea-A', duration: 30, status: 'scheduled', startsAt: new Date('2026-07-30T09:00:00.000Z') };
 
 function makeService(overlappingLessons: Row[]) {
   const claimUpdate = jest.fn(() => ({
