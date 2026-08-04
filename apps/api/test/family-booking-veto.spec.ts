@@ -37,9 +37,9 @@ function makeService() {
     db: {
       query: {
         lessonRequests: { findFirst: jest.fn() },
-        // Booking checks the enrolment isn't a group class; decline of a recurring
-        // series scans for the future rows it materialised.
-        enrollments: { findFirst: jest.fn().mockResolvedValue({ lessonType: 'private' }) },
+        // Booking checks the enrolment is live and isn't a group class; decline of
+        // a recurring series scans for the future rows it materialised.
+        enrollments: { findFirst: jest.fn().mockResolvedValue({ lessonType: 'private', status: 'active' }) },
         lessons: { findMany: jest.fn().mockResolvedValue([]) },
       },
       insert: jest.fn(() => ({
@@ -158,7 +158,7 @@ describe('SchedulingService.createFamilyBooking', () => {
 
   it('rejects a group enrolment — group classes are not self-bookable', async () => {
     const { svc, s, db } = makeService();
-    (db.db.query.enrollments.findFirst as jest.Mock).mockResolvedValue({ lessonType: 'group' });
+    (db.db.query.enrollments.findFirst as jest.Mock).mockResolvedValue({ lessonType: 'group', status: 'active' });
     await expect(
       svc.createFamilyBooking('org-1', {
         studentId: 'stu-1', teacherId: 't-1', enrollmentId: 'en-1',
