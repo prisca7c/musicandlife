@@ -837,9 +837,20 @@ export class SchedulingService {
     // stale client or a crafted request can't turn a group enrolment into a 1:1.
     const enrollment = await this.db.db.query.enrollments.findFirst({
       where: and(eq(enrollments.id, dto.enrollmentId), eq(enrollments.organizationId, orgId)),
-      columns: { lessonType: true },
+      columns: { lessonType: true, status: true },
     });
     if (!enrollment) throw new BadRequestException('Enrolment not found.');
+    // Only a live enrolment is self-bookable. A withdrawn enrolment was
+    // deliberately ended by the studio — withdraw tears down its recurrence and
+    // cancels its future lessons (enrollment withdraw teardown) — and a paused
+    // one is temporarily halted. Self-booking against either (via a stale picker
+    // that still lists it, or a crafted request) would create a fresh lesson,
+    // re-timetable the teacher, and bill the family for an instrument they no
+    // longer take, undoing the teardown. Same "guard the API even though the
+    // picker hides it" reasoning as the group check below.
+    if (enrollment.status !== 'active' && enrollment.status !== 'trial') {
+      throw new BadRequestException('This enrolment is not currently active, so it can’t be booked online. Please contact the studio.');
+    }
     if (enrollment.lessonType === 'group') {
       throw new BadRequestException('Group classes are arranged by the studio, not booked online. Please contact us to join a group.');
     }
