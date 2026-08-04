@@ -211,6 +211,15 @@ export class BillingService {
     // "custom amount" flow passes itemizeLessons=false to stay manual-only.
     if (itemizeLessons !== false) {
       await this.generateLessonLineItems(orgId, inv!.id, dto.familyId, dto.periodStart, dto.periodEnd);
+      // generateLessonLineItems updates invoices.total to the itemised amount, but
+      // `inv` is the pre-itemisation snapshot (total = the £0 insert default). Re-read
+      // so callers see the real total — same as createInvoicesPerClass does. Without
+      // this the auto-scheduler emailed every family "Invoice … for £0.00 is now
+      // available" no matter how much they actually owed.
+      const refreshed = await this.db.db.query.invoices.findFirst({
+        where: eq(invoices.id, inv!.id),
+      });
+      if (refreshed) return refreshed;
     }
 
     return inv!;
