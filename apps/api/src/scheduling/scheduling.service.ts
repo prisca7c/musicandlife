@@ -19,6 +19,13 @@ export interface Actor { role: BaseRole; userId: string }
 // How many weeks ahead recurring weekly lessons are materialised as real rows.
 export const RECURRENCE_WINDOW_WEEKS = 12;
 
+// Only a live lesson can be moved. 'scheduled' is a normal upcoming lesson;
+// 'makeup' is a real upcoming make-up lesson. A 'completed' or any 'cancelled_*'
+// lesson is a settled historical record — moving it would resurrect a dead slot,
+// re-timetable a teacher and confuse billing/attendance. Any reschedule path
+// (staff direct move, family request approval, veto-review move) must refuse it.
+const RESCHEDULABLE_LESSON_STATUSES = ['scheduled', 'makeup'] as const;
+
 const WEEKDAY_INDEX: Record<string, number> = {
   sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6,
 };
@@ -439,6 +446,13 @@ export class SchedulingService {
   async directReschedule(orgId: string, id: string, newStartsAt: string, actor?: Actor) {
     const lesson = await this.getLesson(orgId, id);
     await this.assertOwnsLesson(orgId, lesson.teacherId, actor);
+    // The authoritative guard: never move a settled lesson. A completed or
+    // cancelled lesson is a historical record — moving it re-timetables a teacher
+    // and leaves a dead-status lesson at a new time. Every caller (staff direct
+    // move, reschedule-request approval, veto-review move) routes through here.
+    if (!(RESCHEDULABLE_LESSON_STATUSES as readonly string[]).includes(lesson.status)) {
+      throw new BadRequestException('Only a scheduled lesson can be rescheduled.');
+    }
 
     return this.db.db.transaction(async (tx) => {
       const teacherId = lesson.teacherId ?? undefined;
@@ -1344,6 +1358,16 @@ export class SchedulingService {
       }
     }
 
+    // Only a live lesson can be rescheduled. A family that already cancelled a
+    // future lesson (cancelled_makeup/cancelled_no_pay, still future-dated) could
+    // otherwise file a request against it; a teacher approving it would move a
+    // dead-status lesson into a real slot (a no-charge lesson a teacher then
+    // teaches). Reject at the door rather than let a junk request through — the
+    // decide path and directReschedule enforce the same rule.
+    if (!(RESCHEDULABLE_LESSON_STATUSES as readonly string[]).includes(lesson.status)) {
+      throw new BadRequestException('That lesson isn’t scheduled, so it can’t be rescheduled. To book a new time, use the booking page.');
+    }
+
     const hoursUntil = (new Date(lesson.startsAt).getTime() - Date.now()) / 3600000;
     if (hoursUntil < 24) throw new BadRequestException('Reschedule requests must be made at least 24 hours before the lesson');
 
@@ -1447,6 +1471,15 @@ export class SchedulingService {
         throw new BadRequestException('Chosen time is not one of the requested options');
       }
       const lesson = await this.getLesson(orgId, req.lessonId);
+      // Same guard the mutation (directReschedule) enforces, checked BEFORE the
+      // claim below. If the lesson was cancelled/completed after the request was
+      // raised (e.g. the family cancelled it, or it ran), directReschedule would
+      // throw AFTER the request is marked 'approved' — stranding it approved with
+      // the lesson unmoved and no way to re-decide (the #190 stuck state). Reject
+      // cleanly here so the request stays 'pending'.
+      if (!(RESCHEDULABLE_LESSON_STATUSES as readonly string[]).includes(lesson.status)) {
+        throw new BadRequestException('That lesson is no longer scheduled, so it can’t be rescheduled.');
+      }
       const tz = await this.getOrgTimezone(this.db.db, orgId);
       const unavailable = await this.teacherUnavailableReason(this.db.db, orgId, lesson.teacherId ?? undefined, target, lesson.duration, tz);
       if (unavailable) throw new BadRequestException(unavailable);
