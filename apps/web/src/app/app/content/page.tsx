@@ -81,6 +81,8 @@ export default function ContentPage() {
   }
 
   async function remove(id: string) {
+    // Permanent delete — confirm before optimistically dropping the row.
+    if (!confirm('Remove this piece from the repertoire library? This can’t be undone.')) return;
     mutate(prev => (prev ?? []).filter(p => p.id !== id), { revalidate: false });
     try {
       await apiFetch(`/repertoire/${id}`, { method: 'DELETE', token: tok() });
