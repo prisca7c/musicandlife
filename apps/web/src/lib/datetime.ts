@@ -46,12 +46,36 @@ export function fmtDateTime(input: string | Date, tz: string = STUDIO_TZ): strin
 function studioParts(input: string | Date, tz: string = STUDIO_TZ): Record<string, number> {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hour12: false,
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
   }).formatToParts(new Date(input));
   const m: Record<string, number> = {};
   for (const p of parts) if (p.type !== 'literal') m[p.type] = parseInt(p.value, 10);
   if (m.hour === 24) m.hour = 0;
   return m;
+}
+
+/**
+ * A naive studio-local wall clock ("YYYY-MM-DDTHH:MM[:SS]") → the exact UTC
+ * instant, interpreting the parts in the STUDIO zone — never the browser's.
+ *
+ * `new Date("2026-08-10T00:00:00")` reads the string in the browser's zone, so a
+ * manager setting a London teacher's time-off from another timezone would land
+ * the boundaries hours off. This pins the conversion to the studio zone like
+ * every render helper above. Solves T = g − offset(T) by fixed point (two passes
+ * settle any DST-transition edge); for a browser already in the studio zone it
+ * returns exactly what `new Date(naive)` would, so it's a no-op there.
+ */
+export function studioWallClockToUtc(naive: string, tz: string = STUDIO_TZ): Date {
+  const m = naive.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return new Date(naive);
+  const g = Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, m[6] ? +m[6]! : 0);
+  let ts = g;
+  for (let i = 0; i < 2; i++) {
+    const p = studioParts(new Date(ts), tz);
+    const shown = Date.UTC(p.year!, p.month! - 1, p.day!, p.hour!, p.minute!, p.second ?? 0);
+    ts = g - (shown - ts);
+  }
+  return new Date(ts);
 }
 
 /** Minutes since midnight in the studio zone (for positioning on a day grid). */
