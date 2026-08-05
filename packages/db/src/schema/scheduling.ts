@@ -46,6 +46,13 @@ export const lessons = pgTable(
     actualStartedAt: timestamp('actual_started_at', { withTimezone: true }),
     actualEndedAt: timestamp('actual_ended_at', { withTimezone: true }),
     isTrialLesson: boolean('is_trial_lesson').notNull().default(false),
+    // The canonical weekly-series slot this lesson was materialised for, set only
+    // by the recurrence worker. The worker dedups on THIS (not starts_at), so
+    // rescheduling a recurring lesson off its slot no longer leaves the slot
+    // looking empty — which used to make the next nightly run regenerate a
+    // duplicate at the old time and double-bill the family. Null for one-off
+    // (non-recurring) lessons.
+    seriesSlotAt: timestamp('series_slot_at', { withTimezone: true }),
     status: text('status', {
       enum: ['scheduled','completed','cancelled_makeup','cancelled_no_makeup','cancelled_no_pay','cancelled_teacher','makeup'],
     }).notNull().default('scheduled'),

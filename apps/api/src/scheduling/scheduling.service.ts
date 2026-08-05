@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
-import { eq, and, gte, lte, ne, isNull, inArray, sql } from 'drizzle-orm';
+import { eq, and, gte, lte, ne, or, isNull, inArray, sql } from 'drizzle-orm';
 import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, organizations, enrollments } from '@music-life/db';
 import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
@@ -213,7 +213,7 @@ export class SchedulingService {
     return lesson;
   }
 
-  async createLesson(orgId: string, dto: CreateLessonDto) {
+  async createLesson(orgId: string, dto: CreateLessonDto, opts?: { seriesSlotAt?: Date }) {
     // A caller-supplied teacherId must belong to this org. Without this, a bad (or
     // foreign-org) id slips past the conflict check and blows up on the row's
     // foreign key — surfacing as a 500 to the family portal. Validate up front so
@@ -234,7 +234,9 @@ export class SchedulingService {
 
       const [lesson] = await tx
         .insert(lessons)
-        .values({ ...dto, organizationId: orgId, startsAt })
+        // seriesSlotAt (recurrence worker only) records the canonical weekly slot
+        // so a later reschedule can't vacate it and trigger a duplicate top-up.
+        .values({ ...dto, organizationId: orgId, startsAt, seriesSlotAt: opts?.seriesSlotAt })
         .returning();
       return lesson!;
     });
@@ -281,21 +283,44 @@ export class SchedulingService {
     const windowEnd = new Date(from.getTime() + weeks * 7 * 86400000);
     const occurrences = weeklyOccurrenceStrings(from, weeks, rule.weekday, rule.startTime, tz);
 
+    // Dedup on the canonical SLOT, not the current start time. A lesson occupies
+    // its slot via seriesSlotAt, which a reschedule never touches — so moving a
+    // recurring lesson off its weekly slot no longer leaves that slot looking
+    // empty (the bug that made the next run regenerate a duplicate there and
+    // double-bill the family). Match a lesson whose slot OR (for legacy/one-off
+    // rows not yet stamped) whose start falls in the window.
     const existing = await this.db.db.query.lessons.findMany({
       where: and(
         eq(lessons.enrollmentId, enrollment.id),
-        gte(lessons.startsAt, from),
-        lte(lessons.startsAt, windowEnd),
+        or(
+          and(gte(lessons.seriesSlotAt, from), lte(lessons.seriesSlotAt, windowEnd)),
+          and(isNull(lessons.seriesSlotAt), gte(lessons.startsAt, from), lte(lessons.startsAt, windowEnd)),
+        ),
       ),
-      columns: { startsAt: true },
+      columns: { id: true, startsAt: true, seriesSlotAt: true },
     });
-    const existingTimes = new Set(existing.map((l) => l.startsAt.getTime()));
+    const bySlot = new Map<number, { id: string; stamped: boolean }>();
+    for (const l of existing) {
+      const slot = (l.seriesSlotAt ?? l.startsAt).getTime();
+      if (!bySlot.has(slot)) bySlot.set(slot, { id: l.id, stamped: !!l.seriesSlotAt });
+    }
 
     let created = 0, skippedExisting = 0, skippedConflicts = 0;
     for (const naive of occurrences) {
       const instant = parseZonedDateTime(naive, tz);
       if (endCap && instant.getTime() > endCap.getTime()) break; // occurrences are ascending
-      if (existingTimes.has(instant.getTime())) { skippedExisting++; continue; }
+      const hit = bySlot.get(instant.getTime());
+      if (hit) {
+        skippedExisting++;
+        // Adopt a legacy/one-off row sitting exactly on this slot (e.g. the first
+        // lesson of a recurring family booking, or lessons created before this
+        // column existed): stamp its slot so a later reschedule can't vacate it
+        // and spawn a duplicate on the next run. Self-heals within one pass.
+        if (!hit.stamped) {
+          await this.db.db.update(lessons).set({ seriesSlotAt: instant }).where(eq(lessons.id, hit.id));
+        }
+        continue;
+      }
       try {
         await this.createLesson(orgId, {
           studentId: enrollment.studentId,
@@ -304,7 +329,7 @@ export class SchedulingService {
           teacherId: enrollment.teacherId ?? undefined,
           enrollmentId: enrollment.id,
           termId: enrollment.termId ?? undefined,
-        });
+        }, { seriesSlotAt: instant });
         created++;
       } catch (err) {
         skippedConflicts++;
