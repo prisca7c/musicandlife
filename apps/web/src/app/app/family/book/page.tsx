@@ -59,7 +59,6 @@ export default function BookLessonPage() {
   const [selectedStudent, setSelectedStudent] = useState('');
   const [teacherFilter, setTeacherFilter] = useState<string>(ALL);
   const [weekStart, setWeekStart] = useState(() => weekMonday(new Date()));
-  const [isTrial, setIsTrial] = useState(false);
   const [recurring, setRecurring] = useState(false);
   // Optional last date for a recurring series (studio-local YYYY-MM-DD); '' = open-ended.
   const [recurringEnd, setRecurringEnd] = useState('');
@@ -260,7 +259,6 @@ export default function BookLessonPage() {
           startsAt2: recurring ? undefined : picks[1]?.startsAt,
           startsAt3: recurring ? undefined : picks[2]?.startsAt,
           duration: first.duration,
-          isTrialLesson: isTrial,
           recurring,
           recurringEndDate: recurring && recurringEnd ? recurringEnd : undefined,
         }),
@@ -484,9 +482,9 @@ export default function BookLessonPage() {
 
                 <label className="flex items-center gap-2.5 text-sm cursor-pointer mb-2">
                   <input type="checkbox" checked={recurring}
-                    // A weekly series and a one-off trial are mutually exclusive —
-                    // turning one on turns the other off.
-                    onChange={e => { setRecurring(e.target.checked); if (e.target.checked) { setPicks(p => p.slice(0, 1)); setIsTrial(false); } }}
+                    // A weekly series books one recurring slot, so drop any ranked
+                    // fallback picks when it's turned on.
+                    onChange={e => { setRecurring(e.target.checked); if (e.target.checked) setPicks(p => p.slice(0, 1)); }}
                     className="rounded border-[var(--bd2)]" />
                   <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--txt)' }}>
                     <Repeat size={13} /> Repeat weekly
@@ -516,12 +514,11 @@ export default function BookLessonPage() {
                   </div>
                 )}
 
-                {!recurring && (
-                  <label className="flex items-center gap-2.5 text-sm cursor-pointer mb-3">
-                    <input type="checkbox" checked={isTrial} onChange={e => setIsTrial(e.target.checked)} className="rounded border-[var(--bd2)]" />
-                    <span style={{ color: 'var(--txt)' }}>This is a trial lesson</span>
-                  </label>
-                )}
+                {/* No "this is a trial lesson" toggle: whether a booking is a
+                    trial is decided by the enrolment's status (set by the studio),
+                    never self-declared here. The server ignores any client trial
+                    flag — letting the parent set it would promise a trial price
+                    the booking would never actually be charged. */}
 
                 <button onClick={book} disabled={booking}
                   className="w-full bg-[var(--sage)] text-white font-bold text-sm py-2.5 rounded-xl hover:bg-[var(--sage-dk)] disabled:opacity-50 flex items-center justify-center gap-2">
