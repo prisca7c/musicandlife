@@ -404,6 +404,17 @@ export default function StudentDetailPage() {
   const load = () => mutate();
 
   async function changeEnrollmentStatus(enrollmentId: string, status: string) {
+    // Withdrawing isn't just a label change: the server ends the series —
+    // it clears the weekly rule and cancels every future scheduled lesson at
+    // no charge (same teardown as "Stop weekly", which already confirms). It's
+    // one click away from "Paused" in the dropdown and hard to undo, so guard
+    // it. On cancel we bail without calling the API; the controlled <select>
+    // snaps back to the real status on the next render.
+    if (status === 'withdrawn' &&
+        !confirm('Withdraw this enrollment? This stops the weekly lessons and cancels all future scheduled lessons at no charge. Past lessons are unaffected. To pause temporarily without cancelling upcoming lessons, choose "Paused" instead.')) {
+      load();
+      return;
+    }
     try { await apiFetch(`/enrollments/${enrollmentId}`, { method: 'PATCH', token: tok(), body: JSON.stringify({ status }) }); load(); }
     catch (e) { alert(e instanceof Error ? e.message : 'Could not update enrollment'); }
   }
