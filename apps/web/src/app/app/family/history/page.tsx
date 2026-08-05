@@ -19,7 +19,11 @@ interface Lesson {
 const STATUS_LABELS: Record<string, string> = {
   scheduled: 'Scheduled',
   completed: 'Attended',
-  cancelled_makeup: 'Lesson earned',
+  // ≥24h cancellation where the family wants another time. Since #96 this grants
+  // NO makeup credit and no charge — it's simply a free cancellation with a
+  // rebook to arrange. The old label "Lesson earned" wrongly implied a banked
+  // free lesson the studio doesn't actually track (a dispute waiting to happen).
+  cancelled_makeup: 'Cancelled – rebooking',
   cancelled_no_makeup: 'Late cancel',
   cancelled_no_pay: 'No charge',
   cancelled_teacher: 'Teacher cancelled',
@@ -28,7 +32,8 @@ const STATUS_LABELS: Record<string, string> = {
 
 const STATUS_VARIANT: Record<string, string> = {
   completed: 'active',
-  cancelled_makeup: 'warning',
+  // Not a warning: a ≥24h cancellation costs nothing. Neutral, like no_pay.
+  cancelled_makeup: 'default',
   cancelled_no_makeup: 'error',
   cancelled_no_pay: 'default',
   cancelled_teacher: 'default',
@@ -57,7 +62,7 @@ export default function FamilyHistoryPage() {
         title={
           <span className="inline-flex items-center gap-2">
             Lesson history
-            <InfoTooltip text="Every lesson your family has had, plus any cancellations. A 'makeup credit' is a missed lesson you're allowed to rebook later at no extra charge — it'll show here when one is owed to you." />
+            <InfoTooltip text="Every lesson your family has had, plus any cancellations and how each was settled. Cancelling with more than 24 hours' notice costs nothing; a late cancellation (under 24 hours) is charged as normal." />
           </span>
         }
         subtitle="A record of all your family's lessons"
