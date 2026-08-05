@@ -234,6 +234,9 @@ export default function ResourcesPage() {
   }
 
   async function remove(id: string) {
+    // Permanent delete — removes it for everyone it's shared with. Guard the
+    // mis-click; the app confirms other destructive deletes too.
+    if (!confirm('Delete this resource? It will be removed for everyone it’s shared with and this can’t be undone.')) return;
     setDeleting(id);
     try { await apiFetch(`/resources/${id}`, { method: 'DELETE', token: tok() }); load(); }
     catch(e) { console.error(e); } finally { setDeleting(null); }

@@ -74,6 +74,8 @@ export default function NewsPage() {
   const load = () => mutate();
 
   async function remove(id: string) {
+    // Permanent delete — families will no longer see the post. Guard the mis-click.
+    if (!confirm('Delete this news post? Families will no longer see it and this can’t be undone.')) return;
     setDeleting(id);
     try { await apiFetch(`/news/${id}`, { method: 'DELETE', token: tok() }); load(); }
     catch (e) { console.error(e); } finally { setDeleting(null); }
