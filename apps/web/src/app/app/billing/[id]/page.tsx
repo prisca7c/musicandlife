@@ -195,7 +195,17 @@ export default function InvoiceDetailPage() {
               </button>
             )}
             {invoice.status !== 'void' && invoice.status !== 'paid' && (
-              <button onClick={() => action('void')} disabled={actioning}
+              <button
+                onClick={() => {
+                  // Voiding isn't just a label change: it reverses the charge on
+                  // the family's balance immediately, and there's no "unvoid" —
+                  // the only way back is raising a new invoice. One click on a
+                  // page full of harmless buttons (Send, Download) was too easy
+                  // to hit by mistake.
+                  if (!confirm(`Void invoice ${invoice.number}? This removes ${formatMoney(invoice.total)} from ${invoice.family?.name ?? 'the family'}'s balance immediately and can't be undone — to bill them again you'll need to raise a new invoice.`)) return;
+                  action('void');
+                }}
+                disabled={actioning}
                 className="text-sm rounded-[10px] px-4 py-2 font-semibold transition-colors disabled:opacity-50"
                 style={{ border: '1.5px solid #FCA5A5', color: 'var(--coral)', background: '#fff' }}>
                 Void
