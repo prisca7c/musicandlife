@@ -121,13 +121,15 @@ export default function ReportsPage() {
     <div>
       <PageHeader title="Reports" />
 
-      {/* Date range */}
+      {/* Date range. The labels are tied to their inputs via htmlFor/id — without
+          it a screen reader announces two unlabeled "date" fields with no way
+          to tell which bound is which. */}
       <div className="flex gap-3 items-center mb-6 flex-wrap">
-        <label className="text-sm font-medium" style={{ color: 'var(--txt3)' }}>From</label>
-        <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+        <label htmlFor="reports-from" className="text-sm font-medium" style={{ color: 'var(--txt3)' }}>From</label>
+        <input id="reports-from" type="date" value={from} onChange={e => setFrom(e.target.value)}
           className="border border-[var(--bd2)] rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--sage)]" />
-        <label className="text-sm font-medium" style={{ color: 'var(--txt3)' }}>to</label>
-        <input type="date" value={to} onChange={e => setTo(e.target.value)}
+        <label htmlFor="reports-to" className="text-sm font-medium" style={{ color: 'var(--txt3)' }}>to</label>
+        <input id="reports-to" type="date" value={to} onChange={e => setTo(e.target.value)}
           className="border border-[var(--bd2)] rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--sage)]" />
       </div>
 

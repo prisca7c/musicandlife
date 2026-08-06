@@ -71,12 +71,16 @@ export default function FamilyHistoryPage() {
       {/* Filters */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">
         <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--txt3)' }}>
-          <Calendar size={14} />
-          <span>From</span>
-          <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+          <Calendar size={14} aria-hidden="true" />
+          {/* The visible "From"/"to" text sits next to its input but isn't
+              programmatically tied to it — a screen reader announces two
+              unlabeled "date" fields with no way to tell which is which.
+              htmlFor/id ties them together without changing how it looks. */}
+          <label htmlFor="history-from">From</label>
+          <input id="history-from" type="date" value={from} onChange={e => setFrom(e.target.value)}
             className="border border-[var(--bd2)] rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--sage)]" />
-          <span>to</span>
-          <input type="date" value={to} onChange={e => setTo(e.target.value)}
+          <label htmlFor="history-to">to</label>
+          <input id="history-to" type="date" value={to} onChange={e => setTo(e.target.value)}
             className="border border-[var(--bd2)] rounded-xl px-3 py-1.5 text-sm focus:outline-none focus:border-[var(--sage)]" />
         </div>
         {total > 0 && (
