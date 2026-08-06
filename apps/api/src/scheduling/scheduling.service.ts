@@ -1444,7 +1444,12 @@ export class SchedulingService {
         ? and(eq(rescheduleRequests.organizationId, orgId), eq(rescheduleRequests.status, status as 'pending' | 'approved' | 'denied'))
         : eq(rescheduleRequests.organizationId, orgId),
       with: {
-        lesson: { with: { student: { columns: { id: true, firstName: true, lastName: true } } } },
+        lesson: {
+          with: {
+            student: { columns: { id: true, firstName: true, lastName: true } },
+            teacher: { columns: { id: true, firstName: true, lastName: true } },
+          },
+        },
         requestedByUser: { columns: { id: true, email: true } },
       },
       orderBy: (r, { desc }) => [desc(r.createdAt)],

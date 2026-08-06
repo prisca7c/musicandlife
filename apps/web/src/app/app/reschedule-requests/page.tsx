@@ -18,6 +18,7 @@ interface Req {
     startsAt: string;
     duration: number;
     student: { firstName: string; lastName: string } | null;
+    teacher: { firstName: string; lastName: string } | null;
   } | null;
   requestedByUser: { email: string } | null;
   options: Option[];
@@ -106,6 +107,7 @@ export default function RescheduleRequestsPage() {
                     {r.lesson?.student ? `${r.lesson.student.firstName} ${r.lesson.student.lastName}` : 'Student'}
                   </p>
                   <p className="text-xs" style={{ color: 'var(--txt3)' }}>
+                    {r.lesson?.teacher ? `with ${r.lesson.teacher.firstName} ${r.lesson.teacher.lastName} · ` : ''}
                     Currently: {r.lesson ? fmt(r.lesson.startsAt) : '—'} · {r.lesson?.duration ?? 30} min
                     {r.requestedByUser ? ` · requested by ${r.requestedByUser.email}` : ''}
                   </p>
