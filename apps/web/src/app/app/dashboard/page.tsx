@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useApi } from '@/lib/swr';
 import { useMe } from '@/lib/use-me';
-import { fmtTime } from '@/lib/datetime';
+import { fmtTime, studioDayString } from '@/lib/datetime';
 import { Badge } from '@/components/badge';
 import { PaidDot } from '@/components/paid-dot';
 import { AvailabilityWeekGrid, type AvailWindow } from '@/components/availability-week-grid';
@@ -88,11 +88,14 @@ function StatCard({ label, value, sub, href, icon, warn = false, muted = false }
 
 // ─── Admin dashboard ──────────────────────────────────────────────────────────
 function AdminDashboard() {
-  // Monday of the current week (studio weeks start Monday).
+  // Monday of the current week (studio weeks start Monday). Render the fetch
+  // bound as the STUDIO-zone day, not `.toISOString()` (which is UTC): under BST
+  // (local = UTC+1) local-midnight Monday is 23:00Z Sunday, so toISOString rolled
+  // weekStart back to Sunday — the same trap the calendar page already fixed.
   const mon = new Date();
   mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
   mon.setHours(0, 0, 0, 0);
-  const weekStart = mon.toISOString().split('T')[0];
+  const weekStart = studioDayString(mon);
 
   // Each read is cached on its API path — the whole dashboard renders instantly
   // on revisit, then revalidates in the background.
@@ -104,9 +107,12 @@ function AdminDashboard() {
   const { data: lessons = [] } = useApi<Lesson[]>(`/lessons?weekStart=${weekStart}`);
   const { firstName } = useMe();
 
-  const today = new Date().toISOString().split('T')[0];
+  // "Today" in the studio zone (matches how the calendar buckets lessons), and
+  // compare each lesson's studio day too — a lesson stored as 23:30Z belongs to
+  // the next studio day under BST, so a UTC-prefix startsWith would misfile it.
+  const today = studioDayString(new Date());
   const todayLessons = lessons
-    .filter(l => l.startsAt.startsWith(today!) && l.status === 'scheduled')
+    .filter(l => studioDayString(l.startsAt) === today && l.status === 'scheduled')
     .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
 
   const now = new Date();
