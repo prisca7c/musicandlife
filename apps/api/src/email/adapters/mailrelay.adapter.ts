@@ -71,7 +71,15 @@ export class MailrelayAdapter extends EmailPort {
     // Add recipients to the subscriber list first (outside the send breaker, so
     // list-building keeps working even if sending is temporarily tripped).
     await Promise.all(toList.map((addr) => this.ensureSubscriber(addr)));
-    await this.breaker.call(async () => {
+
+    // Only a 429/5xx means the provider itself is struggling and should count
+    // toward the breaker. A rejected recipient (any other 4xx) is this
+    // message's problem — counting those would let a few dead addresses in a
+    // bulk run open the circuit and silently drop everyone still queued behind
+    // them. Mirrors SenderAdapter.sendOne().
+    type Outcome = { ok: true } | { ok: false; detail: string };
+
+    const outcome = await this.breaker.call(async (): Promise<Outcome> => {
       const res = await fetch(`${this.baseUrl}/send_emails`, {
         method: 'POST',
         headers: {
@@ -86,12 +94,20 @@ export class MailrelayAdapter extends EmailPort {
         }),
       });
 
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
+      if (res.ok) return { ok: true };
+
+      const body = await res.text().catch(() => '');
+      if (res.status === 429 || res.status >= 500) {
         this.logger.error(`Failed to send email to ${opts.to}: ${res.status} ${body}`);
         throw new Error(`Email delivery failed: ${res.status} ${body}`);
       }
-      this.logger.log(`Email sent to ${opts.to}: "${opts.subject}"`);
+      return { ok: false, detail: `${res.status} ${body}` };
     });
+
+    if (!outcome.ok) {
+      this.logger.error(`Failed to send email to ${opts.to}: ${outcome.detail}`);
+      throw new Error(`Email delivery failed: ${outcome.detail}`);
+    }
+    this.logger.log(`Email sent to ${opts.to}: "${opts.subject}"`);
   }
 }
