@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
-import { fmtTime } from '@/lib/datetime';
+import { fmtTime, studioDayString } from '@/lib/datetime';
 import { useRole } from '@/lib/use-role';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
@@ -92,7 +92,10 @@ function MonthGrid({
     const sid = l.student?.id ?? 'unknown';
     const name = l.student ? `${l.student.firstName} ${l.student.lastName}` : 'Unknown student';
     if (!rows.has(sid)) rows.set(sid, { name, days: new Map() });
-    const day = new Date(l.startsAt).getDate();
+    // Bucket by the STUDIO-zone day-of-month, not the browser's — otherwise a
+    // manager in another timezone (or a late-evening lesson near midnight) files
+    // the mark under the wrong column.
+    const day = Number(studioDayString(l.startsAt).slice(8, 10));
     const state = l.attendance?.status ?? (l.status === 'scheduled' ? 'unmarked' : l.status);
     const bucket = rows.get(sid)!.days;
     bucket.set(day, [...(bucket.get(day) ?? []), state]);
@@ -194,7 +197,10 @@ export default function AttendancePage() {
   // Marked rows are read-only until you click "Change" — a mis-tap here moves
   // money, so re-marking is deliberate rather than one stray click away.
   const [correcting, setCorrecting] = useState<string | null>(null);
-  const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]!);
+  // Default to *today in the studio zone*, not new Date().toISOString() (UTC):
+  // under BST (local = UTC+1) between 00:00 and 01:00 that rolls back to
+  // yesterday, so the register would open on the wrong day's lessons.
+  const [date, setDate] = useState(() => studioDayString(new Date()));
   const [search, setSearch] = useState('');
   // Day view marks today's register; month view is the read-only overview the
   // office asked for — one row per student, one column per day.
@@ -223,9 +229,13 @@ export default function AttendancePage() {
     } finally { setSaving(null); }
   }
 
-  const mon = new Date(date);
+  // Monday of the selected week. Anchor `date` at local noon so getDay()/setDate
+  // can't slip across a day boundary, then format as the STUDIO-zone day (as the
+  // dashboard/calendar do) rather than .toISOString() (UTC), which under BST
+  // rolled the week bound back to Sunday.
+  const mon = new Date(`${date}T12:00:00`);
   mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
-  const weekStart = mon.toISOString().split('T')[0];
+  const weekStart = studioDayString(mon);
 
   // The calendar month containing `date`, as YYYY-MM-DD bounds.
   const monthStart = `${date.slice(0, 7)}-01`;
@@ -249,7 +259,7 @@ export default function AttendancePage() {
   // silently starved the "Marked" section below of its correction and
   // take-payment controls. Include lessons that carry an attendance record too.
   const lessons = allLessons.filter(
-    l => l.startsAt.startsWith(date) && (l.status === 'scheduled' || !!l.attendance),
+    l => studioDayString(l.startsAt) === date && (l.status === 'scheduled' || !!l.attendance),
   );
 
   // Seed the per-lesson "present" defaults when the set of lessons for the day
