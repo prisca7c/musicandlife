@@ -1,15 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { pdf } from '@react-pdf/renderer';
 import { apiFetch, apiFetchBlob } from '@/lib/api';
 import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
 import { LoadState } from '@/components/load-state';
 import { PageHeader } from '@/components/page-header';
-import { InvoicePDF, type OrgPDFData } from '@/components/invoice-pdf';
-import { PayrollPDF, type PayrollPDFData } from '@/components/payroll-pdf';
-import { AttendancePDF, type AttendancePDFData } from '@/components/attendance-pdf';
+import type { InvoicePDFData, OrgPDFData } from '@/components/invoice-pdf';
+import type { PayrollPDFData } from '@/components/payroll-pdf';
+import type { AttendancePDFData } from '@/components/attendance-pdf';
 import { Download, FileDown, Loader2 } from 'lucide-react';
 import { SearchableSelect } from '@/components/searchable-select';
 import { lessonStatusLabel } from '@/lib/lesson-status';
@@ -65,7 +64,7 @@ export default function ReportsPage() {
     if (!pdfStudent) return;
     setGenerating('invoice');
     try {
-      const data = await apiFetch<Parameters<typeof InvoicePDF>[0]['invoice'] & { student: { name: string } }>(
+      const data = await apiFetch<InvoicePDFData & { student: { name: string } }>(
         `/reports/student-invoice-pdf?studentId=${pdfStudent}&from=${from}&to=${to}`, { token: tok() }
       );
       // Build an InvoicePDF-compatible shape from the report data
@@ -79,6 +78,11 @@ export default function ReportsPage() {
         family: (data as unknown as { student: { family: { name: string; email: string | null } | null } }).student?.family ?? null,
         lineItems: (data as unknown as { lineItems: { id: string; description: string; amount: number; date: string }[] }).lineItems ?? [],
       };
+      // Loaded on click, not at page load — @react-pdf/renderer is a heavy
+      // library that most Reports visits never need.
+      const [{ pdf }, { InvoicePDF }] = await Promise.all([
+        import('@react-pdf/renderer'), import('@/components/invoice-pdf'),
+      ]);
       const blob = await pdf(<InvoicePDF invoice={invoiceData} org={org} logoSrc="" />).toBlob();
       const studentName = students.find(s => s.id === pdfStudent);
       await downloadBlob(blob, `invoice-${studentName?.firstName ?? 'student'}-${from}.pdf`);
@@ -93,6 +97,9 @@ export default function ReportsPage() {
       const data = await apiFetch<PayrollPDFData>(
         `/reports/teacher-payroll-pdf?staffId=${pdfStaff}&from=${from}&to=${to}`, { token: tok() }
       );
+      const [{ pdf }, { PayrollPDF }] = await Promise.all([
+        import('@react-pdf/renderer'), import('@/components/payroll-pdf'),
+      ]);
       const blob = await pdf(<PayrollPDF data={data} />).toBlob();
       await downloadBlob(blob, `payroll-${data.staff.name.replace(/ /g, '-')}-${from}.pdf`);
     } catch (e) { console.error(e); alert('Could not generate payroll PDF.'); }
@@ -106,6 +113,9 @@ export default function ReportsPage() {
       const data = await apiFetch<AttendancePDFData>(
         `/reports/student-attendance-pdf?studentId=${pdfStudent}&from=${from}&to=${to}`, { token: tok() }
       );
+      const [{ pdf }, { AttendancePDF }] = await Promise.all([
+        import('@react-pdf/renderer'), import('@/components/attendance-pdf'),
+      ]);
       const blob = await pdf(<AttendancePDF data={data} />).toBlob();
       await downloadBlob(blob, `attendance-${data.student.name.replace(/ /g, '-')}-${from}.pdf`);
     } catch (e) { console.error(e); alert('Could not generate attendance PDF.'); }
