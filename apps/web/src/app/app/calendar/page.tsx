@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { fmtTime, fmtTimeEnd, fmtDate, studioMinutesFromMidnight, studioDayString } from '@/lib/datetime';
+import { lessonStatusLabel, attendanceStatusLabel } from '@/lib/lesson-status';
 import { useRole } from '@/lib/use-role';
 import { Modal } from '@/components/modal';
 import { Badge } from '@/components/badge';
@@ -847,6 +848,8 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false 
   }
 
   async function cancelLesson() {
+    const who = lesson!.student ? `${lesson!.student.firstName} ${lesson!.student.lastName}'s` : 'this';
+    if (!confirm(`Cancel ${who} lesson on ${fmtDate(lesson!.startsAt)} at ${fmtTime(lesson!.startsAt)}? This removes it from the calendar with no charge to the family and no pay to the teacher. It can't be undone from here — you'd need to book it again.`)) return;
     setSaving(true); setActionError('');
     try {
       await apiFetch(`/lessons/${lesson!.id}/cancel`, {
@@ -929,12 +932,12 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false 
           </div>
           <div className="flex justify-between items-center">
             <span style={{ color: 'var(--txt3)' }}>Status</span>
-            <Badge variant={lesson.status}>{lesson.status.replace(/_/g, ' ')}</Badge>
+            <Badge variant={lesson.status}>{lessonStatusLabel(lesson.status)}</Badge>
           </div>
           {lesson.attendance && (
             <div className="flex justify-between items-center">
               <span style={{ color: 'var(--txt3)' }}>Attendance</span>
-              <Badge variant={lesson.attendance.status}>{lesson.attendance.status.replace(/_/g, ' ')}</Badge>
+              <Badge variant={lesson.attendance.status}>{attendanceStatusLabel(lesson.attendance.status)}</Badge>
             </div>
           )}
         </div>
