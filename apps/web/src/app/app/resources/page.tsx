@@ -183,6 +183,11 @@ export default function ResourcesPage() {
   const [deleting, setDeleting] = useState<string|null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
   const role = useRole();
+  // Families & students reach this page too (they subscribe to the library), but
+  // the server only lets staff create/delete resources (@Roles('teacher')). Show
+  // them a read-only library — no "Add"/"Remove", no staff-oriented filters —
+  // rather than management controls that just 403. Only staff manage.
+  const canManage = role !== 'guardian' && role !== 'student';
 
   // The filter set is the cache key — changing a filter re-keys and refetches;
   // revisiting with the same filters renders instantly. A rejected read (403)
@@ -223,10 +228,12 @@ export default function ResourcesPage() {
     } finally { setSubscribing(false); }
   }
 
-  // Unfiltered lists for the filter dropdowns / add modal.
+  // Unfiltered lists for the filter dropdowns / add modal. Staff & student lists
+  // are only for the management modal — families would 403 on those routes, so
+  // don't even ask for them.
   const { data: allResources = [] } = useApi<Resource[]>('/resources');
-  const { data: staff = [] } = useApi<Staff[]>('/staff');
-  const { data: students = [] } = useApi<Student[]>('/students');
+  const { data: staff = [] } = useApi<Staff[]>(canManage ? '/staff' : null);
+  const { data: students = [] } = useApi<Student[]>(canManage ? '/students' : null);
 
   function applyFilters(next: Partial<{ search: string; instrument: string; teacherId: string; studentId: string }>) {
     const merged = { search, instrument, teacherId, studentId, ...next };
@@ -318,11 +325,18 @@ export default function ResourcesPage() {
 
   return (
     <div>
-      <AddResourceModal open={showAdd} onClose={()=>setShowAdd(false)} onCreated={() => load()} role={role} staff={staff} students={students} />
+      {canManage && (
+        <AddResourceModal open={showAdd} onClose={()=>setShowAdd(false)} onCreated={() => load()} role={role} staff={staff} students={students} />
+      )}
       <PageHeader title="Resources" subtitle={`${resources.length} item${resources.length!==1?'s':''}`}
-        action={<button onClick={()=>setShowAdd(true)} className="bg-[var(--sage)] text-white rounded px-4 py-2 text-sm font-medium hover:bg-[var(--sage-dk)]">+ Add resource</button>} />
+        action={canManage
+          ? <button onClick={()=>setShowAdd(true)} className="bg-[var(--sage)] text-white rounded px-4 py-2 text-sm font-medium hover:bg-[var(--sage-dk)]">+ Add resource</button>
+          : undefined} />
 
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-5">
+      {/* Families get a simple search + instrument filter; the teacher/student
+          filters are a staff tool (and their options are only populated from the
+          staff-visible lists). */}
+      <div className={`grid grid-cols-1 gap-3 mb-5 ${canManage ? 'sm:grid-cols-4' : 'sm:grid-cols-2'}`}>
         <div className="relative sm:col-span-1">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><Search size={14} /></span>
           <input value={search} onChange={e => applyFilters({ search: e.target.value })} placeholder="Search title or description…"
@@ -332,14 +346,18 @@ export default function ResourcesPage() {
           options={instrumentOptions.map(i => ({ value: i, label: i.charAt(0).toUpperCase() + i.slice(1) }))}
           value={instrument} onChange={v => applyFilters({ instrument: v })} emptyLabel="All instruments" placeholder="All instruments"
         />
-        <SearchableSelect
-          options={teacherOptions.map(t => ({ value: t.id, label: `${t.firstName} ${t.lastName}` }))}
-          value={teacherId} onChange={v => applyFilters({ teacherId: v })} emptyLabel="All teachers" placeholder="All teachers"
-        />
-        <SearchableSelect
-          options={studentOptions.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
-          value={studentId} onChange={v => applyFilters({ studentId: v })} emptyLabel="All students" placeholder="All students"
-        />
+        {canManage && (
+          <SearchableSelect
+            options={teacherOptions.map(t => ({ value: t.id, label: `${t.firstName} ${t.lastName}` }))}
+            value={teacherId} onChange={v => applyFilters({ teacherId: v })} emptyLabel="All teachers" placeholder="All teachers"
+          />
+        )}
+        {canManage && (
+          <SearchableSelect
+            options={studentOptions.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+            value={studentId} onChange={v => applyFilters({ studentId: v })} emptyLabel="All students" placeholder="All students"
+          />
+        )}
       </div>
 
       <div className="space-y-2">
@@ -369,8 +387,10 @@ export default function ResourcesPage() {
               )}
               {openError?.id === r.id && <p className="text-xs text-red-500 mt-1">{openError.message}</p>}
             </div>
-            <button onClick={()=>remove(r.id)} disabled={deleting===r.id}
-              className="text-xs text-red-500 hover:underline shrink-0 disabled:opacity-50">Remove</button>
+            {canManage && (
+              <button onClick={()=>remove(r.id)} disabled={deleting===r.id}
+                className="text-xs text-red-500 hover:underline shrink-0 disabled:opacity-50">Remove</button>
+            )}
           </div>
         ))}
       </div>
