@@ -13,6 +13,7 @@ import { Modal } from '@/components/modal';
 import { PRIVATE_INSTRUMENTS, GROUP_INSTRUMENTS, WEEKDAYS, lessonRate } from '@music-life/types';
 import { SearchableSelect } from '@/components/searchable-select';
 import { BackButton } from '@/components/back-button';
+import { useRole } from '@/lib/use-role';
 
 interface StudentDetail {
   id: string; firstName: string; lastName: string; status: string;
@@ -394,14 +395,37 @@ function LessonNotes({ studentId }: { studentId: string }) {
 
 export default function StudentDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const id = params.id;
   const [showEnroll, setShowEnroll] = useState(false);
   const [editEnrollment, setEditEnrollment] = useState<EnrollmentRow | null>(null);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const role = useRole();
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   // Cached read — instant on revisit. load() refreshes after an edit/enrollment.
   const { data: student = null, mutate } = useApi<StudentDetail>(`/students/${id}`);
   const load = () => mutate();
+
+  // Withdrawing the whole student (as opposed to one of their enrollments) was
+  // only reachable via a direct API/DB call — there was no button anywhere in
+  // the app, even though the server (#171) does the full, correct teardown in
+  // one transaction: flips the student to withdrawn, withdraws every
+  // enrollment, clears each schedule rule, and cancels every future scheduled
+  // lesson at no charge. Past lessons are untouched. DELETE-shaped but not a
+  // data loss — the record stays, just marked left — so it gets the same
+  // confirm bar as an enrollment withdrawal, not a "type to confirm" prompt.
+  async function withdrawStudent() {
+    if (!confirm(`Withdraw ${student!.firstName} ${student!.lastName}? This ends every enrollment, stops all their weekly lessons, and cancels all future scheduled lessons at no charge. Past lessons are unaffected. This cannot be undone from here — re-enroll them to bring them back.`)) return;
+    setWithdrawing(true);
+    try {
+      await apiFetch(`/students/${id}`, { method: 'DELETE', token: tok() });
+      router.push('/app/students');
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not withdraw this student');
+      setWithdrawing(false);
+    }
+  }
 
   async function changeEnrollmentStatus(enrollmentId: string, status: string) {
     // Withdrawing isn't just a label change: the server ends the series —
@@ -440,7 +464,22 @@ export default function StudentDetailPage() {
       </div>
 
       <PageHeader title={`${student.firstName} ${student.lastName}`} subtitle={student.family?.name}
-        action={<Badge variant={student.status}>{student.status}</Badge>} />
+        action={
+          <span className="inline-flex items-center gap-2.5">
+            <Badge variant={student.status}>{student.status}</Badge>
+            {/* Only admins can actually withdraw (DELETE /students/:id is
+                admin-gated server-side) — hidden rather than shown-disabled
+                for everyone else, so a receptionist/teacher/manager on this
+                page isn't shown a button that would just 403. */}
+            {student.status !== 'withdrawn' && (role === 'admin' || role === 'system_admin') && (
+              <button onClick={withdrawStudent} disabled={withdrawing}
+                className="text-xs font-semibold hover:underline disabled:opacity-50"
+                style={{ color: 'var(--coral)' }}>
+                {withdrawing ? 'Withdrawing…' : 'Withdraw student'}
+              </button>
+            )}
+          </span>
+        } />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 space-y-4">
