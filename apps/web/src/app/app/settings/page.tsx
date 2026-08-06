@@ -127,6 +127,10 @@ export default function SettingsPage() {
   }
 
   async function revertTemplate(templateId: string) {
+    // Reverting permanently discards the studio's customized subject + HTML for
+    // this email (the server hard-deletes the override) — there's no undo, so a
+    // mis-click one button away from "Edit" would wipe carefully-written copy.
+    if (!confirm('Revert this email to the default wording? Your customized version will be discarded and this can’t be undone.')) return;
     setTemplateSaving(templateId);
     try {
       await apiFetch(`/email-templates/${templateId}`, { method: 'DELETE', token: tok() });
