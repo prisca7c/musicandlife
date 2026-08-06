@@ -4,6 +4,7 @@ import { useState, useEffect, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { formatMoney } from '@/lib/money';
+import { studioDayString } from '@/lib/datetime';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
@@ -27,8 +28,8 @@ interface StaffMember { id: string; firstName: string; lastName: string; }
 // Default payroll period = this month so far. Lessons only become payable once
 // their attendance is marked (present → completed), so defaulting to *last*
 // month used to hide this month's lessons and the run came back empty.
-const monthStartISO = () => { const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]; };
-const todayISO = () => new Date().toISOString().split('T')[0];
+const monthStartISO = () => `${studioDayString(new Date()).slice(0, 7)}-01`;
+const todayISO = () => studioDayString(new Date());
 
 // Shown on both payroll modals: explains why a run can come back empty.
 const PAYROLL_HINT = 'Only lessons marked as completed (attendance taken) count. Overdue lessons auto-complete about a day later when that automation is on — until then, mark attendance so they appear here.';
@@ -79,12 +80,12 @@ function CreateRunModal({ open, onClose, onCreated }: { open: boolean; onClose: 
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="ui-label">Period start <span style={{ color: 'var(--coral)' }}>*</span></label>
-            <input name="periodStart" type="date" required defaultValue={monthStartISO()} className="ui-input" />
+            <label htmlFor="run-period-start" className="ui-label">Period start <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <input id="run-period-start" name="periodStart" type="date" required defaultValue={monthStartISO()} className="ui-input" />
           </div>
           <div>
-            <label className="ui-label">Period end <span style={{ color: 'var(--coral)' }}>*</span></label>
-            <input name="periodEnd" type="date" required defaultValue={todayISO()} className="ui-input" />
+            <label htmlFor="run-period-end" className="ui-label">Period end <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <input id="run-period-end" name="periodEnd" type="date" required defaultValue={todayISO()} className="ui-input" />
           </div>
         </div>
         <div className="flex gap-3 pt-1">
@@ -174,12 +175,12 @@ function RunAllModal({ open, onClose, onCreated }: { open: boolean; onClose: () 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="ui-label">Period start <span style={{ color: 'var(--coral)' }}>*</span></label>
-                <input name="periodStart" type="date" required defaultValue={monthStartISO()} className="ui-input" />
+                <label htmlFor="run-all-period-start" className="ui-label">Period start <span style={{ color: 'var(--coral)' }}>*</span></label>
+                <input id="run-all-period-start" name="periodStart" type="date" required defaultValue={monthStartISO()} className="ui-input" />
               </div>
               <div>
-                <label className="ui-label">Period end <span style={{ color: 'var(--coral)' }}>*</span></label>
-                <input name="periodEnd" type="date" required defaultValue={todayISO()} className="ui-input" />
+                <label htmlFor="run-all-period-end" className="ui-label">Period end <span style={{ color: 'var(--coral)' }}>*</span></label>
+                <input id="run-all-period-end" name="periodEnd" type="date" required defaultValue={todayISO()} className="ui-input" />
               </div>
             </div>
             <div className="flex gap-3 pt-1">
@@ -263,27 +264,27 @@ function AddExpenseModal({ open, onClose, onCreated }: { open: boolean; onClose:
             />
           </div>
           <div>
-            <label className="ui-label">Date <span style={{ color: 'var(--coral)' }}>*</span></label>
-            <input name="date" type="date" required className="ui-input" />
+            <label htmlFor="expense-date" className="ui-label">Date <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <input id="expense-date" name="date" type="date" required className="ui-input" />
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="ui-label">Amount (£) <span style={{ color: 'var(--coral)' }}>*</span></label>
-            <input name="amount" type="number" min="0.01" step="0.01" required className="ui-input" />
+            <label htmlFor="expense-amount" className="ui-label">Amount (£) <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <input id="expense-amount" name="amount" type="number" min="0.01" step="0.01" required className="ui-input" />
           </div>
           <div>
-            <label className="ui-label">Mileage (km)</label>
-            <input name="mileageKm" type="number" min="0" className="ui-input" />
+            <label htmlFor="expense-mileage" className="ui-label">Mileage (km)</label>
+            <input id="expense-mileage" name="mileageKm" type="number" min="0" className="ui-input" />
           </div>
         </div>
         <div>
-          <label className="ui-label">Description</label>
-          <input name="description" className="ui-input" />
+          <label htmlFor="expense-description" className="ui-label">Description</label>
+          <input id="expense-description" name="description" className="ui-input" />
         </div>
         <div>
-          <label className="ui-label">Receipt</label>
-          <input type="file" accept="image/*,.pdf" onChange={e => setReceipt(e.target.files?.[0] ?? null)} className="ui-input" />
+          <label htmlFor="expense-receipt" className="ui-label">Receipt</label>
+          <input id="expense-receipt" type="file" accept="image/*,.pdf" onChange={e => setReceipt(e.target.files?.[0] ?? null)} className="ui-input" />
         </div>
         <div className="flex gap-3 pt-1">
           <button type="submit" disabled={saving} className="ui-btn-primary">
