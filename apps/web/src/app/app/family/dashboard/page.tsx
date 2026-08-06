@@ -290,7 +290,9 @@ export default function FamilyDashboardPage() {
                 ? 'in credit — nothing to pay right now'
                 : balance === 0
                   ? 'all settled — nothing to pay right now'
-                  : 'owing — we’ll invoice you for this'}
+                  : outstandingInvoice
+                    ? 'owing — see the invoice below'
+                    : 'owing — we’ll invoice you for this'}
             </p>
           </div>
 
@@ -494,6 +496,9 @@ export default function FamilyDashboardPage() {
                   </p>
                 </div>
               </button>
+              <button onClick={() => setCancelModal(null)} disabled={cancelling} className="ui-btn-ghost w-full">
+                Never mind
+              </button>
             </>
           ) : (
             <>
@@ -505,6 +510,9 @@ export default function FamilyDashboardPage() {
                 disabled={cancelling}
                 className="w-full py-3 px-4 rounded-xl bg-[var(--coral)] text-white font-bold text-sm hover:opacity-90 disabled:opacity-50">
                 Confirm cancellation (fee applies)
+              </button>
+              <button onClick={() => setCancelModal(null)} disabled={cancelling} className="ui-btn-ghost w-full">
+                Never mind
               </button>
             </>
           )}
