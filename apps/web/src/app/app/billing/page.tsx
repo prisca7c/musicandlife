@@ -13,6 +13,7 @@ import { PaidDot } from '@/components/paid-dot';
 import { Modal } from '@/components/modal';
 import { SearchableSelect } from '@/components/searchable-select';
 import { Plus, PoundSterling, Trash2 } from 'lucide-react';
+import { invoiceStatusLabel, invoiceStatusColor } from '@/lib/invoice-status';
 
 interface Invoice {
   id: string; number: string; status: string; total: number; issuedOn: string; dueDate: string;
@@ -346,18 +347,6 @@ function RecordPaymentModal({ open, onClose, onCreated }: { open: boolean; onClo
   );
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  draft: 'default', sent: 'trial', paid: 'active', void: 'withdrawn',
-};
-
-// "sent" is our internal word for "issued and waiting to be paid" — meaningless to
-// a parent. Show them plain English. A negative total is a credit note regardless
-// of workflow status.
-function statusLabel(i: { status: string; total: number }): string {
-  if (i.total < 0) return 'Credit';
-  return { draft: 'Draft', sent: 'Due', paid: 'Paid', void: 'Void' }[i.status] ?? i.status;
-}
-
 export default function BillingPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
@@ -466,7 +455,7 @@ export default function BillingPage() {
                     )}
                   </span>
                 </td>
-                <td><Badge variant={i.total < 0 ? 'default' : STATUS_COLORS[i.status]}>{statusLabel(i)}</Badge></td>
+                <td><Badge variant={invoiceStatusColor(i)}>{invoiceStatusLabel(i)}</Badge></td>
               </tr>
             ))}
           </tbody>

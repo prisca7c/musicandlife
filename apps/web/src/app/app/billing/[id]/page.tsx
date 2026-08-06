@@ -13,6 +13,7 @@ import { Modal } from '@/components/modal';
 import { BackButton } from '@/components/back-button';
 import { Calendar, Pencil } from 'lucide-react';
 import type { InvoicePDFData, OrgPDFData } from '@/components/invoice-pdf';
+import { invoiceStatusLabel, invoiceStatusColor } from '@/lib/invoice-status';
 
 // Load the PDF download button client-side only (react-pdf uses browser APIs)
 const PdfDownloadButton = dynamic(
@@ -100,8 +101,6 @@ function AddLineItemModal({ open, onClose, invoiceId, onAdded }: {
   );
 }
 
-const STATUS_COLORS: Record<string, string> = { draft: 'default', sent: 'trial', paid: 'active', void: 'withdrawn' };
-
 export default function InvoiceDetailPage() {
   const params                                 = useParams<{ id: string }>();
   const [logoSrc, setLogoSrc]                  = useState('');
@@ -179,7 +178,7 @@ export default function InvoiceDetailPage() {
           className="h-14 w-auto object-contain" />
         <div className="text-right text-sm" style={{ color: 'var(--txt3)' }}>
           <p className="font-bold text-base" style={{ color: 'var(--txt)' }}>Invoice {invoice.number}</p>
-          <p className="mt-1"><Badge variant={STATUS_COLORS[invoice.status]}>{invoice.status}</Badge></p>
+          <p className="mt-1"><Badge variant={invoiceStatusColor(invoice)}>{invoiceStatusLabel(invoice)}</Badge></p>
         </div>
       </div>
 
