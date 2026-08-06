@@ -23,12 +23,38 @@ export default function PayInvoicePage() {
   const params = useParams<{ invoiceId: string }>();
   const [data, setData] = useState<PublicInvoiceSummary | null>(null);
   const [error, setError] = useState('');
+  // Card is only offered when the studio has Mollie configured; otherwise this
+  // page stays exactly as it was (bank transfer only).
+  const [cardEnabled, setCardEnabled] = useState(false);
+  const [payingByCard, setPayingByCard] = useState(false);
 
   useEffect(() => {
     apiFetch<PublicInvoiceSummary>(`/public/invoices/${params.invoiceId}`)
       .then(setData)
       .catch(err => setError(err instanceof Error ? err.message : 'Could not load invoice'));
   }, [params.invoiceId]);
+
+  useEffect(() => {
+    apiFetch<{ card: boolean }>('/public/payments/methods')
+      .then(m => setCardEnabled(m.card))
+      .catch(() => setCardEnabled(false));
+  }, []);
+
+  async function payByCard() {
+    setPayingByCard(true);
+    setError('');
+    try {
+      const { checkoutUrl } = await apiFetch<{ checkoutUrl: string }>(
+        `/public/payments/mollie/checkout/${params.invoiceId}`, { method: 'POST' },
+      );
+      // Hand off to Mollie's hosted checkout — card details are entered there,
+      // never on our page, so no card data ever touches this app.
+      window.location.href = checkoutUrl;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not start the card payment. Please try again.');
+      setPayingByCard(false);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 py-12 px-4">
@@ -75,6 +101,23 @@ export default function PayInvoicePage() {
                 <p className="text-2xl font-bold text-gray-900">{formatMoney(data.total)}</p>
                 <p className="text-xs text-gray-500 mt-1">Due {data.dueDate}</p>
               </div>
+
+              {cardEnabled && (
+                <div className="mb-6">
+                  <button
+                    onClick={payByCard}
+                    disabled={payingByCard}
+                    className="w-full rounded-lg bg-gray-900 text-white font-semibold py-3 text-sm hover:opacity-90 disabled:opacity-50">
+                    {payingByCard ? 'Taking you to checkout…' : `Pay ${formatMoney(data.total)} by card`}
+                  </button>
+                  <p className="text-xs text-gray-500 mt-2 text-center">
+                    Secure checkout. Your card details are handled by our payment provider, never stored by the studio.
+                  </p>
+                  {(data.org.bankAccountNumber || data.org.bankSortCode) && (
+                    <p className="text-xs text-gray-400 mt-4 text-center">or pay by bank transfer below</p>
+                  )}
+                </div>
+              )}
 
               {(data.org.bankAccountNumber || data.org.bankSortCode) && (
                 <div className="space-y-2 text-sm text-gray-700 mb-4">
