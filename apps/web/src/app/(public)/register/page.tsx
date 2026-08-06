@@ -138,7 +138,26 @@ export default function RegisterPage() {
   // same registration — a double-click race, a back-then-resubmit, or a second
   // tab — reuse this key so the API dedupes them instead of creating duplicate
   // pending registrations. A fresh mount (page reload after success) gets a new key.
-  const idempotencyKey = useRef(`reg-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const newIdempotencyKey = () => `reg-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const idempotencyKey = useRef(newIdempotencyKey());
+
+  // Start a brand-new registration in place (used by "Register another student"
+  // on the success screen). Crucially this rotates the idempotency key: without a
+  // fresh key the API treats the next child's submission as a duplicate of the
+  // one just sent and silently returns "Already submitted" without creating it —
+  // so a family registering siblings back-to-back would lose every child after
+  // the first. A full page reload gets a new key via the useRef initialiser; this
+  // in-place reset must do the same by hand.
+  function startNewRegistration() {
+    idempotencyKey.current = newIdempotencyKey();
+    setStep(1);
+    setData(EMPTY);
+    setTcAccepted(false);
+    setErrors({});
+    setSubmitError('');
+    setFamilySearch('');
+    setSelectedFamily(null);
+  }
 
   // The instruments offered are editable from Settings, so they're fetched
   // rather than compiled in. The build-time constants stay as the fallback: if
@@ -351,7 +370,7 @@ export default function RegisterPage() {
                 className="flex items-center gap-2 bg-white text-[var(--sage-dk)] border border-[var(--sage-md)] rounded-[10px] px-6 py-2.5 text-sm font-bold hover:bg-[var(--sage-lt)] transition-colors">
                 <Home size={16} /> Back to sign in
               </a>
-              <button onClick={() => { setStep(1); setData(EMPTY); setTcAccepted(false); }}
+              <button onClick={startNewRegistration}
                 className="flex items-center gap-2 bg-[var(--sage)] text-white rounded-[10px] px-6 py-2.5 text-sm font-bold hover:bg-[var(--sage-dk)] transition-colors">
                 <Plus size={16} /> Register another student
               </button>
