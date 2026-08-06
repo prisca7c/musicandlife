@@ -83,7 +83,10 @@ export default function ResourceSubscribersPage() {
                 <Play size={12} /> {s.active ? 'Renew' : 'Activate'}
               </button>
               {s.status !== 'canceled' && (
-                <button onClick={() => act(s.id, 'cancel')} disabled={busy === s.id}
+                <button onClick={() => {
+                  if (!confirm(`Cancel ${s.name || s.email}'s subscription? This revokes their library access immediately${s.paidUntil ? `, even though they've paid until ${s.paidUntil}` : ''}. This can't be undone from here — you'd need to activate them again.`)) return;
+                  act(s.id, 'cancel');
+                }} disabled={busy === s.id}
                   className="inline-flex items-center gap-1.5 text-xs text-red-500 hover:underline disabled:opacity-50 px-3 py-1">
                   <XCircle size={12} /> Cancel
                 </button>
