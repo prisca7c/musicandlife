@@ -138,6 +138,7 @@ export default function PayInvoicePage() {
                   yet) and there are no free-text payment notes, at least tell them
                   to get in touch — with the reference so the studio can match it. */}
               {data.status !== 'paid' &&
+                !cardEnabled &&
                 !data.org.bankAccountNumber &&
                 !data.org.bankSortCode &&
                 !data.org.invoiceNotes && (
