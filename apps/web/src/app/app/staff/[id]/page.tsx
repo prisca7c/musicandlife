@@ -9,6 +9,7 @@ import { StaffInstruments } from '@/components/staff-instruments';
 import { StaffPayrollEditor } from '@/components/staff-payroll-editor';
 import { AssignStudentsButton } from '@/components/assign-students-button';
 import { BackButton } from '@/components/back-button';
+import { StaffStatusToggle } from '@/components/staff-status-toggle';
 
 interface StaffDetail {
   id: string;
@@ -42,7 +43,13 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
       <PageHeader
         title={`${member.firstName} ${member.lastName}`}
         subtitle={member.title ?? member.user?.email}
-        action={<Badge variant={member.status}>{member.status}</Badge>}
+        action={
+          <StaffStatusToggle
+            staffId={member.id}
+            initialStatus={member.status}
+            teacherName={`${member.firstName} ${member.lastName}`}
+          />
+        }
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
