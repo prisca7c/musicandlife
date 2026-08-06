@@ -101,7 +101,7 @@ export default function FamilyHistoryPage() {
               <tr className="border-b" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
                 <th className="text-left px-4 py-3 font-bold text-xs uppercase tracking-widest" style={{ color: 'var(--txt3)' }}>Date</th>
                 <th className="text-left px-4 py-3 font-bold text-xs uppercase tracking-widest" style={{ color: 'var(--txt3)' }}>Student</th>
-                <th className="text-left px-4 py-3 font-bold text-xs uppercase tracking-widest" style={{ color: 'var(--txt3)' }}>Subject</th>
+                <th className="text-left px-4 py-3 font-bold text-xs uppercase tracking-widest" style={{ color: 'var(--txt3)' }}>Instrument</th>
                 <th className="text-left px-4 py-3 font-bold text-xs uppercase tracking-widest" style={{ color: 'var(--txt3)' }}>Teacher</th>
                 <th className="text-left px-4 py-3 font-bold text-xs uppercase tracking-widest" style={{ color: 'var(--txt3)' }}>Duration</th>
                 <th className="text-left px-4 py-3 font-bold text-xs uppercase tracking-widest" style={{ color: 'var(--txt3)' }}>Status</th>
