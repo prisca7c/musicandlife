@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api';
+import { studioWallClockToUtc } from '@/lib/datetime';
 import { Modal } from '@/components/modal';
 import { Plus, Trash2, CalendarOff } from 'lucide-react';
 
@@ -93,11 +94,14 @@ export function StaffAvailability({ staffId, self = false }: { staffId?: string;
     try {
       // Whole days: from 00:00 on the first day to 23:59:59 on the last, so a
       // single-day absence blocks that entire day rather than a zero-length span.
+      // Interpret those wall-clock boundaries in the STUDIO zone, not the
+      // browser's — otherwise a manager setting a teacher's time-off from another
+      // timezone lands the block hours off (see studioWallClockToUtc).
       await apiFetch(offBase, {
         method: 'POST', token: tok(),
         body: JSON.stringify({
-          startsAt: new Date(`${offFrom}T00:00:00`).toISOString(),
-          endsAt: new Date(`${offTo}T23:59:59`).toISOString(),
+          startsAt: studioWallClockToUtc(`${offFrom}T00:00:00`).toISOString(),
+          endsAt: studioWallClockToUtc(`${offTo}T23:59:59`).toISOString(),
           reason: offReason.trim() || undefined,
         }),
       });
