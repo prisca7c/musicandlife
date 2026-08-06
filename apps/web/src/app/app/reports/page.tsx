@@ -12,6 +12,7 @@ import { PayrollPDF, type PayrollPDFData } from '@/components/payroll-pdf';
 import { AttendancePDF, type AttendancePDFData } from '@/components/attendance-pdf';
 import { Download, FileDown, Loader2 } from 'lucide-react';
 import { SearchableSelect } from '@/components/searchable-select';
+import { lessonStatusLabel } from '@/lib/lesson-status';
 
 interface AttendanceReport { from: string; to: string; byStatus: { status: string; count: number }[]; }
 interface RevenueReport { from: string; to: string; accountingMode: 'cash' | 'accrual'; total: number; byType: { type: string; total: string | null }[]; earnedFromLessons: number; completedLessons: number; }
@@ -29,12 +30,6 @@ async function downloadBlob(blob: Blob, filename: string) {
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  scheduled: 'Scheduled', completed: 'Completed',
-  cancelled_makeup: 'Cancelled — rebook', cancelled_no_makeup: 'Late cancel',
-  cancelled_no_pay: 'No charge', cancelled_teacher: 'Teacher cancelled', makeup: 'Makeup lesson',
-};
 
 export default function ReportsPage() {
   // Dropdown / PDF options — cached, so they populate instantly on revisit.
@@ -203,7 +198,7 @@ export default function ReportsPage() {
                 {attendance.byStatus.map(row => (
                   <div key={row.status} className="flex items-center justify-between">
                     <span className="text-xs capitalize px-2 py-0.5 rounded-full bg-[var(--surf)]" style={{ color: 'var(--txt3)' }}>
-                      {STATUS_LABELS[row.status] ?? row.status.replace(/_/g, ' ')}
+                      {lessonStatusLabel(row.status)}
                     </span>
                     <span className="font-bold" style={{ color: 'var(--txt)' }}>{row.count}</span>
                   </div>
