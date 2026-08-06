@@ -1036,6 +1036,11 @@ export default function CalendarPage() {
   const [view, setView] = useState<'week' | 'day' | 'month'>('week');
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
+  // Month view renders all 6 weeks and lets the browser scroll — with today
+  // late in the month that means landing on the top row and scrolling down
+  // every single time. Jump straight to today's row (still scrollable up to
+  // see earlier weeks) whenever month view starts showing the current month.
+  const todayCellRef = useRef<HTMLButtonElement>(null);
   const [anchorDate, setAnchorDate] = useState(() => new Date());
   const [showAdd, setShowAdd] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
@@ -1065,6 +1070,17 @@ export default function CalendarPage() {
   // The visible date range: week/day both page by week; month spans the whole
   // 6-week grid so lessons that fall on the leading/trailing days still show.
   const monthGrid = getMonthGrid(anchorDate);
+  const monthShowsToday =
+    monthGrid.monthStart.getFullYear() === new Date().getFullYear() &&
+    monthGrid.monthStart.getMonth() === new Date().getMonth();
+  // Depend on the month/year, not the monthGrid object (a fresh Date each
+  // render) — otherwise this would re-fire on every lesson refetch and yank
+  // the view back down while someone's mid-scroll reading an earlier week.
+  useEffect(() => {
+    if (view === 'month' && monthShowsToday) {
+      todayCellRef.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [view, monthShowsToday]);
   const lessonsQuery = (() => {
     const p = new URLSearchParams();
     if (view === 'month') {
@@ -1598,6 +1614,7 @@ export default function CalendarPage() {
               return (
                 <button
                   key={i}
+                  ref={isToday ? todayCellRef : undefined}
                   onClick={() => { setAnchorDate(d); setView('day'); }}
                   className="text-left border-r border-b border-[var(--bd)] last:border-r-0 p-1.5 align-top transition-colors hover:bg-[var(--sage-lt)]/20"
                   style={{ minHeight: 108, background: inMonth ? '#fff' : 'var(--surf)' }}
