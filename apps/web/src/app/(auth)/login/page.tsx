@@ -111,10 +111,16 @@ export default function LoginPage() {
                 placeholder="Your password"
                 className="ui-input pr-10"
               />
+              {/* Reveal toggle. Must carry an accessible name (a screen reader
+                  otherwise announces a nameless "button") and stay in the keyboard
+                  tab order — a keyboard-only user needs to reach it to check the
+                  password they typed. aria-pressed exposes the on/off state. */}
               <button type="button" onClick={() => setShowPw(v => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 transition-colors"
-                style={{ color: 'var(--txt4)' }}
-                tabIndex={-1}>
+                aria-label={showPw ? 'Hide password' : 'Show password'}
+                aria-pressed={showPw}
+                title={showPw ? 'Hide password' : 'Show password'}
+                className="absolute right-3 top-1/2 -translate-y-1/2 transition-colors hover:text-[var(--txt2)]"
+                style={{ color: 'var(--txt4)' }}>
                 {showPw ? <EyeOff size={17} /> : <Eye size={17} />}
               </button>
             </div>
