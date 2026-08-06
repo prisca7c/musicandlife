@@ -6,6 +6,7 @@ import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Modal } from '@/components/modal';
 import { linkify } from '@/lib/linkify';
+import { fmtDate } from '@/lib/datetime';
 import { Megaphone } from 'lucide-react';
 
 interface NewsPost {
@@ -102,7 +103,7 @@ export default function NewsPage() {
             <div className="flex items-start justify-between gap-3 mb-2">
               <h3 className="font-bold" style={{ color: 'var(--txt)' }}>{p.title}</h3>
               <span className="text-xs shrink-0" style={{ color: 'var(--txt4)' }}>
-                {new Date(p.publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                {fmtDate(p.publishedAt)}
               </span>
             </div>
             <p className="text-sm whitespace-pre-wrap mb-3" style={{ color: 'var(--txt3)' }}>{linkify(p.body)}</p>

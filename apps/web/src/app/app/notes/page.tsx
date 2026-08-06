@@ -9,6 +9,7 @@ import { SearchableSelect } from '@/components/searchable-select';
 import { linkify } from '@/lib/linkify';
 import { uploadFile } from '@/lib/upload';
 import { useRole } from '@/lib/use-role';
+import { fmtDate } from '@/lib/datetime';
 import { Lock, Users, Paperclip, X as XIcon, FileText, Download, Check } from 'lucide-react';
 
 interface Student { id: string; firstName: string; lastName: string; }
@@ -193,7 +194,7 @@ export default function NotesPage() {
                             {a.error ? <span className="text-[var(--coral)] shrink-0">{a.error}</span>
                               : !a.fileId ? <span className="text-[var(--txt4)] shrink-0">Uploading…</span>
                               : <Check size={13} className="text-[var(--sage-dk)] shrink-0" />}
-                            <button type="button" onClick={() => removeAttachment(a.localId)} className="shrink-0 hover:text-[var(--coral)]">
+                            <button type="button" onClick={() => removeAttachment(a.localId)} aria-label={`Remove ${a.name}`} className="shrink-0 hover:text-[var(--coral)]">
                               <XIcon size={13} />
                             </button>
                           </div>
@@ -258,7 +259,7 @@ export default function NotesPage() {
                                 {n.authorName ?? n.author?.email?.split('@')[0] ?? 'Studio'}
                               </span>
                               <span className="text-xs" style={{ color: 'var(--txt4)' }}>
-                                {new Date(n.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                {fmtDate(n.createdAt)}
                               </span>
                             </div>
                             <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--txt)' }}>{linkify(n.body)}</p>
