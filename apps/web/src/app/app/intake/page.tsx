@@ -48,6 +48,10 @@ function RegistrationDetailModal({ reg, open, onClose, onDecision }: {
   }
 
   async function deny() {
+    // A denied registration can't be re-approved — the family would have to
+    // resubmit from scratch — so this deserves the same confirm as the other
+    // one-way decisions in this codebase.
+    if (!window.confirm(`Deny ${p.studentFirstName} ${p.studentLastName}'s registration? This can't be undone — the family would need to submit a new registration.`)) return;
     setActioning(true); setError('');
     try {
       await apiFetch(`/registrations/${reg!.id}/deny`, { method: 'POST', token: tok(), body: JSON.stringify({ reason: denyReason }) });

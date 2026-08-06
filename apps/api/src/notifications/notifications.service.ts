@@ -6,6 +6,12 @@ import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
 import { brandedEmail, loginDetailsBlock, BRAND } from '../email/branding';
 
+// ctx.subject is free text a staff member typed (broadcast compose box);
+// it's used verbatim as the literal email Subject header (safe — mail
+// clients don't render HTML there) but also dropped into the HTML heading
+// below, which does render raw markup. Escape only for the latter.
+const escapeHtml = (s: string) => s.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!));
+
 export type TriggerEvent =
   | 'registration.received'
   | 'registration.submitted'
@@ -158,7 +164,7 @@ export const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: strin
     subject: ctx.subject ?? "What's on at Music & Life",
     html: brandedEmail({
       previewText: 'News and upcoming events from Music & Life.',
-      heading: ctx.subject ?? "What's on at Music & Life",
+      heading: ctx.subject ? escapeHtml(ctx.subject) : "What's on at Music & Life",
       bodyHtml: ctx.body,
       cta: { label: 'Visit our website', url: BRAND.website },
       footnote: "You're receiving this because you're part of the Music & Life community.",

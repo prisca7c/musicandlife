@@ -373,8 +373,20 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
     const existing = detail.enrollments.find(
       en => en.instrument === instrument && en.lessonType === lessonType && en.status !== 'withdrawn'
         && (lessonType !== 'group' || (en.groupName ?? '') === groupName.trim()),
-    )?.id;
-    if (existing) return existing;
+    );
+    if (existing) {
+      // A matching enrollment can predate this booking and carry a different (or
+      // no) teacher. Without reconciling it, this dialog's teacher choice is
+      // cosmetic — recurring materialization reads enrollment.teacherId, not
+      // what's shown here, so "repeat weekly" would silently book the OLD
+      // teacher's series instead of the one just picked.
+      if (teacherId && (existing.teacherId ?? '') !== teacherId) {
+        await apiFetch(`/enrollments/${existing.id}`, {
+          method: 'PATCH', token: t, body: JSON.stringify({ teacherId }),
+        });
+      }
+      return existing.id;
+    }
     const created = await apiFetch<{ id: string }>(`/students/${studentId}/enrollments`, {
       method: 'POST', token: t, body: JSON.stringify({
         instrument, lessonType, duration: parseInt(duration) || 60,
