@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { useMe } from '@/lib/use-me';
-import { fmtTime, fmtDate } from '@/lib/datetime';
+import { fmtTime, fmtDate, studioDayString } from '@/lib/datetime';
 import { formatMoney, formatBalance } from '@/lib/money';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
@@ -158,7 +158,7 @@ export default function FamilyDashboardPage() {
   // stays with the parent too.
   const isStudent = data.viewer === 'student';
   const isToday = nextLesson
-    ? new Date(nextLesson.startsAt).toDateString() === new Date().toDateString()
+    ? studioDayString(nextLesson.startsAt) === studioDayString(new Date())
     : false;
 
   return (
@@ -537,31 +537,36 @@ export default function FamilyDashboardPage() {
                 {reschedErr}
               </div>
             )}
-            {([0, 1, 2] as const).map((i) => (
-              <div key={i}>
-                <label className="ui-label">
-                  {i === 0 ? '1st choice' : i === 1 ? '2nd choice' : '3rd choice'}
-                  {i === 0 ? <span style={{ color: 'var(--coral)' }}> *</span> : <span className="font-normal text-[11px]" style={{ color: 'var(--txt4)' }}> (optional)</span>}
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="date"
-                    value={reschedDates[i]}
-                    min={new Date().toISOString().split('T')[0]}
-                    onChange={(e) => setReschedDates((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
-                    className="ui-input flex-1"
-                  />
-                  <select
-                    value={reschedTimes[i]}
-                    onChange={(e) => setReschedTimes((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
-                    className="ui-input w-32 shrink-0"
-                  >
-                    <option value="">Time…</option>
-                    {RESCHED_TIME_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
+            {([0, 1, 2] as const).map((i) => {
+              const ordinal = i === 0 ? '1st choice' : i === 1 ? '2nd choice' : '3rd choice';
+              return (
+                <div key={i}>
+                  <label htmlFor={`resched-date-${i}`} className="ui-label">
+                    {ordinal}
+                    {i === 0 ? <span style={{ color: 'var(--coral)' }}> *</span> : <span className="font-normal text-[11px]" style={{ color: 'var(--txt4)' }}> (optional)</span>}
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      id={`resched-date-${i}`}
+                      type="date"
+                      value={reschedDates[i]}
+                      min={studioDayString(new Date())}
+                      onChange={(e) => setReschedDates((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
+                      className="ui-input flex-1"
+                    />
+                    <select
+                      aria-label={`${ordinal} time`}
+                      value={reschedTimes[i]}
+                      onChange={(e) => setReschedTimes((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
+                      className="ui-input w-32 shrink-0"
+                    >
+                      <option value="">Time…</option>
+                      {RESCHED_TIME_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             <div className="flex gap-3 pt-1">
               <button onClick={submitReschedule} disabled={reschedSaving} className="ui-btn-primary">
                 {reschedSaving ? 'Sending…' : 'Send request'}
