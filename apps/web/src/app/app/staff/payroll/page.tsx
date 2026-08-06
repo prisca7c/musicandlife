@@ -311,6 +311,9 @@ export default function PayrollPage() {
   const load = () => { mutateRuns(); mutateExpenses(); };
 
   async function approveRun(id: string) {
+    const run = runs.find(r => r.id === id);
+    const who = run?.staff ? `${run.staff.firstName} ${run.staff.lastName}` : 'this run';
+    if (!confirm(`Approve ${who}'s payroll run${run ? ` (${formatMoney(run.gross)})` : ''}? This locks the figures in — there's no way to un-approve it from here.`)) return;
     setActioning(id);
     try { await apiFetch(`/staff/payroll/${id}/approve`, { method: 'POST', token: tok() }); load(); }
     catch (e) { console.error(e); } finally { setActioning(null); }
@@ -324,12 +327,15 @@ export default function PayrollPage() {
   }
 
   async function approveExpense(id: string) {
+    const exp = expenses.find(e => e.id === id);
+    const who = exp?.staff ? `${exp.staff.firstName} ${exp.staff.lastName}` : 'this expense';
+    if (!confirm(`Approve ${who}'s expense${exp ? ` (${formatMoney(exp.amount)})` : ''}? There's no way to un-approve it from here.`)) return;
     setActioning(id);
     try { await apiFetch(`/expenses/${id}/approve`, { method: 'POST', token: tok() }); load(); }
     catch (e) { console.error(e); } finally { setActioning(null); }
   }
 
-  const STATUS_COLORS: Record<string, string> = { draft:'default', approved:'trial', paid:'active', pending:'default', rejected:'withdrawn' };
+  const STATUS_COLORS: Record<string, string> = { draft:'draft', approved:'approved', paid:'paid', pending:'pending', rejected:'denied' };
 
   return (
     <div>
