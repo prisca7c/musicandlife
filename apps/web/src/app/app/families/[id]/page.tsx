@@ -11,6 +11,7 @@ import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { BackButton } from '@/components/back-button';
 import { InvoicingSettingsFields, readInvoicingSettingsForm } from '@/components/invoicing-settings-fields';
+import { invoiceStatusLabel, invoiceStatusColor } from '@/lib/invoice-status';
 
 interface FamilyDetail {
   id: string; name: string; contactName: string | null; address: string | null;
@@ -270,15 +271,6 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
 }
 
 interface FamilyInvoice { id: string; number: string; status: string; total: number; issuedOn: string; dueDate: string; }
-
-const INVOICE_STATUS_COLORS: Record<string, string> = { draft: 'default', sent: 'trial', paid: 'active', void: 'withdrawn' };
-
-// Mirror the billing list: "sent" is internal jargon, and a negative total is a
-// credit note regardless of workflow status. Keep this in sync with billing/page.tsx.
-function invoiceStatusLabel(i: { status: string; total: number }): string {
-  if (i.total < 0) return 'Credit';
-  return { draft: 'Draft', sent: 'Due', paid: 'Paid', void: 'Void' }[i.status] ?? i.status;
-}
 
 // Absorb a duplicate family into this one. The picked family is the SOURCE
 // (deleted); the family on the page is the target that survives.
@@ -554,7 +546,7 @@ export default function FamilyDetailPage() {
                         ? <span title="Credit note — money owed to the family, not by them">{formatMoney(Math.abs(i.total))} credit</span>
                         : formatMoney(i.total)}
                     </td>
-                    <td><Badge variant={i.total < 0 ? 'default' : INVOICE_STATUS_COLORS[i.status]}>{invoiceStatusLabel(i)}</Badge></td>
+                    <td><Badge variant={invoiceStatusColor(i)}>{invoiceStatusLabel(i)}</Badge></td>
                   </tr>
                 ))}
               </tbody>
