@@ -41,31 +41,62 @@ export class SenderAdapter extends EmailPort {
     const toList = Array.isArray(opts.to) ? opts.to : [opts.to];
     const from = parseAddress(opts.from ?? this.defaultFrom);
 
-    await this.breaker.call(async () => {
-      for (const addr of toList) {
-        const res = await fetch(`${this.baseUrl}/message/send`, {
-          method: 'POST',
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.token}`,
-          },
-          body: JSON.stringify({
-            from,
-            to: parseAddress(addr),
-            subject: opts.subject,
-            html: opts.html,
-          }),
-        });
+    for (const addr of toList) {
+      await this.sendOne(from, addr, opts);
+    }
+  }
 
-        if (!res.ok) {
-          const body = await res.text().catch(() => '');
-          this.logger.error(`Failed to send email to ${addr}: ${res.status} ${body}`);
-          throw new Error(`Email delivery failed: ${res.status} ${body}`);
-        }
-        this.logger.log(`Email sent to ${addr}: "${opts.subject}"`);
+  /**
+   * Send to one address, distinguishing a bad *recipient* from a bad *service*.
+   *
+   * This matters for bulk sends. The breaker opens after 3 consecutive
+   * failures, and a broadcast to a few hundred families is a near-certainty to
+   * contain a handful of dead or mistyped addresses. If a rejected recipient
+   * counted as a breaker failure, three bad addresses in a row would open the
+   * circuit and every remaining family in that run would be dropped in
+   * milliseconds — reported as "failed" with nothing actually wrong. So only a
+   * 429 or 5xx (the provider genuinely struggling) counts toward the breaker;
+   * any other 4xx is this message's problem and is raised without tripping it.
+   */
+  private async sendOne(
+    from: { email: string; name?: string },
+    addr: string,
+    opts: SendEmailOptions,
+  ): Promise<void> {
+    type Outcome = { ok: true } | { ok: false; detail: string };
+
+    const outcome = await this.breaker.call(async (): Promise<Outcome> => {
+      const res = await fetch(`${this.baseUrl}/message/send`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.token}`,
+        },
+        body: JSON.stringify({
+          from,
+          to: parseAddress(addr),
+          subject: opts.subject,
+          html: opts.html,
+        }),
+      });
+
+      if (res.ok) return { ok: true };
+
+      const body = await res.text().catch(() => '');
+      // The provider is failing, not this recipient — let it count.
+      if (res.status === 429 || res.status >= 500) {
+        this.logger.error(`Failed to send email to ${addr}: ${res.status} ${body}`);
+        throw new Error(`Email delivery failed: ${res.status} ${body}`);
       }
+      return { ok: false, detail: `${res.status} ${body}` };
     });
+
+    if (!outcome.ok) {
+      this.logger.error(`Failed to send email to ${addr}: ${outcome.detail}`);
+      throw new Error(`Email delivery failed: ${outcome.detail}`);
+    }
+    this.logger.log(`Email sent to ${addr}: "${opts.subject}"`);
   }
 
   /** Map an audience to the configured Sender group id(s), if any. */
