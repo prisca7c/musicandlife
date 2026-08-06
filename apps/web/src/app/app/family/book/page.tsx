@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
-import { fmtTime, studioDayString } from '@/lib/datetime';
+import { fmtTime, fmtDate, studioDayString } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { SearchableSelect } from '@/components/searchable-select';
@@ -247,6 +247,7 @@ export default function BookLessonPage() {
   async function book() {
     const first = picks[0];
     if (!first) return;
+    if (recurring && !confirm(`Set up a weekly lesson with ${first.teacherName} every ${fmtDate(first.startsAt, { weekday: 'long' })} at ${fmtTime(first.startsAt)}${recurringEnd ? ` until ${recurringEnd}` : ', with no end date'}? This books an ongoing series, not a one-off lesson.`)) return;
     setBooking(true);
     try {
       await apiFetch('/family/lessons', {
