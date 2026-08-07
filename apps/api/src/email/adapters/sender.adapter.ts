@@ -66,6 +66,12 @@ export class SenderAdapter extends EmailPort {
     type Outcome = { ok: true } | { ok: false; detail: string };
 
     const outcome = await this.breaker.call(async (): Promise<Outcome> => {
+      // Without a timeout, a provider that accepts the connection but never
+      // responds (distinct from a fast 429/5xx) hangs this fetch forever — the
+      // breaker's call() never resolves either, so it never counts as a
+      // failure and never trips. send() awaits recipients sequentially, so
+      // one hung request stalls every remaining recipient in the broadcast
+      // indefinitely instead of failing fast and moving on.
       const res = await fetch(`${this.baseUrl}/message/send`, {
         method: 'POST',
         headers: {
@@ -79,6 +85,7 @@ export class SenderAdapter extends EmailPort {
           subject: opts.subject,
           html: opts.html,
         }),
+        signal: AbortSignal.timeout(20_000),
       });
 
       if (res.ok) return { ok: true };

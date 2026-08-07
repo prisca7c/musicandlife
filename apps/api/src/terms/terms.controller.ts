@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, UseGuards, BadRequestException, NotFoundException } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -47,6 +47,11 @@ export class TermsController {
       .set({ status: body.status, updatedAt: new Date() })
       .where(and(eq(terms.id, id), eq(terms.organizationId, user.orgId)))
       .returning();
-    return updated!;
+    // A term id from another org (or a bogus one) matched nothing, but the
+    // org-scoped where clause made that indistinguishable from success — the
+    // update silently no-opped and still returned 200 with an empty body,
+    // unlike leads.update/organizations.update which both correctly 404.
+    if (!updated) throw new NotFoundException('Term not found');
+    return updated;
   }
 }
