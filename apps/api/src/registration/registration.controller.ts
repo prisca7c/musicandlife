@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/co
 import { Throttle } from '@nestjs/throttler';
 import { RegistrationService } from './registration.service';
 import { SubmitRegistrationDto } from './dto/submit-registration.dto';
+import { DenyRegistrationDto } from './dto/deny-registration.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -81,7 +82,7 @@ export class RegistrationController {
   deny(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
-    @Body() body: { reason?: string },
+    @Body() body: DenyRegistrationDto,
   ) {
     return this.registration.deny(user.orgId, id, user.userId, body.reason);
   }

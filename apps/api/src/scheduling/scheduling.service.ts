@@ -93,10 +93,23 @@ export class SchedulingService {
   // keyed on the teacher before checking + writing. This is robust against
   // overlapping (not just identical) slots and needs no schema change / clean
   // data — unlike a unique index.
-  private async lockResources(tx: Executor, orgId: string, teacherId?: string | null) {
-    if (!teacherId) return;
-    const key = `lesson:${orgId}:teacher:${teacherId}`;
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+  //
+  // Also lock on the STUDENT: checkConflicts independently checks the student
+  // isn't double-booked, but that check used to run under only the teacher's
+  // lock. Two concurrent bookings for the same student with two DIFFERENT
+  // teachers took two different teacher locks and could both pass the
+  // student-clash check before either committed — the student ends up booked
+  // with both teachers at once. Locking both ids (in a fixed order to avoid a
+  // teacher-lock-then-student-lock vs student-lock-then-teacher-lock deadlock)
+  // closes that gap the same way the teacher lock closes the teacher one.
+  private async lockResources(tx: Executor, orgId: string, teacherId?: string | null, studentId?: string | null) {
+    const keys = [
+      teacherId ? `lesson:${orgId}:teacher:${teacherId}` : null,
+      studentId ? `lesson:${orgId}:student:${studentId}` : null,
+    ].filter((k): k is string => k !== null).sort();
+    for (const key of keys) {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+    }
   }
 
   private async resolveStaffId(orgId: string, userId: string): Promise<string | null> {
@@ -229,7 +242,7 @@ export class SchedulingService {
       const tz = await this.getOrgTimezone(tx, orgId);
       // Interpret a naive wall-clock ("...T16:00:00") as the studio's local time.
       const startsAt = parseZonedDateTime(dto.startsAt, tz);
-      await this.lockResources(tx, orgId, dto.teacherId);
+      await this.lockResources(tx, orgId, dto.teacherId, dto.studentId);
       await this.checkConflicts(tx, orgId, startsAt.toISOString(), dto.duration ?? 60, dto.teacherId, undefined, dto.studentId);
 
       const [lesson] = await tx
@@ -406,7 +419,7 @@ export class SchedulingService {
       const startsAt = dto.startsAt ? parseZonedDateTime(dto.startsAt, tz) : undefined;
       if (dto.startsAt || dto.teacherId) {
         const teacherId = dto.teacherId ?? existing.teacherId ?? undefined;
-        await this.lockResources(tx, orgId, teacherId);
+        await this.lockResources(tx, orgId, teacherId, existing.studentId);
         await this.checkConflicts(
           tx,
           orgId,
@@ -473,7 +486,7 @@ export class SchedulingService {
 
     return this.db.db.transaction(async (tx) => {
       const teacherId = lesson.teacherId ?? undefined;
-      await this.lockResources(tx, orgId, teacherId);
+      await this.lockResources(tx, orgId, teacherId, lesson.studentId);
       await this.checkConflicts(tx, orgId, lesson.startsAt.toISOString(), lesson.duration, teacherId, id, lesson.studentId ?? undefined);
 
       const [updated] = await tx.update(lessons)
@@ -501,7 +514,7 @@ export class SchedulingService {
       // Interpret a naive wall-clock as studio-local; a zoned ISO passes through.
       const startsAt = parseZonedDateTime(newStartsAt, tz);
       const startsAtISO = startsAt.toISOString();
-      await this.lockResources(tx, orgId, teacherId);
+      await this.lockResources(tx, orgId, teacherId, lesson.studentId);
       await this.checkConflicts(tx, orgId, startsAtISO, lesson.duration, teacherId, id, lesson.studentId ?? undefined);
 
       // Reasonable-for-the-teacher check: the new slot must sit inside the

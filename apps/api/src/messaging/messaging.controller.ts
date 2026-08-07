@@ -13,21 +13,27 @@ import type { RequestUser } from '@music-life/types';
 export class MessagingController {
   constructor(private readonly messaging: MessagingService) {}
 
+  // 'student' is the correct floor, not 'guardian' — ROLE_LEVEL puts student (10)
+  // below guardian (20), so @Roles('guardian') silently 403'd a student's own
+  // JWT on every route here even though the service layer (teacherFamilyUserIds,
+  // NON_STAFF_ROLES, participant checks) already treats guardian/student
+  // identically and a teacher can add a student as a thread participant. Matches
+  // the floor used throughout family-portal.controller.ts.
   @Get()
-  @Roles('guardian')
+  @Roles('student')
   getThreads(@CurrentUser() user: RequestUser) {
     return this.messaging.getThreads(user.orgId, user.userId);
   }
 
   @Post()
-  @Roles('guardian')
+  @Roles('student')
   createThread(@CurrentUser() user: RequestUser, @Body() dto: CreateThreadDto) {
     return this.messaging.createThread(user.orgId, user.userId, user.role, dto);
   }
 
   // Declared before :id so "recipients" isn't captured as a thread id.
   @Get('recipients')
-  @Roles('guardian')
+  @Roles('student')
   getRecipients(@CurrentUser() user: RequestUser) {
     return this.messaging.getRecipients(user.orgId, user.userId, user.role);
   }
@@ -47,19 +53,19 @@ export class MessagingController {
   }
 
   @Get('unread-count')
-  @Roles('guardian')
+  @Roles('student')
   getUnreadCount(@CurrentUser() user: RequestUser) {
     return this.messaging.getUnreadCount(user.orgId, user.userId);
   }
 
   @Get(':id')
-  @Roles('guardian')
+  @Roles('student')
   getThread(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.messaging.getThread(user.orgId, id, user.userId);
   }
 
   @Post(':id/messages')
-  @Roles('guardian')
+  @Roles('student')
   sendMessage(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
@@ -73,7 +79,7 @@ export class MessagingController {
   // — a parent must be able to open a video their teacher sent without owning
   // the file. The thread membership check is the authorisation.
   @Get(':id/attachments/:fileId')
-  @Roles('guardian')
+  @Roles('student')
   signAttachment(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,

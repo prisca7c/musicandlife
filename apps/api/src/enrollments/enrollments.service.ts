@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { eq, and, gte } from 'drizzle-orm';
 import { enrollments, students, staffMembers, terms, lessons } from '@music-life/db';
 import { DbService } from '../db/db.service';
@@ -16,9 +16,18 @@ export class EnrollmentsService {
     if (teacherId) {
       const teacher = await this.db.db.query.staffMembers.findFirst({
         where: and(eq(staffMembers.id, teacherId), eq(staffMembers.organizationId, orgId)),
-        columns: { id: true },
+        columns: { id: true, status: true },
       });
       if (!teacher) throw new NotFoundException('Teacher not found');
+      // Booking (#193), direct recurring materialization, and recurrence
+      // generation (#172) all already refuse an inactive teacher; enrollment
+      // create/update was the one write path still missing the check — a
+      // receptionist could point a brand-new (or re-pointed) enrolment at a
+      // deactivated teacher, who'd then start accumulating a real, billable
+      // series invisible to the "active staff" payroll batch.
+      if (teacher.status !== 'active') {
+        throw new BadRequestException('This teacher is not active. Choose an active teacher, or reactivate them first.');
+      }
     }
     if (termId) {
       const term = await this.db.db.query.terms.findFirst({
@@ -89,6 +98,22 @@ export class EnrollmentsService {
         organizationId: orgId,
       })
       .returning();
+
+    // A withdrawn student's records are correctly readable and re-enrollable
+    // (the sibling comment above says so — re-enrolling is fine), but nothing
+    // brought students.status back in step: the new enrolment went live and
+    // billable while the student stayed flagged 'withdrawn' — invisible in
+    // "active students" filters and the status-breakdown report even though
+    // they now have a real, active enrolment. Mirrors #171 in reverse: that
+    // fix cascades a student withdrawal DOWN to enrolments; this cascades a
+    // fresh enrolment back UP to the student when it undoes a prior withdrawal.
+    const effectiveStatus = dto.status ?? 'active';
+    if (student.status === 'withdrawn' && effectiveStatus !== 'withdrawn') {
+      await this.db.db.update(students)
+        .set({ status: effectiveStatus, updatedAt: new Date() })
+        .where(eq(students.id, studentId));
+    }
+
     return enrollment!;
   }
 

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { eq, and, sql } from 'drizzle-orm';
 import { attendance, lessons, enrollments, families, ledgerEntries, lessonCredits, staffMembers } from '@music-life/db';
 import type { Db } from '@music-life/db';
@@ -139,6 +139,27 @@ export class AttendanceService {
     if (actor?.role === 'teacher') {
       const staffId = await this.resolveStaffId(orgId, actor.userId);
       if (!staffId || lesson.teacherId !== staffId) throw new ForbiddenException('Not your lesson');
+    }
+
+    // actualStartedAt/actualEndedAt feed payroll directly (computeRunItems pays
+    // the elapsed minutes between them when both are set) and family billing
+    // never touches them, so nothing else validates them. A teacher marking
+    // their OWN lesson can set any pair of timestamps; with no plausibility
+    // check a 30-minute lesson could be recorded as 5 hours and paid as such.
+    // Bound it to something a real lesson could plausibly run: never negative,
+    // and capped at double the scheduled duration plus an hour's buffer for a
+    // genuinely long session.
+    if (dto.actualStartedAt && dto.actualEndedAt) {
+      const elapsedMinutes = (new Date(dto.actualEndedAt).getTime() - new Date(dto.actualStartedAt).getTime()) / 60000;
+      if (elapsedMinutes <= 0) {
+        throw new BadRequestException('Actual end time must be after the actual start time.');
+      }
+      const maxPlausibleMinutes = lesson.duration * 2 + 60;
+      if (elapsedMinutes > maxPlausibleMinutes) {
+        throw new BadRequestException(
+          `Actual duration (${Math.round(elapsedMinutes)} min) is implausible for a ${lesson.duration}-min lesson. Double-check the times.`,
+        );
+      }
     }
 
     const existing = await this.db.db.query.attendance.findFirst({
