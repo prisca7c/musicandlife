@@ -106,12 +106,22 @@ export class AttendanceService {
   // marks them present (across all orgs). The grace window leaves teachers time to
   // instead record an absence/cancellation. Idempotent via markManyPresent's guard.
   async autoCompleteOverdue(graceHours: number) {
+    // Excludes a lesson whose teacher has since gone inactive. Deactivating a
+    // teacher deliberately leaves their already-scheduled lessons untouched
+    // (see the comment in scheduling.service.ts's inactive-teacher guards) —
+    // it only stops NEW ones being generated — so this worker used to still
+    // pick those lessons up, auto-mark them present, and trigger real billing
+    // + payroll accrual for a teacher no longer employed. Leaving the lesson
+    // 'scheduled' forever until staff manually reassign/cancel it is the
+    // correct outcome here, not silently charging for it.
     const rows = (await this.db.db.execute(sql`
       select l.id, l.organization_id as "orgId"
       from lessons l
+      left join staff_members sm on sm.id = l.teacher_id
       where l.status = 'scheduled'
         and (l.starts_at + make_interval(mins => l.duration)) < now() - make_interval(hours => ${graceHours})
         and not exists (select 1 from attendance a where a.lesson_id = l.id)
+        and (l.teacher_id is null or sm.status = 'active')
     `)) as unknown as { id: string; orgId: string }[];
 
     const byOrg = new Map<string, string[]>();

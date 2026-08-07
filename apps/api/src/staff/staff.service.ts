@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
 import {
   staffMembers, staffPrivileges, teacherAssignments,
@@ -172,15 +172,28 @@ export class StaffService {
   }
 
   async assignStudent(orgId: string, staffId: string, studentId: string, role: 'primary' | 'secondary' = 'primary') {
-    await this.findOne(orgId, staffId);
+    const staff = await this.findOne(orgId, staffId);
+    // findOne() is deliberately status-agnostic (admins need to view inactive
+    // staff too), so it doesn't guard this write path on its own. Assigning a
+    // student to an inactive teacher — or a withdrawn student to any teacher —
+    // is the same class of gap enrollments.create already closed for
+    // enrolments (assertTeacherAndTermInOrg): the resulting link resurfaces in
+    // teacher-scoped student views (getAssignedStudentIds) with no lesson/
+    // billing guard rail anywhere else expecting it to exist.
+    if (staff.status !== 'active') {
+      throw new BadRequestException('This teacher is not active. Choose an active teacher, or reactivate them first.');
+    }
     // Guard the caller-supplied studentId the same way: an id from another studio
     // (or a bogus one) would otherwise 500 on the FK violation or, if valid,
     // cross-link another org's student to this teacher.
     const student = await this.db.db.query.students.findFirst({
       where: and(eq(students.id, studentId), eq(students.organizationId, orgId)),
-      columns: { id: true },
+      columns: { id: true, status: true },
     });
     if (!student) throw new NotFoundException('Student not found');
+    if (student.status === 'withdrawn') {
+      throw new BadRequestException('This student has been withdrawn and can’t be assigned a teacher.');
+    }
     await this.db.db
       .insert(teacherAssignments)
       .values({ organizationId: orgId, staffId, studentId, role })
