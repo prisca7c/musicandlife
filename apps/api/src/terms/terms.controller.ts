@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, UseGuards, BadRequestException } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -27,6 +27,9 @@ export class TermsController {
   @Post()
   @Roles('admin')
   async create(@CurrentUser() user: RequestUser, @Body() dto: CreateTermDto) {
+    if (dto.endsOn <= dto.startsOn) {
+      throw new BadRequestException('End date must be after the start date');
+    }
     const [term] = await this.db.db.insert(terms)
       .values({ ...dto, organizationId: user.orgId })
       .returning();

@@ -268,6 +268,22 @@ export class SchedulingService {
       throw new BadRequestException('This enrollment has no weekly schedule (weekday + time) set');
     }
 
+    // materializeAllRecurring pre-filters inactive teachers before calling this,
+    // but this is also reachable directly (POST /lessons/recurring, e.g. booking
+    // a recurring lesson from the calendar), which had no such guard — letting a
+    // receptionist materialize a real, billable series under a teacher who's
+    // already been deactivated. Same class of bug as #172; enforce it here too
+    // so both callers are covered by one check instead of two that can drift.
+    if (enrollment.teacherId) {
+      const teacher = await this.db.db.query.staffMembers.findFirst({
+        where: eq(staffMembers.id, enrollment.teacherId),
+        columns: { status: true },
+      });
+      if (teacher && teacher.status !== 'active') {
+        throw new BadRequestException('This lesson’s teacher is no longer active, so weekly lessons can’t be scheduled. Reassign the enrollment to an active teacher first.');
+      }
+    }
+
     const tz = await this.getOrgTimezone(this.db.db, orgId);
     // A recurring series can carry a last date — never generate past the end of
     // that studio-local day.
@@ -1428,7 +1444,12 @@ export class SchedulingService {
         ? and(eq(rescheduleRequests.organizationId, orgId), eq(rescheduleRequests.status, status as 'pending' | 'approved' | 'denied'))
         : eq(rescheduleRequests.organizationId, orgId),
       with: {
-        lesson: { with: { student: { columns: { id: true, firstName: true, lastName: true } } } },
+        lesson: {
+          with: {
+            student: { columns: { id: true, firstName: true, lastName: true } },
+            teacher: { columns: { id: true, firstName: true, lastName: true } },
+          },
+        },
         requestedByUser: { columns: { id: true, email: true } },
       },
       orderBy: (r, { desc }) => [desc(r.createdAt)],

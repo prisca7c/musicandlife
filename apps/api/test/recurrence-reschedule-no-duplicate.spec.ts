@@ -30,6 +30,7 @@ function makeService(existing: Lesson[]) {
           }),
         },
         lessons: { findMany: async () => existing },
+        staffMembers: { findFirst: async () => ({ status: 'active' }) },
       },
       // Adopt path: update(lessons).set({ seriesSlotAt }).where(eq(id))
       update: () => ({

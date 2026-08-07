@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEmail, IsBoolean, IsIn, IsDateString, IsInt } from 'class-validator';
+import { IsString, IsOptional, IsEmail, IsBoolean, IsIn, IsDateString, IsInt, Min, Max } from 'class-validator';
 
 export class CreateFamilyDto {
   @IsString()
@@ -39,10 +39,14 @@ export class CreateFamilyDto {
 
   @IsOptional()
   @IsInt()
+  @Min(0)
+  @Max(90)
   invoiceDateOffsetDays?: number;
 
   @IsOptional()
   @IsInt()
+  @Min(0)
+  @Max(90)
   dueDateOffsetDays?: number;
 
   @IsOptional()

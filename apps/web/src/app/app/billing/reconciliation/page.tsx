@@ -236,7 +236,16 @@ export default function ReconciliationPage() {
                   </td>
                   <td className="p-3 text-right whitespace-nowrap">
                     <button
-                      onClick={() => act(`/reconciliation/claims/${c.id}/confirm`)}
+                      onClick={() => {
+                        // Unlike a normal match, this claim has no matching bank line — confirming
+                        // records a real payment purely on staff say-so ("without a matching
+                        // statement line"), so a mis-click here books money that was never verified
+                        // against the actual statement. Every other action of this consequence in
+                        // the app confirms first.
+                        if (window.confirm(`Record a payment of ${money(c.amount)} for ${c.family?.name ?? 'this family'}? No matching bank line was found — only confirm if you've verified this payment actually arrived.`)) {
+                          act(`/reconciliation/claims/${c.id}/confirm`);
+                        }
+                      }}
                       className="text-xs font-semibold px-2 py-1 rounded-lg bg-[var(--green)] text-white"
                     >
                       Confirm anyway

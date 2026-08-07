@@ -162,7 +162,7 @@ export class StaffController {
 
   // ─── Availability ──────────────────────────────────────────────────────────
   @Get(':id/availability')
-  @Roles('teacher')
+  @Roles('manager')
   getAvailability(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.staff.getAvailability(user.orgId, id);
   }
