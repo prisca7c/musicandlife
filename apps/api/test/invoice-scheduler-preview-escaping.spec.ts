@@ -29,6 +29,7 @@ function makeWorker(familyName: string) {
         families: { findMany: jest.fn().mockResolvedValue([family]) },
         invoices: { findFirst: jest.fn().mockResolvedValue(undefined) },
         memberships: { findMany: jest.fn().mockResolvedValue([{ user: { email: 'admin@studio.test' } }]) },
+        organizations: { findFirst: jest.fn().mockResolvedValue({ timezone: 'Europe/London' }) },
       },
     },
   };

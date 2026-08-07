@@ -438,6 +438,16 @@ export class BillingService {
 
   async sendInvoice(orgId: string, id: string) {
     const inv = await this.getInvoice(orgId, id);
+    // Only a draft can be issued. Without this, re-sending an already-sent
+    // invoice was a no-op (fine), but re-sending a VOIDED one flipped it back
+    // to 'sent' and, since its status wasn't 'sent' yet, syncManualInvoiceCharge
+    // posted a brand-new charge for an invoice that was supposed to be
+    // cancelled — a stale "Send" click double-billed the family. It also let a
+    // 'paid' invoice be silently downgraded back to 'sent', hiding that it was
+    // settled.
+    if (inv.status !== 'draft') {
+      throw new BadRequestException(`This invoice is already ${inv.status} and cannot be sent again.`);
+    }
     // An invoice with nothing on it is not a bill. Issuing one put a £0.00
     // "Invoice due" in front of a family with no way to act on it, and left
     // staff wondering why the balance never moved. Say so at the point of
@@ -463,7 +473,7 @@ export class BillingService {
       .where(and(eq(invoices.id, id), eq(invoices.organizationId, orgId)))
       .returning();
     // Issuing the invoice is what puts the money on the family's account.
-    if (inv.status !== 'sent') await this.syncManualInvoiceCharge(orgId, id);
+    await this.syncManualInvoiceCharge(orgId, id);
     return updated!;
   }
 
@@ -584,7 +594,17 @@ export class BillingService {
   }
 
   async addLineItem(orgId: string, invoiceId: string, description: string, amount: number, lessonId?: string) {
-    await this.getInvoice(orgId, invoiceId);
+    const target = await this.getInvoice(orgId, invoiceId);
+    // A line added to a 'paid' invoice bumped invoices.total without ever
+    // charging the family the extra amount (syncManualInvoiceCharge only ran
+    // for 'sent'), so the invoice showed a bigger total while still reading
+    // "Paid" — the shortfall was never posted anywhere. On a 'void' invoice it
+    // resurrected a total on something that was supposed to be cancelled. Both
+    // are dead ends once the invoice has left 'draft'/'sent'; the line just
+    // needs a new invoice instead.
+    if (target.status === 'paid' || target.status === 'void') {
+      throw new BadRequestException(`This invoice is ${target.status} and can no longer be edited.`);
+    }
     // An optional lessonId is a caller-supplied FK: a bogus id 500s on the
     // constraint and a foreign-org id would bill against another studio's lesson.
     if (lessonId) {

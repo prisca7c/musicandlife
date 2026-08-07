@@ -6,6 +6,21 @@ import { DbService } from '../db/db.service';
 import { BillingService } from './billing.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { withAdvisoryLock } from '../common/cron-lock';
+import { getOrgTimezone } from '../common/timezone';
+
+// "Today" as a calendar date IN the studio's timezone, not the server's. The
+// cron fires once a day at 6am server-time (UTC on Render); for a studio
+// whose zone is materially ahead of or behind UTC, that instant can already
+// be a different local calendar day, shifting nextInvoiceDate's day-of-month
+// comparison by one and firing an auto-invoice a day early or late.
+function orgToday(now: Date, timeZone: string): Date {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now);
+  const m: Record<string, string> = {};
+  for (const p of parts) if (p.type !== 'literal') m[p.type] = p.value;
+  return new Date(Number(m.year), Number(m.month) - 1, Number(m.day));
+}
 
 const PREVIEW_DAYS_AHEAD = 3;
 
@@ -69,9 +84,11 @@ export class InvoiceSchedulerWorker {
     const previewByOrg = new Map<string, typeof autoInvoiceFamilies>();
 
     for (const family of autoInvoiceFamilies) {
+      const tz = await getOrgTimezone(this.db.db, family.organizationId);
+      const today = orgToday(now, tz);
       const anchorDay = family.billingStartDate ? new Date(family.billingStartDate).getDate() : 1;
-      const invoiceDate = nextInvoiceDate(anchorDay, family.invoiceDateOffsetDays, now);
-      const daysUntil = daysBetween(invoiceDate, now);
+      const invoiceDate = nextInvoiceDate(anchorDay, family.invoiceDateOffsetDays, today);
+      const daysUntil = daysBetween(invoiceDate, today);
 
       if (daysUntil === 0) {
         try {
