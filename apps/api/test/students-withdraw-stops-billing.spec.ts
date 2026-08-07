@@ -9,9 +9,9 @@ import { StudentsService } from '../src/students/students.service';
 
 type Captured = { table: string; set: Record<string, unknown> };
 
-function makeService() {
+function makeService(opts: { siblingRemains?: boolean } = {}) {
   const captured: Captured[] = [];
-  const found = { id: 'stu-1', organizationId: 'org-1' };
+  const found = { id: 'stu-1', organizationId: 'org-1', familyId: 'fam-1' };
 
   // A tx.update(...).set(...).where(...)[.returning()] chain that records the
   // table it targeted and the values it set.
@@ -22,8 +22,9 @@ function makeService() {
       return {
         set: (set: Record<string, unknown>) => {
           captured.push({ table: name, set });
-          // .where() is awaited directly (enrolments) OR chained to .returning()
-          // (students, lessons). Return a thenable that also carries .returning().
+          // .where() is awaited directly (enrolments/families) OR chained to
+          // .returning() (students, lessons). Return a thenable that also
+          // carries .returning().
           const whereResult = Object.assign(Promise.resolve(rows), {
             returning: () => Promise.resolve(rows),
           });
@@ -31,7 +32,14 @@ function makeService() {
         },
       };
     };
-    return { update };
+    return {
+      update,
+      query: {
+        students: {
+          findFirst: jest.fn().mockResolvedValue(opts.siblingRemains ? { id: 'stu-2' } : undefined),
+        },
+      },
+    };
   };
 
   const db = {
@@ -53,6 +61,7 @@ jest.mock('@music-life/db', () => {
     students: Object.assign(actual.students, { __name: 'students' }),
     enrollments: Object.assign(actual.enrollments, { __name: 'enrollments' }),
     lessons: Object.assign(actual.lessons, { __name: 'lessons' }),
+    families: Object.assign(actual.families, { __name: 'families' }),
   };
 });
 
@@ -71,5 +80,19 @@ describe('StudentsService.remove — withdrawal stops billing', () => {
     // Future scheduled lessons cancelled at no charge.
     expect(lesson?.set).toMatchObject({ status: 'cancelled_no_pay' });
     expect((res as { cancelledLessons: number }).cancelledLessons).toBe(2);
+  });
+
+  it('clears the family calendar-feed token when this was the LAST non-withdrawn student', async () => {
+    const { svc, captured } = makeService({ siblingRemains: false });
+    await svc.remove('org-1', 'stu-1');
+    const family = captured.find(c => c.table === 'families');
+    expect(family?.set).toMatchObject({ calendarToken: null });
+  });
+
+  it('leaves the family calendar-feed token alone when a sibling is still enrolled', async () => {
+    const { svc, captured } = makeService({ siblingRemains: true });
+    await svc.remove('org-1', 'stu-1');
+    const family = captured.find(c => c.table === 'families');
+    expect(family).toBeUndefined();
   });
 });

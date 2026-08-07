@@ -936,15 +936,31 @@ export class BillingService {
           if (!invOwned) throw new NotFoundException('Invoice not found');
         }
 
-        // Guard against duplicate payments on an already-settled invoice. Because
-        // the family row is locked above, concurrent full payments serialise here:
-        // the first commits + marks the invoice paid, and every later one re-reads
-        // it as 'paid' and returns the winner's payment instead of inserting again.
-        // This closes the double-charge race for callers that don't send an
-        // idempotency key, and turns concurrent self-pay double-taps into a clean
-        // idempotent response rather than a unique-constraint 500. Partial payments
-        // (invoice still 'sent') are unaffected and still accumulate normally.
-        if (dto.invoiceId) {
+        // Guard against duplicate payments on an already-settled invoice — but
+        // ONLY for a payment with no independent proof it's a distinct real
+        // transaction (no providerRef). A manual/cash entry with no dedupeKey
+        // can't be told apart from a receptionist's accidental double-click, so
+        // for THOSE it's correct to assume "already recorded" and return the
+        // prior payment instead of inserting again (closes that race since the
+        // locked family row serialises concurrent calls through here).
+        //
+        // A payment WITH a providerRef (Mollie, or any future gateway) is
+        // different: dto.providerRef is independently verified by re-fetching
+        // from the provider (see MollieService.handleWebhook), and it already
+        // passed the fast-path dedupeKey check above — meaning THIS is a
+        // genuinely different, real, distinct transaction, not a retry of the
+        // one that just paid the invoice. Two open tabs / two devices can each
+        // complete a real card charge before either webhook lands; the second
+        // charge is real money the family's card was actually billed. Treating
+        // it as "already paid, discard" here silently dropped that charge with
+        // NO payment row, NO ledger entry, and NO record anywhere that a second
+        // payment ever happened — the money vanished from the app's books while
+        // still sitting captured in Mollie's dashboard. It must still be
+        // recorded (as a credit to the family's balance, same as any
+        // overpayment) even though the invoice itself is already settled; the
+        // status-flip logic further below already no-ops once status is 'paid',
+        // so falling through here does not re-trigger "invoice paid" effects.
+        if (dto.invoiceId && !dto.providerRef) {
           const inv = await tx.query.invoices.findFirst({
             where: and(eq(invoices.id, dto.invoiceId), eq(invoices.organizationId, orgId)),
           });

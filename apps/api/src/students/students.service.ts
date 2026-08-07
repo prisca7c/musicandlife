@@ -182,6 +182,30 @@ export class StudentsService {
         ))
         .returning({ id: lessons.id });
 
+      // families has no status of its own — the ICS calendar feed token
+      // (families.calendarToken) is never invalidated on withdrawal, so a
+      // family's old feed URL, if it had ever leaked (shared with a co-parent,
+      // synced to another calendar app), kept serving lesson history/times
+      // indefinitely with no way to revoke it short of the family noticing and
+      // clicking "regenerate" themselves. When this was the family's LAST
+      // remaining non-withdrawn student, rotate the token now — closing the
+      // access this family's students no longer have any reason to keep open.
+      // A family with siblings still enrolled is untouched: their feed should
+      // keep working.
+      const remaining = await tx.query.students.findFirst({
+        where: and(
+          eq(students.familyId, updated!.familyId),
+          eq(students.organizationId, orgId),
+          ne(students.status, 'withdrawn'),
+        ),
+        columns: { id: true },
+      });
+      if (!remaining) {
+        await tx.update(families)
+          .set({ calendarToken: null, updatedAt: now })
+          .where(and(eq(families.id, updated!.familyId), eq(families.organizationId, orgId)));
+      }
+
       return { ...updated!, cancelledLessons: cancelled.length };
     });
   }
