@@ -23,7 +23,11 @@ export class StudentsService {
   // primary/secondary) and enrollments.teacherId — in practice every student-teacher
   // link today comes from an enrollment, since nothing in the app currently writes to
   // teacherAssignments outside the dedicated staff assign/unassign endpoints.
-  private async getAssignedStudentIds(orgId: string, staffId: string): Promise<string[]> {
+  //
+  // This is the canonical definition of "this teacher's students" — other call sites
+  // (e.g. the dashboard KPI tile) must reuse it rather than re-deriving their own
+  // scoped student-id list, or the two will silently drift apart.
+  async getAssignedStudentIds(orgId: string, staffId: string): Promise<string[]> {
     const [assignments, enrolled] = await Promise.all([
       this.db.db.query.teacherAssignments.findMany({
         where: and(eq(teacherAssignments.organizationId, orgId), eq(teacherAssignments.staffId, staffId)),

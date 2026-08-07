@@ -9,14 +9,23 @@ import { BroadcastService } from '../src/broadcasts/broadcast.service';
 
 function makeService(opts: {
   memberships: { user: { email: string | null } | null }[];
-  families?: { email: string | null }[];
+  families?: { id?: string; email: string | null }[];
+  guardians?: { familyId: string }[];
+  students?: { studentUserId: string | null }[];
+  users?: { email: string | null }[];
 }) {
   const familiesFindMany = jest.fn().mockResolvedValue(opts.families ?? []);
+  const guardiansFindMany = jest.fn().mockResolvedValue(opts.guardians ?? []);
+  const studentsFindMany = jest.fn().mockResolvedValue(opts.students ?? []);
+  const usersFindMany = jest.fn().mockResolvedValue(opts.users ?? []);
   const db = {
     db: {
       query: {
         memberships: { findMany: jest.fn().mockResolvedValue(opts.memberships) },
         families: { findMany: familiesFindMany },
+        guardians: { findMany: guardiansFindMany },
+        students: { findMany: studentsFindMany },
+        users: { findMany: usersFindMany },
       },
     },
   };
@@ -24,7 +33,7 @@ function makeService(opts: {
   const call = (audience: string) =>
     (svc as unknown as { audienceEmails: (o: string, a: string) => Promise<string[]> })
       .audienceEmails('org-1', audience);
-  return { call, familiesFindMany };
+  return { call, familiesFindMany, guardiansFindMany, studentsFindMany, usersFindMany };
 }
 
 describe('BroadcastService.audienceEmails — family contact addresses', () => {
@@ -64,5 +73,31 @@ describe('BroadcastService.audienceEmails — family contact addresses', () => {
     const emails = await call('teachers');
     expect(emails).toEqual(['teach@x.com']);
     expect(familiesFindMany).not.toHaveBeenCalled();
+  });
+
+  // Student-portal parity (an adult student can manage their own account with
+  // no guardian at all) reopened this: a family with neither a guardian login
+  // nor a families.email is only reachable through the student's own login.
+  it('reaches a family with no guardian and no families.email via its student login', async () => {
+    const { call } = makeService({
+      memberships: [], // no guardian logins in the org
+      families: [{ id: 'fam-1', email: null }],
+      guardians: [], // fam-1 has no guardian row at all
+      students: [{ studentUserId: 'user-student-1' }],
+      users: [{ email: 'adult.student@x.com' }],
+    });
+    const emails = await call('families');
+    expect(emails).toEqual(['adult.student@x.com']); // would have been [] before
+  });
+
+  it('does not use the student-login fallback for a family that already has a guardian', async () => {
+    const { call, studentsFindMany } = makeService({
+      memberships: [{ user: { email: 'guardian@x.com' } }],
+      families: [{ id: 'fam-1', email: null }],
+      guardians: [{ familyId: 'fam-1' }],
+    });
+    const emails = await call('families');
+    expect(emails).toEqual(['guardian@x.com']);
+    expect(studentsFindMany).not.toHaveBeenCalled();
   });
 });

@@ -65,9 +65,38 @@ export class BroadcastService {
     if (audience === 'families' || audience === 'everyone') {
       const famRows = await this.db.db.query.families.findMany({
         where: eq(families.organizationId, orgId),
-        columns: { email: true },
+        columns: { id: true, email: true },
       });
       emails.push(...famRows.map((f) => f.email));
+
+      // Since student-portal parity (an adult student can manage their own
+      // account with no guardian at all), a family may have neither a
+      // guardian login nor a families.email on file — its only reachable
+      // contact is the student's own login. Without this, those families were
+      // silently invisible to "message all families", the same failure mode
+      // families.email was added to close, reopened by a different gap.
+      const guardianFamilyIds = new Set(
+        (await this.db.db.query.guardians.findMany({
+          where: eq(guardians.organizationId, orgId),
+          columns: { familyId: true },
+        })).map((g) => g.familyId),
+      );
+      const uncoveredFamilyIds = famRows
+        .filter((f) => !f.email?.trim() && !guardianFamilyIds.has(f.id))
+        .map((f) => f.id);
+      if (uncoveredFamilyIds.length) {
+        const studentUserIds = (await this.db.db.query.students.findMany({
+          where: and(eq(students.organizationId, orgId), inArray(students.familyId, uncoveredFamilyIds)),
+          columns: { studentUserId: true },
+        })).map((s) => s.studentUserId).filter((u): u is string => !!u);
+        if (studentUserIds.length) {
+          const userRows = await this.db.db.query.users.findMany({
+            where: inArray(users.id, studentUserIds),
+            columns: { email: true },
+          });
+          emails.push(...userRows.map((u) => u.email));
+        }
+      }
     }
 
     return BroadcastService.dedupe(emails);
@@ -214,7 +243,7 @@ export class BroadcastService {
           const [famRows, guardianRows] = await Promise.all([
             this.db.db.query.families.findMany({
               where: and(eq(families.organizationId, orgId), inArray(families.id, familyIds)),
-              columns: { email: true },
+              columns: { id: true, email: true },
             }),
             this.db.db.query.guardians.findMany({
               where: and(eq(guardians.organizationId, orgId), inArray(guardians.familyId, familyIds)),
@@ -223,6 +252,27 @@ export class BroadcastService {
           ]);
           out.push(...famRows.map((f) => f.email));
           out.push(...guardianRows.map((g) => (g as { user?: { email: string | null } }).user?.email));
+
+          // Same fallback as audienceEmails: a family with no guardian and no
+          // families.email — the adult-student-only case — is only reachable
+          // through the matched student's own login.
+          const guardianFamilyIds = new Set(guardianRows.map((g) => g.familyId));
+          const uncoveredFamilyIds = new Set(
+            famRows.filter((f) => !f.email?.trim() && !guardianFamilyIds.has(f.id)).map((f) => f.id),
+          );
+          if (uncoveredFamilyIds.size) {
+            const studentUserIds = studentRows
+              .filter((s) => s.familyId && uncoveredFamilyIds.has(s.familyId))
+              .map((s) => s.studentUserId)
+              .filter((u): u is string => !!u);
+            if (studentUserIds.length) {
+              const rows = await this.db.db.query.users.findMany({
+                where: inArray(users.id, studentUserIds),
+                columns: { email: true },
+              });
+              out.push(...rows.map((r) => r.email));
+            }
+          }
         }
       }
     }

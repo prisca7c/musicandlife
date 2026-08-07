@@ -34,7 +34,7 @@ function makeService(lessons: Lesson[]) {
       })),
     },
   };
-  return new ReportsService(db as never);
+  return new ReportsService(db as never, {} as never);
 }
 
 const enr = (over: Partial<Lesson['enrollment']> = {}): Lesson['enrollment'] => ({

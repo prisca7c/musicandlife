@@ -24,7 +24,7 @@ function makeService(periodLessons: unknown[]) {
       },
     },
   };
-  return new ReportsService(db as never);
+  return new ReportsService(db as never, {} as never);
 }
 
 const at = new Date('2026-08-10T15:00:00Z');
