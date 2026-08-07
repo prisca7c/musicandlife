@@ -22,8 +22,10 @@ import {
 interface NewsPost { id: string; title: string; body: string; publishedAt: string; }
 
 interface DashboardData {
-  // 'student' means a pupil is signed in with their own login; the API omits
-  // the family's money entirely in that case.
+  // 'student' means a pupil is signed in with their own login rather than a
+  // parent — used only to soften some copy/framing below. The API returns the
+  // same balance/invoice/booking data either way: a student may be an adult
+  // with no guardian account managing their own lessons and payments.
   viewer: 'student' | 'guardian';
   nextLesson: {
     id: string; startsAt: string; duration: number; isTrialLesson: boolean;
@@ -150,12 +152,11 @@ export default function FamilyDashboardPage() {
   const { nextLesson, balance, outstandingInvoice, students, lastNote } = data;
   const hoursUntil = nextLesson ? (new Date(nextLesson.startsAt).getTime() - Date.now()) / 3600000 : 0;
 
-  // A pupil's home page is not a smaller parent home page. Money — the balance,
-  // an invoice due, the "I've sent the transfer" button — is between the studio
-  // and whoever pays; a child was being shown all of it. What's left is what
-  // they actually need: the next lesson, what to bring, and what their teacher
-  // last wrote. Changing or cancelling a lesson has a fee attached, so that
-  // stays with the parent too.
+  // A student login may be an adult with no guardian account at all, so the
+  // student portal needs full parity with the parent portal — booking,
+  // rescheduling, cancelling, paying invoices, all of it. `isStudent` here only
+  // adjusts copy/framing (leading with the lesson instead of a child's name),
+  // never gates an action a guardian could take.
   const isStudent = data.viewer === 'student';
   const isToday = nextLesson
     ? studioDayString(nextLesson.startsAt) === studioDayString(new Date())
@@ -206,20 +207,12 @@ export default function FamilyDashboardPage() {
                 </div>
               </div>
               <div className="flex gap-2 flex-wrap">
-                {/* Rescheduling and cancelling both have a fee attached, so they
-                    belong to whoever pays the bill — not to the pupil. */}
-                {isStudent ? (
-                  <p className="text-xs max-w-[14rem]" style={{ color: 'var(--txt4)' }}>
-                    Need to move or cancel this lesson? Ask a parent — they can do it from their account.
-                  </p>
-                ) : (
-                  <Link href="/app/family/book"
-                    className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-xl border font-medium hover:bg-[var(--surf)]"
-                    style={{ borderColor: 'var(--bd2)', color: 'var(--txt)' }}>
-                    <Plus size={13} /> Book another
-                  </Link>
-                )}
-                {!isStudent && hoursUntil >= 24 && (
+                <Link href="/app/family/book"
+                  className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-xl border font-medium hover:bg-[var(--surf)]"
+                  style={{ borderColor: 'var(--bd2)', color: 'var(--txt)' }}>
+                  <Plus size={13} /> Book another
+                </Link>
+                {hoursUntil >= 24 && (
                   <button
                     onClick={() => openReschedule(nextLesson.id)}
                     className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-xl border font-medium hover:bg-[var(--surf)]"
@@ -227,7 +220,7 @@ export default function FamilyDashboardPage() {
                     <CalendarClock size={13} /> Request reschedule
                   </button>
                 )}
-                {!isStudent && hoursUntil > 0 && (
+                {hoursUntil > 0 && (
                   <button
                     onClick={() => setCancelModal({ lessonId: nextLesson.id, hoursUntil })}
                     className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-xl border font-medium hover:bg-[var(--coral-lt)]"
@@ -240,14 +233,10 @@ export default function FamilyDashboardPage() {
           ) : (
             <div className="text-center py-6">
               <p className="text-sm mb-3" style={{ color: 'var(--txt3)' }}>No upcoming lessons.</p>
-              {isStudent ? (
-                <p className="text-xs" style={{ color: 'var(--txt4)' }}>Your parent can book your next one.</p>
-              ) : (
-                <Link href="/app/family/book"
-                  className="inline-flex items-center gap-1.5 bg-[var(--sage)] text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-[var(--sage-dk)]">
-                  <Plus size={14} /> Book a lesson
-                </Link>
-              )}
+              <Link href="/app/family/book"
+                className="inline-flex items-center gap-1.5 bg-[var(--sage)] text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-[var(--sage-dk)]">
+                <Plus size={14} /> Book a lesson
+              </Link>
             </div>
           )}
         </div>
@@ -273,8 +262,8 @@ export default function FamilyDashboardPage() {
           </div>
         )}
 
-        {/* ── Balance / invoice — parents only ── */}
-        <div className={`space-y-4 ${isStudent ? 'hidden' : ''}`}>
+        {/* ── Balance / invoice ── */}
+        <div className="space-y-4">
           <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
             <p className="text-xs font-bold uppercase tracking-widest mb-2 flex items-center gap-2" style={{ color: 'var(--txt3)' }}>
               Account balance
@@ -383,8 +372,10 @@ export default function FamilyDashboardPage() {
         </div>
 
         {/* ── Students / lessons remaining ── */}
-        <div className={`lg:col-span-2 bg-white rounded-2xl border p-5 ${isStudent ? 'hidden' : ''}`} style={{ borderColor: 'var(--bd)' }}>
-          <p className="text-xs font-bold uppercase tracking-widest mb-4" style={{ color: 'var(--txt3)' }}>Students</p>
+        <div className="lg:col-span-2 bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+          <p className="text-xs font-bold uppercase tracking-widest mb-4" style={{ color: 'var(--txt3)' }}>
+            {isStudent ? 'Lessons available' : 'Students'}
+          </p>
           <div className="space-y-3">
             {students.map(s => (
               <div key={s.id} className="flex items-center justify-between gap-3 py-2 border-b last:border-0" style={{ borderColor: 'var(--bd)' }}>
@@ -432,18 +423,6 @@ export default function FamilyDashboardPage() {
                 </div>
               ))}
             </div>
-          </div>
-        )}
-
-        {/* Lessons remaining — the one number a pupil benefits from knowing,
-            with none of the family's money attached to it. */}
-        {isStudent && students[0] && (
-          <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
-            <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--txt3)' }}>Lessons available</p>
-            <p className="text-2xl font-black" style={{ color: 'var(--sage-dk)' }}>{students[0].lessons.total}</p>
-            {students[0].lessons.makeup > 0 && (
-              <p className="text-xs mt-1" style={{ color: 'var(--txt4)' }}>includes {students[0].lessons.makeup} makeup</p>
-            )}
           </div>
         )}
 

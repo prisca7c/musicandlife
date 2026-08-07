@@ -11,7 +11,7 @@ import { EmailPort } from '../email/ports/email.port';
 import { eq, and, gt, gte, lte, ne, inArray } from 'drizzle-orm';
 import {
   lessons, lessonCredits, notes, families, memberships, guardians, organizations,
-  students, availability, enrollments, staffMembers,
+  students, enrollments, staffMembers,
   teacherAssignments, attendance, paymentClaims,
 } from '@music-life/db';
 import { AttendanceService } from '../attendance/attendance.service';
@@ -25,6 +25,56 @@ import type { RequestUser } from '@music-life/types';
 
 // Shape of the entries stored in notes.attachments (see NotesController).
 interface NoteAttachment { fileId: string; name: string; mime: string; size?: number }
+
+const DAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+// Monday of the current studio-local week, as a "YYYY-MM-DD" string — the same
+// shape `getAvailableSlotsWeek` expects as `weekStart`. Mirrors the frontend's
+// `weekMonday()` (family/book/page.tsx), but anchored to studio "today" rather
+// than the caller's browser date.
+export function currentStudioWeekMonday(timeZone: string): string {
+  const todayStr = new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  const [y, mo, d] = todayStr.split('-').map(Number);
+  // Noon-UTC anchor keeps the calendar date DST-proof while we step by days.
+  const anchor = new Date(Date.UTC(y!, mo! - 1, d!, 12));
+  const daysSinceMonday = (anchor.getUTCDay() + 6) % 7;
+  anchor.setUTCDate(anchor.getUTCDate() - daysSinceMonday);
+  return `${anchor.getUTCFullYear()}-${String(anchor.getUTCMonth() + 1).padStart(2, '0')}-${String(anchor.getUTCDate()).padStart(2, '0')}`;
+}
+
+// Turns a flat list of bookable lesson-start slots into compact per-weekday
+// windows for the availability grid, merging consecutive starts (15-minute
+// apart, `getAvailableSlots`'s step) into one shaded block instead of a choppy
+// dot per slot — e.g. starts at 14:00, 14:15, 14:30 with a 60-min duration
+// become one window 14:00–15:30, matching what a family can actually book.
+export function mergeSlotsIntoWindows(
+  slots: { startsAt: string }[], duration: number, timeZone: string,
+): { weekday: string; startTime: string; endTime: string }[] {
+  const STEP_MIN = 15;
+  const points = slots.map(s => {
+    const instant = new Date(s.startsAt);
+    const weekday = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'long' }).format(instant).toLowerCase();
+    const hm = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hour12: false }).format(instant);
+    const [h, m] = hm.split(':').map(Number);
+    return { weekday, minutes: h! * 60 + m! };
+  }).sort((a, b) => DAY_KEYS.indexOf(a.weekday) - DAY_KEYS.indexOf(b.weekday) || a.minutes - b.minutes);
+
+  const out: { weekday: string; startTime: string; endTime: string }[] = [];
+  const fmt = (mins: number) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  let run: { weekday: string; start: number; last: number } | null = null;
+  for (const p of points) {
+    if (run && run.weekday === p.weekday && p.minutes - run.last <= STEP_MIN) {
+      run.last = p.minutes;
+    } else {
+      if (run) out.push({ weekday: run.weekday, startTime: fmt(run.start), endTime: fmt(run.last + duration) });
+      run = { weekday: p.weekday, start: p.minutes, last: p.minutes };
+    }
+  }
+  if (run) out.push({ weekday: run.weekday, startTime: fmt(run.start), endTime: fmt(run.last + duration) });
+  return out;
+}
 import { IsBoolean, IsDateString, IsInt, IsOptional, IsUUID, Min, Max, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -251,14 +301,18 @@ export class FamilyPortalController {
       }
     }
 
-    // Outstanding invoice — parents only. Never surfaced to a child.
+    // Outstanding invoice. This used to be hidden from every student login on
+    // the assumption a "student" account is always a minor whose parent pays —
+    // but a student account is also how an adult pupil with no guardian on
+    // file manages their own account, and they need to see and pay their own
+    // bill same as a guardian would. So: same query for both viewer types.
     //
     // `total > 0` because an issued invoice can be zero or negative: a credit
     // note, or one raised before any line items were added. INV-0008 (−£4.00)
     // was being shown to the family as "Invoice due" with an "I've sent the
     // transfer" button that dead-ended on "This invoice has nothing to pay."
     // There is nothing for a family to do about a credit, so it isn't a bill.
-    const outstandingInvoice = viewerIsStudent ? null : await this.db.db.query.invoices.findFirst({
+    const outstandingInvoice = await this.db.db.query.invoices.findFirst({
       where: and(
         eq(invoices.familyId, family.id),
         eq(invoices.organizationId, user.orgId),
@@ -288,7 +342,7 @@ export class FamilyPortalController {
     return {
       nextLesson,
       viewer: viewerIsStudent ? 'student' : 'guardian',
-      balance: viewerIsStudent ? 0 : family.balanceCached,
+      balance: family.balanceCached,
       outstandingInvoice: outstandingInvoice
         ? { id: outstandingInvoice.id, number: outstandingInvoice.number, total: outstandingInvoice.total, dueDate: outstandingInvoice.dueDate }
         : null,
@@ -313,9 +367,14 @@ export class FamilyPortalController {
    * who never sent anything could clear their own invoice. It now raises a
    * claim that settles only once a matching line shows up on the imported bank
    * statement (or a staff member confirms it by hand).
+   *
+   * @Roles('student'): a logged-in student may pay their own family's invoice
+   * too, not just a guardian — some students are adults with no guardian
+   * account at all. requireFamily()/family.id below already scope this to the
+   * caller's own family exactly as it does for a guardian.
    */
   @Post('invoices/:id/mark-paid')
-  @Roles('guardian')
+  @Roles('student')
   async markInvoicePaid(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     const family = await this.requireFamily(user.userId, user.orgId);
 
@@ -349,7 +408,7 @@ export class FamilyPortalController {
    * to be confirmed.
    */
   @Get('payment-details')
-  @Roles('guardian')
+  @Roles('student')
   async getPaymentDetails(@CurrentUser() user: RequestUser) {
     const family = await this.requireFamily(user.userId, user.orgId);
     const reference = await this.recon.ensureReference(user.orgId, family.id);
@@ -392,11 +451,11 @@ export class FamilyPortalController {
   }
 
   // ─── Resource-library subscription ──────────────────────────────────────────
-  // Guardians can see the terms and buy access; students never see money, so the
-  // subscribe flow is guardian-only (a student who isn't covered just sees the
-  // locked resources page telling them to ask a parent).
+  // A logged-in student may see the terms and buy access too, same as a
+  // guardian — an adult student may have no guardian account to do it for
+  // them. requireFamily() scopes this to the caller's own family either way.
   @Get('resource-subscription')
-  @Roles('guardian')
+  @Roles('student')
   async getResourceSubscription(@CurrentUser() user: RequestUser) {
     const family = await this.requireFamily(user.userId, user.orgId);
     const terms = await this.billing.getResourceSubscriptionTerms(user.orgId);
@@ -411,7 +470,7 @@ export class FamilyPortalController {
   }
 
   @Post('resource-subscription/subscribe')
-  @Roles('guardian')
+  @Roles('student')
   async subscribeResources(@CurrentUser() user: RequestUser) {
     const family = await this.requireFamily(user.userId, user.orgId);
     const result = await this.billing.chargeResourceSubscription(user.orgId, family.id);
@@ -419,10 +478,11 @@ export class FamilyPortalController {
   }
 
   // ─── This family's invoices (read-only) ─────────────────────────────────────
-  // Parents RECEIVE invoices — they never create them — so this list is view-only
-  // and scoped to the caller's own family (staff use the admin /invoices route).
+  // Families (guardian or a logged-in student) RECEIVE invoices — they never
+  // create them — so this list is view-only and scoped to the caller's own
+  // family (staff use the admin /invoices route).
   @Get('invoices')
-  @Roles('guardian')
+  @Roles('student')
   async getFamilyInvoices(@CurrentUser() user: RequestUser) {
     const family = await this.requireFamily(user.userId, user.orgId);
     const rows = await this.db.db.query.invoices.findMany({
@@ -712,6 +772,14 @@ export class FamilyPortalController {
   // Powers the "when your teacher is free" visual on the family dashboard. Only
   // returns windows for teachers the family's students are actually linked to
   // (via enrollment or assignment), so families don't see the whole roster.
+  //
+  // This used to read the teacher's raw weekly windows straight from the
+  // `availability` table — their DECLARED recurring hours, with no lessons or
+  // blocked time subtracted. The Book page (`/family/availability`) filters
+  // against actual bookings via the shared scheduling engine, so the two
+  // disagreed on screen: this widget shaded an hour as free that Book then
+  // showed as taken. Now it queries the same `getAvailableSlotsWeek` engine,
+  // for the current studio week, so both surfaces always agree.
   @Get('teacher-availability')
   @Roles('student')
   async teacherAvailability(@CurrentUser() user: RequestUser) {
@@ -726,21 +794,23 @@ export class FamilyPortalController {
     const teacherIds = await this.familyTeacherIds(user.orgId, studentIds);
     if (teacherIds.length === 0) return [];
 
-    const [wins, teachers] = await Promise.all([
-      this.db.db.query.availability.findMany({
-        where: and(eq(availability.organizationId, user.orgId), inArray(availability.staffId, teacherIds)),
-        orderBy: (a, { asc }) => [asc(a.weekday), asc(a.startTime)],
-      }),
-      this.db.db.query.staffMembers.findMany({
-        where: and(eq(staffMembers.organizationId, user.orgId), inArray(staffMembers.id, teacherIds)),
-        columns: { id: true, firstName: true, lastName: true },
-      }),
-    ]);
+    const teachers = await this.db.db.query.staffMembers.findMany({
+      where: and(eq(staffMembers.organizationId, user.orgId), inArray(staffMembers.id, teacherIds)),
+      columns: { id: true, firstName: true, lastName: true },
+    });
     const nameById = Object.fromEntries(teachers.map(t => [t.id, `${t.firstName} ${t.lastName}`]));
-    return wins.map(w => ({
-      id: w.id, staffId: w.staffId, weekday: w.weekday, startTime: w.startTime, endTime: w.endTime,
-      teacherName: nameById[w.staffId] ?? 'Teacher',
+
+    const tz = await getOrgTimezone(this.db.db, user.orgId);
+    const weekStart = currentStudioWeekMonday(tz);
+
+    const out: { id: string; staffId: string; weekday: string; startTime: string; endTime: string; teacherName: string }[] = [];
+    await Promise.all(teacherIds.map(async id => {
+      const slots = await this.scheduling.getAvailableSlotsWeek(user.orgId, id, weekStart, 60, { futureOnly: true });
+      for (const w of mergeSlotsIntoWindows(slots, 60, tz)) {
+        out.push({ id: `${id}-${w.weekday}-${w.startTime}`, staffId: id, ...w, teacherName: nameById[id] ?? 'Teacher' });
+      }
     }));
+    return out.sort((a, b) => a.weekday === b.weekday ? a.startTime.localeCompare(b.startTime) : a.weekday.localeCompare(b.weekday));
   }
 
   // ─── Confirmation emails ──────────────────────────────────────────────────

@@ -351,9 +351,10 @@ export default function BillingPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
 
-  // A parent signed in is receive-only: they see their own family's invoices from
-  // the family-portal route (the admin /invoices list is staff-gated) and never
-  // get the create/record controls.
+  // A guardian OR a logged-in student is receive-only: they see their own
+  // family's invoices from the family-portal route (the admin /invoices list
+  // is staff-gated) and never get the create/record controls. A student may be
+  // an adult with no guardian account managing their own billing.
   const [role, setRole] = useState('');
   useEffect(() => {
     try {
@@ -361,12 +362,12 @@ export default function BillingPage() {
       setRole(t ? (JSON.parse(atob(t.split('.')[1]!)).role ?? '') : '');
     } catch { /* not signed in */ }
   }, []);
-  const isGuardian = role === 'guardian';
+  const isFamilyPortal = role === 'guardian' || role === 'student';
 
   // Cached read — instant on revisit, revalidates in the background. Key stays
   // null until we know the role so we never fire the staff route for a parent.
   const { data: invoices = [], isLoading, mutate } = useApi<Invoice[]>(
-    role ? (isGuardian ? '/family/invoices' : '/invoices') : null,
+    role ? (isFamilyPortal ? '/family/invoices' : '/invoices') : null,
   );
   const load = () => mutate();
 
@@ -380,12 +381,12 @@ export default function BillingPage() {
         title={
           <span className="inline-flex items-center gap-2">
             Billing
-            <InfoTooltip text="'Outstanding' is the total still unpaid across all invoices. Staff see the whole studio's balance here; a parent signed in sees only their own family's invoices and what they owe." />
+            <InfoTooltip text="'Outstanding' is the total still unpaid across all invoices. Staff see the whole studio's balance here; a guardian or student signed in sees only their own family's invoices and what they owe." />
           </span>
         }
         subtitle={outstanding > 0 ? `${formatMoney(outstanding)} outstanding` : undefined}
         action={
-          isGuardian ? undefined : (
+          isFamilyPortal ? undefined : (
             <div className="flex gap-2">
               <button onClick={() => setShowPayment(true)} className="ui-btn-ghost">
                 <PoundSterling size={15} /> Record payment
@@ -404,7 +405,7 @@ export default function BillingPage() {
           <thead>
             <tr>
               <th>Invoice #</th>
-              {!isGuardian && <th>Family</th>}
+              {!isFamilyPortal && <th>Family</th>}
               <th>Mode</th>
               <th>Issued</th>
               <th>Due</th>
@@ -414,25 +415,25 @@ export default function BillingPage() {
           </thead>
           <tbody>
             {invoices.length === 0 && (!role || isLoading) && (
-              <tr><td colSpan={isGuardian ? 6 : 7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={isFamilyPortal ? 6 : 7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 Loading…
               </td></tr>
             )}
             {invoices.length === 0 && role && !isLoading && (
-              <tr><td colSpan={isGuardian ? 6 : 7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={isFamilyPortal ? 6 : 7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No invoices yet.
               </td></tr>
             )}
             {invoices.map(i => (
               <tr key={i.id}>
                 <td>
-                  <Link href={isGuardian ? `/pay/${i.id}` : `/app/billing/${i.id}`}
+                  <Link href={isFamilyPortal ? `/pay/${i.id}` : `/app/billing/${i.id}`}
                     className="font-semibold hover:underline"
                     style={{ color: 'var(--sage-dk)' }}>
                     {i.number}
                   </Link>
                 </td>
-                {!isGuardian && (
+                {!isFamilyPortal && (
                   <td>
                     {i.family
                       ? <Link href={`/app/families/${i.family.id}`} className="hover:underline" style={{ color: 'var(--txt2)' }}>{i.family.name}</Link>

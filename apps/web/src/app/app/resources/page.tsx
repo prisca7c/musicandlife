@@ -202,11 +202,12 @@ export default function ResourcesPage() {
   const locked = !!resourcesError;
   const load = () => mutate();
 
-  // Subscription terms — only guardians can see the price and buy access, so
-  // only they fetch it (students get a 403 on this route by design).
-  const isGuardian = role === 'guardian';
+  // Subscription terms — a guardian OR a logged-in student may see the price
+  // and buy access (a student may be an adult with no guardian account to do
+  // it for them). Staff never see this — they manage the library, not pay for it.
+  const isFamilyMember = role === 'guardian' || role === 'student';
   const { data: sub, mutate: mutateSub } = useApi<{ active: boolean; paidUntil: string | null; price: number; months: number }>(
-    isGuardian ? '/family/resource-subscription' : null,
+    isFamilyMember ? '/family/resource-subscription' : null,
   );
   const [subscribing, setSubscribing] = useState(false);
   const [subError, setSubError] = useState('');
@@ -277,7 +278,7 @@ export default function ResourcesPage() {
         <div className="bg-white rounded-lg border px-6 py-16 text-center">
           <Lock size={28} className="mx-auto mb-3 text-gray-300" />
           <p className="text-gray-700 font-medium mb-1">Unlock the resource library</p>
-          {isGuardian && sub ? (
+          {isFamilyMember && sub ? (
             <>
               <p className="text-sm text-gray-500 max-w-sm mx-auto mb-5">
                 Sheet music, practice tracks and teaching materials your family can use at home.
@@ -315,7 +316,7 @@ export default function ResourcesPage() {
             </>
           ) : (
             <p className="text-sm text-gray-400 max-w-sm mx-auto">
-              This studio&apos;s resource library requires an active subscription. Please ask a parent or the studio to set up access.
+              This studio&apos;s resource library requires an active subscription. Please contact the studio to set up access.
             </p>
           )}
         </div>
