@@ -28,9 +28,12 @@ import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
 import { brandedEmail } from '../email/branding';
 
-// 30 days — keeps people signed in until they log out. See auth.module.ts for
-// why a long-lived access token (rather than short token + refresh) is used.
-const ACCESS_TTL = parseInt(process.env.JWT_ACCESS_TTL ?? '2592000', 10);
+// Access token: short-lived (900s / 15min by .env.example). Refresh token:
+// the real 30-day session, rotated with reuse detection — see refresh() below.
+// The ACCESS_TTL fallback must match the documented default, not the refresh
+// token's magnitude (see auth.module.ts, which signs the token this value is
+// only used to compare cookie/response metadata against).
+const ACCESS_TTL = parseInt(process.env.JWT_ACCESS_TTL ?? '900', 10);
 const REFRESH_TTL = parseInt(process.env.JWT_REFRESH_TTL ?? '2592000', 10);
 
 @Injectable()
@@ -72,11 +75,18 @@ export class AuthService {
       where: eq(users.email, emailAddr.toLowerCase()),
     });
 
+    // Account status and verification are checked ONLY after the password is
+    // confirmed correct. Checking them first (as this used to) let anyone
+    // submit a real email with a garbage password and learn, from which error
+    // came back, whether that account exists and its exact status/verification
+    // state — a user-enumeration oracle, the same class of leak the
+    // requestReset() comment below already goes out of its way to avoid.
     if (!user) throw new UnauthorizedException('Invalid credentials');
-    if (user.status !== 'active') throw new UnauthorizedException('Account suspended');
 
     const valid = await argonVerify(user.passwordHash, password);
     if (!valid) throw new UnauthorizedException('Invalid credentials');
+
+    if (user.status !== 'active') throw new UnauthorizedException('Account suspended');
 
     if (!user.emailVerifiedAt) {
       throw new UnauthorizedException('Please verify your email before logging in');

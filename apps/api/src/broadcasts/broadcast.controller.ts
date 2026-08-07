@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -41,8 +42,14 @@ export class BroadcastController {
     return this.broadcast.preview(user.orgId, dto.audience, dto.filter);
   }
 
+  // Every other bulk/sensitive action in this codebase (auth, payments,
+  // registration) has its own @Throttle; this one relied on the global
+  // 120/min default, which is effectively no limit at all for a full-audience
+  // email blast — a compromised or scripted manager session could fire up to
+  // 120 broadcasts a minute. Real usage is at most a handful a day.
   @Post('send')
   @Roles('manager')
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   send(@CurrentUser() user: RequestUser, @Body() dto: BroadcastSendDto) {
     return this.broadcast.send(user.orgId, dto.audience, dto.subject, dto.body, dto.filter);
   }

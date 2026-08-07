@@ -9,12 +9,16 @@ import { RolesGuard } from './guards/roles.guard';
   imports: [
     JwtModule.register({
       secret: process.env.JWT_SECRET,
-      // 30 days by default. The web app and API live on different domains, so
-      // the silent cross-domain refresh is unreliable (Safari/Chrome block the
-      // third-party cookie). A long-lived access token means people stay signed
-      // in until they explicitly log out, which clears the cookie and revokes
-      // the refresh token server-side. Override with JWT_ACCESS_TTL (seconds).
-      signOptions: { expiresIn: parseInt(process.env.JWT_ACCESS_TTL ?? '2592000', 10) },
+      // Short-lived (900s / 15min by .env.example) with a rotating, reuse-
+      // detected refresh token carrying the real 30-day session — see
+      // AuthService.refresh(). The fallback here MUST match that documented
+      // default, not the refresh token's magnitude: if JWT_ACCESS_TTL is ever
+      // missing in some environment (a fresh deploy, a misconfigured preview
+      // env), falling back to 30 days would silently mint month-long access
+      // tokens with none of the revocation/rotation protection the refresh
+      // token has — a suspended or removed user's token would stay valid for
+      // up to 30 days instead of ~15 minutes, invisibly.
+      signOptions: { expiresIn: parseInt(process.env.JWT_ACCESS_TTL ?? '900', 10) },
     }),
   ],
   controllers: [AuthController],

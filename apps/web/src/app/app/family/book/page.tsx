@@ -487,7 +487,13 @@ export default function BookLessonPage() {
                       style={{ borderColor: i === 0 ? 'var(--sage-md)' : 'var(--bd2)' }}>
                       <span style={{ color: 'var(--txt)' }}>
                         <span className="font-black mr-1.5" style={{ color: 'var(--sage-dk)' }}>#{i + 1}</span>
-                        {new Date(p.startsAt).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} · {fmtTime(p.startsAt)}
+                        {/* Studio-zone, not browser-local — this is the same slot the
+                            grid column (and the min= on the recurring-end date picker
+                            below) is keyed by via studioDayString; a raw
+                            toLocaleDateString here read the browser's clock instead and
+                            could show a different day than the column the parent
+                            actually clicked. */}
+                        {fmtDate(p.startsAt, { weekday: 'short', day: 'numeric', month: 'short' })} · {fmtTime(p.startsAt)}
                         {i === 0 && <span className="ml-1.5 text-[10px] font-bold uppercase" style={{ color: 'var(--sage-dk)' }}>booked now</span>}
                       </span>
                       <button onClick={() => setPicks(picks.filter((_, j) => j !== i))} className="text-[var(--txt4)] hover:text-[var(--txt)]" aria-label="Remove">
