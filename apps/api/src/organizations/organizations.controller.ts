@@ -15,7 +15,7 @@ export class OrganizationsController {
   @Get('me')
   @Roles('teacher')
   getMe(@CurrentUser() user: RequestUser) {
-    return this.orgs.findById(user.orgId);
+    return this.orgs.findById(user.orgId, user.role);
   }
 
   @Patch('me')

@@ -53,6 +53,7 @@ export class MailrelayAdapter extends EmailPort {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-auth-token': this.token },
         body: JSON.stringify({ email, name, status: 'active', group_ids: [this.groupId] }),
+        signal: AbortSignal.timeout(20_000),
       });
       if (res.ok) {
         this.logger.log(`Subscriber ensured: ${email}`);
@@ -80,6 +81,9 @@ export class MailrelayAdapter extends EmailPort {
     type Outcome = { ok: true } | { ok: false; detail: string };
 
     const outcome = await this.breaker.call(async (): Promise<Outcome> => {
+      // Without a timeout, a provider that accepts the connection but never
+      // responds hangs this fetch (and the breaker.call() awaiting it)
+      // forever — it never counts as a failure and never trips the breaker.
       const res = await fetch(`${this.baseUrl}/send_emails`, {
         method: 'POST',
         headers: {
@@ -92,6 +96,7 @@ export class MailrelayAdapter extends EmailPort {
           subject: opts.subject,
           html_part: opts.html,
         }),
+        signal: AbortSignal.timeout(20_000),
       });
 
       if (res.ok) return { ok: true };
