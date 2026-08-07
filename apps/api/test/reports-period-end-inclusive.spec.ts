@@ -40,7 +40,7 @@ function makeService(settings: Record<string, unknown> | null) {
       },
     },
   };
-  return new ReportsService(db as never);
+  return new ReportsService(db as never, {} as never);
 }
 
 function endOfDayFor(to: string): string {

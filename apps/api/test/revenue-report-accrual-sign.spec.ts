@@ -22,7 +22,7 @@ function makeService(accountingMode: 'cash' | 'accrual', entries: { type: string
       })),
     },
   };
-  return new ReportsService(db as never);
+  return new ReportsService(db as never, {} as never);
 }
 
 describe('getRevenueReport — accrual headline sign', () => {

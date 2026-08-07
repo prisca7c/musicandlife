@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { eq, and, gte, lte, count, sum, inArray, sql, ne } from 'drizzle-orm';
+import { eq, and, gte, lte, count, sum, inArray, sql } from 'drizzle-orm';
 import {
   students, staffMembers, families, lessons, attendance,
   invoices, ledgerEntries, enrollments, terms, lessonCredits,
@@ -9,10 +9,11 @@ import { DbService } from '../db/db.service';
 import { effectiveLessonAmount } from '../billing/billing.service';
 import { periodEndInclusive } from '../payroll/payroll.service';
 import { getOrgTimezone, formatInZone } from '../common/timezone';
+import { StudentsService } from '../students/students.service';
 
 @Injectable()
 export class ReportsService {
-  constructor(private readonly db: DbService) {}
+  constructor(private readonly db: DbService, private readonly students: StudentsService) {}
 
   /** Pass scopeTeacherId for the teacher portal: limits every metric to that teacher's own students/lessons and hides studio-wide financials. */
   async getDashboardKpis(orgId: string, scopeTeacherId?: string) {
@@ -26,23 +27,13 @@ export class ReportsService {
     const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
 
     // For teacher scoping: resolve the set of students this teacher actually
-    // teaches via enrollments. Excludes withdrawn enrolments — without this, a
-    // student whose only link to this teacher was withdrawn long ago (they may
-    // now be active with a different teacher, or gone entirely) still counted
-    // toward this teacher's "total students" tile, while the instrument
-    // breakdown a few cards over (enrollmentScope, active-only) correctly
-    // excluded them — the same tile-vs-tile disagreement class as the fixed
-    // calendar label bug, this time on the teacher dashboard.
+    // teaches via the same canonical definition /app/students uses (union of
+    // teacherAssignments and enrollments.teacherId) — a separate ad-hoc query
+    // here had drifted from that definition and undercounted the "My students"
+    // tile against the students list for the same teacher.
     let scopedStudentIds: string[] | null = null;
     if (scopeTeacherId) {
-      const rows = await this.db.db.select({ studentId: enrollments.studentId })
-        .from(enrollments)
-        .where(and(
-          eq(enrollments.organizationId, orgId),
-          eq(enrollments.teacherId, scopeTeacherId),
-          ne(enrollments.status, 'withdrawn'),
-        ));
-      scopedStudentIds = [...new Set(rows.map(r => r.studentId))];
+      scopedStudentIds = await this.students.getAssignedStudentIds(orgId, scopeTeacherId);
     }
 
     const lessonScope = scopeTeacherId

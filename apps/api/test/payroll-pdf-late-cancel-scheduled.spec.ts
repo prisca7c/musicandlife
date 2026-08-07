@@ -28,7 +28,7 @@ function makeService(hourlyRate: number, periodLessons: Lesson[]) {
       },
     },
   };
-  return new ReportsService(db as never);
+  return new ReportsService(db as never, {} as never);
 }
 
 const HOURLY = 6000; // £60/hr
