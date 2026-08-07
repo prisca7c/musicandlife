@@ -23,7 +23,17 @@ export class FilesService {
   }) {
     const result = await this.storage.signUpload(opts);
 
-    // Pre-register file metadata (virus_scan_status = pending)
+    // Pre-register file metadata. `virusScanStatus` defaults to 'pending' but
+    // NOTE (#190): there is no scanning pipeline wired up anywhere in this
+    // codebase — no ClamAV/VirusTotal/etc. integration, no worker or webhook
+    // that ever transitions this column, and no caller sets it to 'clean' or
+    // 'infected'. It exists as an aspirational/unused field only. Do NOT gate
+    // downloads on this column (see signDownload/signDownloadForOrg below) —
+    // doing so would lock out every download forever, since nothing will ever
+    // flip it away from 'pending'. Wiring a real AV scanner is a product
+    // decision (which vendor, whose API key/budget) and is intentionally left
+    // out of scope here; this comment documents the gap so it isn't mistaken
+    // for working malware protection.
     const [file] = await this.db.db.insert(files).values({
       organizationId: opts.orgId,
       key: result.fileKey,
@@ -55,10 +65,6 @@ export class FilesService {
     if (!isOwner && !isManagement) throw new NotFoundException('File not found');
 
     return this.storage.signDownload({ fileKey: file.key });
-  }
-
-  async markClean(fileId: string) {
-    await this.db.db.update(files).set({ virusScanStatus: 'clean' }).where(eq(files.id, fileId));
   }
 
   // Sign a download for any file in the given org, WITHOUT the per-file owner

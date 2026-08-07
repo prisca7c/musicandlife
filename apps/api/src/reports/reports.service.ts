@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { eq, and, gte, lte, count, sum, inArray, sql } from 'drizzle-orm';
+import { eq, and, gte, lte, count, sum, inArray, sql, ne } from 'drizzle-orm';
 import {
   students, staffMembers, families, lessons, attendance,
   invoices, ledgerEntries, enrollments, terms, lessonCredits,
@@ -25,12 +25,23 @@ export class ReportsService {
     weekStart.setHours(0, 0, 0, 0);
     const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
 
-    // For teacher scoping: resolve the set of students this teacher actually teaches via enrollments.
+    // For teacher scoping: resolve the set of students this teacher actually
+    // teaches via enrollments. Excludes withdrawn enrolments — without this, a
+    // student whose only link to this teacher was withdrawn long ago (they may
+    // now be active with a different teacher, or gone entirely) still counted
+    // toward this teacher's "total students" tile, while the instrument
+    // breakdown a few cards over (enrollmentScope, active-only) correctly
+    // excluded them — the same tile-vs-tile disagreement class as the fixed
+    // calendar label bug, this time on the teacher dashboard.
     let scopedStudentIds: string[] | null = null;
     if (scopeTeacherId) {
       const rows = await this.db.db.select({ studentId: enrollments.studentId })
         .from(enrollments)
-        .where(and(eq(enrollments.organizationId, orgId), eq(enrollments.teacherId, scopeTeacherId)));
+        .where(and(
+          eq(enrollments.organizationId, orgId),
+          eq(enrollments.teacherId, scopeTeacherId),
+          ne(enrollments.status, 'withdrawn'),
+        ));
       scopedStudentIds = [...new Set(rows.map(r => r.studentId))];
     }
 
