@@ -95,6 +95,19 @@ function getWeekStart(date: Date) {
 // month view) all summer. studioDayString matches how the grid buckets lessons.
 function formatDate(d: Date) { return studioDayString(d); }
 
+// Render a Date for display using the STUDIO-zone calendar day, not the
+// browser's. `d.toLocaleDateString(...)` with no `timeZone` reads the day/
+// weekday out of the browser's local clock — for a viewer whose device isn't
+// set to the studio's zone, near a day boundary that can read a different
+// weekday (or day-of-month) than what studioDayString buckets the grid's
+// lessons/availability bands by, e.g. a "Sat" header sitting over Sunday's
+// data. Anchoring at noon UTC of the studio-zone day string (the same
+// technique the backend uses to turn a date into a weekday) makes the label
+// zone-independent and always agree with the grid underneath it.
+function formatDateLabel(d: Date, opts: Intl.DateTimeFormatOptions) {
+  return new Date(`${studioDayString(d)}T12:00:00Z`).toLocaleDateString('en-GB', { ...opts, timeZone: 'UTC' });
+}
+
 // The 6-week (42-day) grid that renders the month containing `date`: always
 // starts on the Monday on or before the 1st, so the first week's leading days
 // from the previous month fill in, and covers 42 days so any month fits.
@@ -421,7 +434,12 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
       if (repeat) {
         // Set the enrollment's weekly schedule (weekday derived from the picked
         // date), then materialise the series so every week appears at once.
-        const weekday = WEEKDAY_KEYS[(new Date(`${date}T12:00:00`).getDay() + 6) % 7];
+        // `date` is already a studio-zone "YYYY-MM-DD" string; parsing it as
+        // "...T12:00:00" (no Z) reads it back in the BROWSER's zone via getDay(),
+        // which for a large enough offset can name the wrong weekday for the
+        // recurring rule actually written to the enrollment. Anchor at noon UTC
+        // and read getUTCDay() instead — zone-independent, same as elsewhere.
+        const weekday = WEEKDAY_KEYS[(new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7];
         await apiFetch(`/enrollments/${enrollmentId}`, {
           method: 'PATCH', token: t, body: JSON.stringify({ scheduleRule: { weekday, startTime: times[0] } }),
         });
@@ -1211,16 +1229,21 @@ export default function CalendarPage() {
   // Day view: a single teacher's availability windows for the anchor day's weekday.
   function teacherAvailabilityBands(teacherId: string | null): { top: number; height: number }[] {
     if (!teacherId) return [];
-    const key = WEEKDAY_KEYS[(anchorDate.getDay() + 6) % 7];
+    // anchorDate.getDay() reads the BROWSER's local weekday, which can disagree
+    // with the studio-zone day the rest of the day view is keyed by (formatDate/
+    // studioDayString) — showing the wrong day's availability bands for a viewer
+    // whose device isn't set to the studio's zone. Derive the weekday from the
+    // studio-zone date string instead, same fix as the family booking picker.
+    const key = WEEKDAY_KEYS[(new Date(`${formatDate(anchorDate)}T12:00:00Z`).getUTCDay() + 6) % 7];
     return availability
       .filter(a => a.staffId === teacherId && a.weekday === key)
       .map(a => bandBox(hhmmToMin(a.startTime), hhmmToMin(a.endTime)))
       .filter((b): b is { top: number; height: number } => b !== null);
   }
 
-  const weekLabel = `${weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} – ${new Date(weekStart.getTime() + 6 * 86400000).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
-  const dayLabel = anchorDate.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const monthLabel = monthGrid.monthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  const weekLabel = `${formatDateLabel(weekStart, { day: 'numeric', month: 'short' })} – ${formatDateLabel(new Date(weekStart.getTime() + 6 * 86400000), { day: 'numeric', month: 'short', year: 'numeric' })}`;
+  const dayLabel = formatDateLabel(anchorDate, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const monthLabel = formatDateLabel(monthGrid.monthStart, { month: 'long', year: 'numeric' });
   const todayStr = formatDate(new Date());
   const anchorStr = formatDate(anchorDate);
   const isAnchorToday = anchorStr === todayStr;
@@ -1407,7 +1430,11 @@ export default function CalendarPage() {
                 <div key={day}
                   className={`border-r border-[var(--bd)] px-2 py-2.5 text-center bg-[var(--surf)] ${i === 6 ? 'border-r-0' : ''}`}>
                   <div className={`text-[11px] font-bold uppercase tracking-wider ${isToday ? 'text-[var(--sage)]' : 'text-[var(--txt4)]'}`}>{day}</div>
-                  <div className={`text-xl font-bold mt-0.5 ${isToday ? 'text-[var(--sage)]' : 'text-[var(--txt)]'}`}>{d.getDate()}</div>
+                  {/* dStr (studio-zone) is what dayLessons(i)/isToday are keyed by
+                      below — d.getDate() reads the browser-local day-of-month,
+                      which can show a different number than the studio-zone day
+                      this column's lessons belong to. */}
+                  <div className={`text-xl font-bold mt-0.5 ${isToday ? 'text-[var(--sage)]' : 'text-[var(--txt)]'}`}>{Number(dStr.slice(8, 10))}</div>
                   {count > 0 && (
                     <div className="text-[9px] font-bold mt-0.5" style={{ color: 'var(--txt4)' }}>
                       {count} lesson{count !== 1 ? 's' : ''}
@@ -1633,8 +1660,11 @@ export default function CalendarPage() {
                   title="Open this day"
                 >
                   <div className="flex items-center justify-between mb-1">
+                    {/* dayStr (studio-zone) is what dayList is filtered by —
+                        d.getDate() reads the browser-local day-of-month, which
+                        can show a different number than the cell's actual data. */}
                     <span className={`text-xs font-bold ${isToday ? 'text-white bg-[var(--sage)] rounded-full w-5 h-5 flex items-center justify-center' : inMonth ? 'text-[var(--txt2)]' : 'text-[var(--txt4)]'}`}>
-                      {d.getDate()}
+                      {Number(dayStr.slice(8, 10))}
                     </span>
                     {dayList.length > 0 && (
                       <span className="text-[9px] font-bold" style={{ color: 'var(--txt4)' }}>{dayList.length}</span>

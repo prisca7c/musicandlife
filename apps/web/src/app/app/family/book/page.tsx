@@ -364,8 +364,12 @@ export default function BookLessonPage() {
                   <ChevronLeft size={16} />
                 </button>
                 <p className="font-bold text-sm" style={{ color: 'var(--txt)' }}>
-                  {weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })} –{' '}
-                  {new Date(weekStart.getTime() + 6 * 86400000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                  {/* Same studio-zone-anchored rendering as the day columns below —
+                      weekStart is browser-local midnight, which the raw Date read
+                      out via toLocaleDateString (no timeZone) instead of `days[]`'s
+                      studio-zone keys. */}
+                  {new Date(`${days[0]!.key}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', timeZone: 'UTC' })} –{' '}
+                  {new Date(`${days[6]!.key}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}
                 </p>
                 <button onClick={() => setWeekStart(d => new Date(d.getTime() + 7 * 86400000))}
                   className="p-2 rounded-xl border border-[var(--bd2)] hover:bg-[var(--surf)]" aria-label="Next week">
@@ -379,16 +383,28 @@ export default function BookLessonPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-                  {days.map(({ date, key, slots: daySlots }) => {
+                  {days.map(({ key, slots: daySlots }) => {
                     const isToday = studioDayString(new Date()) === key;
+                    // The column's label must agree with `key` (the studio-zone
+                    // day its slots were grouped by), not the browser's local
+                    // reading of a raw Date. `date.toLocaleDateString(...)` with
+                    // no timeZone reads the BROWSER's zone: a tester whose device
+                    // isn't set to the studio's zone could see a column labelled
+                    // "Sat" actually populated with a neighbouring studio-zone
+                    // day's slots (and vice versa) — indistinguishable from the
+                    // teacher's real Saturday/Sunday hours being swapped. Deriving
+                    // the label from `key` itself (via a UTC-noon anchor, the same
+                    // technique the backend uses to turn a date into a weekday)
+                    // makes the label zone-independent and always correct.
+                    const anchor = new Date(`${key}T12:00:00Z`);
                     return (
                       <div key={key} className="min-h-[120px]">
                         <div className="text-center mb-2">
                           <p className="text-[11px] font-bold uppercase tracking-wide" style={{ color: 'var(--txt3)' }}>
-                            {date.toLocaleDateString('en-GB', { weekday: 'short' })}
+                            {anchor.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' })}
                           </p>
                           <p className="text-sm font-black" style={{ color: isToday ? 'var(--sage-dk)' : 'var(--txt)' }}>
-                            {date.getDate()}
+                            {Number(key.slice(8, 10))}
                           </p>
                         </div>
                         <div className="flex flex-col gap-1.5">
