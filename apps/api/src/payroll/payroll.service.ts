@@ -192,6 +192,13 @@ export class PayrollService {
       where: and(eq(staffMembers.id, dto.staffId), eq(staffMembers.organizationId, orgId)),
     });
     if (!staff) throw new NotFoundException('Staff member not found');
+    // The batch path (createPayrollRunsForAll) already filters to active staff;
+    // without the same check here, running payroll for one specific teacher by
+    // id — the only way to pay someone the batch just skipped — could pay a
+    // departed/deactivated teacher for lessons attributed after they left.
+    if (staff.status !== 'active') {
+      throw new BadRequestException('This teacher is not active — reactivate them first, or run payroll before deactivating.');
+    }
 
     // Reject a duplicate run for the same teacher+period. The batch path
     // (createPayrollRunsForAll) already skips existing runs; without the same
@@ -311,12 +318,23 @@ export class PayrollService {
   }
 
   async approveExpense(orgId: string, id: string) {
+    const expense = await this.db.db.query.expenses.findFirst({
+      where: and(eq(expenses.id, id), eq(expenses.organizationId, orgId)),
+      columns: { status: true },
+    });
+    if (!expense) throw new NotFoundException('Expense not found');
+    // Only a pending expense can be approved — mirrors decideRateChange's guard.
+    // Without it, re-clicking "Approve" (or a stale tab) on an already-approved
+    // expense is a harmless no-op today, but silently re-approving one that a
+    // future reject path had turned down would erase that decision with no
+    // audit trail of the override.
+    if (expense.status !== 'pending') throw new BadRequestException('Only a pending expense can be approved');
+
     const [updated] = await this.db.db.update(expenses)
       .set({ status: 'approved' })
       .where(and(eq(expenses.id, id), eq(expenses.organizationId, orgId)))
       .returning();
-    if (!updated) throw new NotFoundException('Expense not found');
-    return updated;
+    return updated!;
   }
 
   // ─── Rate change requests ─────────────────────────────────────────────────

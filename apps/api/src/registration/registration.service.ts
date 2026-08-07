@@ -407,10 +407,16 @@ export class RegistrationService {
       .where(eq(registrations.id, regId));
 
     if (payload.contactEmail) {
+      // reason is free-text typed by a receptionist (role-guarded lower than the
+      // admins trusted to hand-edit email templates) and rendered as raw HTML by
+      // the registration.denied template — escape it like every other
+      // user-supplied string in this file (contactName/studentFirstName/LastName
+      // above), or a denial reason becomes stored HTML injection into the
+      // family's inbox.
       this.notifications.trigger('registration.denied', {
         orgId,
         email: payload.contactEmail,
-        body: reason ?? 'We are unable to accept your registration at this time.',
+        body: reason ? escapeHtml(reason) : 'We are unable to accept your registration at this time.',
       }).catch(e => this.logger.warn('Denial notification failed', e));
     }
 

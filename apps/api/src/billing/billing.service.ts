@@ -785,64 +785,77 @@ export class BillingService {
    * left rather than throwing it away.
    */
   async chargeResourceSubscription(orgId: string, familyId: string) {
-    const family = await this.db.db.query.families.findFirst({
-      where: and(eq(families.id, familyId), eq(families.organizationId, orgId)),
-      columns: { id: true, resourceAccessPaidUntil: true },
-    });
-    if (!family) throw new NotFoundException('Family not found');
-
     const { price, months } = await this.getResourceSubscriptionTerms(orgId);
 
-    // Idempotency guard. The subscribe endpoint takes no arguments, so a
-    // double-tap, a two-tab retry, or a back-button re-POST would otherwise
-    // raise a second invoice (and a second email) and stack a second period —
-    // charging the family twice for one intent. Access is granted the moment the
-    // invoice is issued (paid later by bank transfer), so if an unpaid
-    // resource-subscription invoice already exists we return it rather than
-    // charging again. Once that invoice is reconciled to 'paid', a genuine
-    // renewal is allowed through. There is no invoice "kind" column, so the
-    // subscription invoice is recognised by its line-item label prefix.
-    const outstanding = await this.db.db.query.invoices.findMany({
-      where: and(
-        eq(invoices.organizationId, orgId),
-        eq(invoices.familyId, familyId),
-        eq(invoices.status, 'sent'),
-      ),
-      columns: { id: true, number: true },
-      with: { lineItems: { columns: { description: true } } },
+    // The whole check-then-act runs inside one transaction, row-locking the
+    // family first. Without this, the idempotency guard below (checking for an
+    // already-outstanding subscription invoice) was a plain read: a double-tap,
+    // two open tabs, or a back-button re-POST could both read "no outstanding
+    // invoice" before either had inserted one, raising two invoices (and two
+    // emails) and stacking the paid-until period twice for one intent. `.for
+    // ('update')` serialises concurrent callers on this family exactly like
+    // syncManualInvoiceCharge does for a ledger charge. createInvoice/addLineItem
+    // /sendInvoice all write through `this.db.db`, so a scoped copy of `this`
+    // whose db is the open transaction is used to call them, keeping their
+    // inserts inside the same lock instead of a separate connection that
+    // wouldn't be serialised by it.
+    return this.db.db.transaction(async (tx) => {
+      const [family] = await tx.select({ id: families.id, resourceAccessPaidUntil: families.resourceAccessPaidUntil })
+        .from(families)
+        .where(and(eq(families.id, familyId), eq(families.organizationId, orgId)))
+        .for('update');
+      if (!family) throw new NotFoundException('Family not found');
+
+      // Idempotency guard. Access is granted the moment the invoice is issued
+      // (paid later by bank transfer), so if an unpaid resource-subscription
+      // invoice already exists we return it rather than charging again. Once
+      // that invoice is reconciled to 'paid', a genuine renewal is allowed
+      // through. There is no invoice "kind" column, so the subscription invoice
+      // is recognised by its line-item label prefix.
+      const outstanding = await tx.query.invoices.findMany({
+        where: and(
+          eq(invoices.organizationId, orgId),
+          eq(invoices.familyId, familyId),
+          eq(invoices.status, 'sent'),
+        ),
+        columns: { id: true, number: true },
+        with: { lineItems: { columns: { description: true } } },
+      });
+      const alreadyPending = outstanding.find(inv =>
+        inv.lineItems.some(li => li.description.startsWith(BillingService.RESOURCE_SUB_LABEL_PREFIX)),
+      );
+      if (alreadyPending) {
+        return {
+          paidUntil: family.resourceAccessPaidUntil ?? null,
+          invoiceId: alreadyPending.id,
+          invoiceNumber: alreadyPending.number,
+          price, months, alreadyPending: true,
+        };
+      }
+
+      const scoped: this = Object.create(this, { db: { value: { db: tx } } });
+
+      // One manual invoice, one line, issued so it lands on the family's account.
+      const inv = await scoped.createInvoice(orgId, {
+        familyId, mode: 'monthly_statement', itemizeLessons: false,
+      });
+      const label = `${BillingService.RESOURCE_SUB_LABEL_PREFIX} — ${months} month${months === 1 ? '' : 's'}`;
+      await scoped.addLineItem(orgId, inv.id, label, price);
+      await scoped.sendInvoice(orgId, inv.id);
+
+      // Extend from the later of today or the current expiry.
+      const todayStr = new Date().toISOString().split('T')[0]!;
+      const stillActive = family.resourceAccessPaidUntil && family.resourceAccessPaidUntil >= todayStr;
+      const base = stillActive ? new Date(family.resourceAccessPaidUntil!) : new Date(todayStr);
+      base.setMonth(base.getMonth() + months);
+      const paidUntil = base.toISOString().split('T')[0]!;
+
+      await tx.update(families)
+        .set({ resourceAccessPaidUntil: paidUntil, updatedAt: new Date() })
+        .where(and(eq(families.id, familyId), eq(families.organizationId, orgId)));
+
+      return { paidUntil, invoiceId: inv.id, invoiceNumber: inv.number, price, months };
     });
-    const alreadyPending = outstanding.find(inv =>
-      inv.lineItems.some(li => li.description.startsWith(BillingService.RESOURCE_SUB_LABEL_PREFIX)),
-    );
-    if (alreadyPending) {
-      return {
-        paidUntil: family.resourceAccessPaidUntil ?? null,
-        invoiceId: alreadyPending.id,
-        invoiceNumber: alreadyPending.number,
-        price, months, alreadyPending: true,
-      };
-    }
-
-    // One manual invoice, one line, issued so it lands on the family's account.
-    const inv = await this.createInvoice(orgId, {
-      familyId, mode: 'monthly_statement', itemizeLessons: false,
-    });
-    const label = `${BillingService.RESOURCE_SUB_LABEL_PREFIX} — ${months} month${months === 1 ? '' : 's'}`;
-    await this.addLineItem(orgId, inv.id, label, price);
-    await this.sendInvoice(orgId, inv.id);
-
-    // Extend from the later of today or the current expiry.
-    const todayStr = new Date().toISOString().split('T')[0]!;
-    const stillActive = family.resourceAccessPaidUntil && family.resourceAccessPaidUntil >= todayStr;
-    const base = stillActive ? new Date(family.resourceAccessPaidUntil!) : new Date(todayStr);
-    base.setMonth(base.getMonth() + months);
-    const paidUntil = base.toISOString().split('T')[0]!;
-
-    await this.db.db.update(families)
-      .set({ resourceAccessPaidUntil: paidUntil, updatedAt: new Date() })
-      .where(and(eq(families.id, familyId), eq(families.organizationId, orgId)));
-
-    return { paidUntil, invoiceId: inv.id, invoiceNumber: inv.number, price, months };
   }
 
   // ─── Ledger ────────────────────────────────────────────────────────────────

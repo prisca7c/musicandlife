@@ -15,19 +15,27 @@ function makeService(opts: {
   outstandingInvoices: { id: string; number: string; lineItems: { description: string }[] }[];
 }) {
   const updateWhere = jest.fn().mockResolvedValue(undefined);
+  const txQuery = {
+    invoices: { findMany: jest.fn().mockResolvedValue(opts.outstandingInvoices) },
+  };
+  const tx = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          for: async () => [{ id: 'fam-1', resourceAccessPaidUntil: opts.resourceAccessPaidUntil }],
+        }),
+      }),
+    }),
+    query: txQuery,
+    update: jest.fn(() => ({ set: jest.fn(() => ({ where: updateWhere })) })),
+  };
   const mockDb = {
     query: {
-      families: {
-        findFirst: jest.fn().mockResolvedValue({ id: 'fam-1', resourceAccessPaidUntil: opts.resourceAccessPaidUntil }),
-      },
       organizations: {
         findFirst: jest.fn().mockResolvedValue({ settings: { resourceSubscriptionPrice: 600, resourceSubscriptionMonths: 1 } }),
       },
-      invoices: {
-        findMany: jest.fn().mockResolvedValue(opts.outstandingInvoices),
-      },
     },
-    update: jest.fn(() => ({ set: jest.fn(() => ({ where: updateWhere })) })),
+    transaction: async (fn: (tx: unknown) => unknown) => fn(tx),
   };
 
   const service = new BillingService({ db: mockDb } as never);

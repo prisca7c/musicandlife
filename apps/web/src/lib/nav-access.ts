@@ -40,7 +40,7 @@ export const ROUTE_ACCESS: RouteAccess[] = [
   { href: '/app/billing/reconciliation', roles: ['system_admin', 'admin', 'manager', 'receptionist'] },
   { href: '/app/billing',               roles: ['system_admin', 'admin', 'manager', 'receptionist', 'guardian'] },
   { href: '/app/intake',                roles: ['system_admin', 'admin', 'manager', 'receptionist'] },
-  { href: '/app/messaging',             roles: ['system_admin', 'admin', 'manager', 'teacher', 'guardian'] },
+  { href: '/app/messaging',             roles: ['system_admin', 'admin', 'manager', 'teacher', 'guardian', 'student'] },
   { href: '/app/resource-subscribers',  roles: ['system_admin', 'admin', 'manager', 'receptionist'] },
   { href: '/app/resources',             roles: ['system_admin', 'admin', 'manager', 'teacher', 'guardian', 'student'] },
   { href: '/app/content',               roles: ['system_admin', 'admin', 'manager', 'teacher'] },

@@ -23,7 +23,7 @@ function makeService(
     db: {
       query: {
         students: { findFirst: async () => ({ id: STU, organizationId: ORG }) },
-        staffMembers: { findFirst: async () => ({ id: TEACHER }) },
+        staffMembers: { findFirst: async () => ({ id: TEACHER, status: 'active' }) },
         terms: { findFirst: async () => ({ id: 'term-1' }) },
         enrollments: {
           findMany: async () => existing,
