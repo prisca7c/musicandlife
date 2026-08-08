@@ -151,6 +151,17 @@ export class AttendanceService {
       if (!staffId || lesson.teacherId !== staffId) throw new ForbiddenException('Not your lesson');
     }
 
+    // "Present" asserts the lesson actually happened, so it can't be true
+    // before the lesson has even started — QA caught this marking a lesson
+    // present 11 days ahead of its scheduled time, which then billed the
+    // family and paid the teacher for a lesson that hadn't occurred. Every
+    // other status (the cancellation variants) legitimately gets set ahead of
+    // time — a family emailing to cancel next week's lesson today is normal —
+    // so only 'present' is time-gated.
+    if (dto.status === 'present' && lesson.startsAt.getTime() > Date.now()) {
+      throw new BadRequestException('This lesson hasn’t happened yet — it can’t be marked present.');
+    }
+
     // actualStartedAt/actualEndedAt feed payroll directly (computeRunItems pays
     // the elapsed minutes between them when both are set) and family billing
     // never touches them, so nothing else validates them. A teacher marking
