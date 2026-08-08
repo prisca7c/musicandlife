@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and, gte, lte, ne, or, isNull, inArray, sql } from 'drizzle-orm';
-import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, organizations, enrollments, users } from '@music-life/db';
+import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, organizations, enrollments, users, invoiceLineItems, invoices } from '@music-life/db';
 import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateLessonDto } from './dto/create-lesson.dto';
@@ -169,10 +169,15 @@ export class SchedulingService {
         student: { columns: { id: true, firstName: true, lastName: true } },
         teacher: { columns: { id: true, firstName: true, lastName: true } },
         attendance: { columns: { status: true } },
-        enrollment: { columns: { instrument: true, lessonType: true, groupName: true } },
+        // enrollment.teacherId is the lesson's NORMAL teacher (per the student's
+        // enrolment) — compared against the lesson's own teacherId client-side to
+        // detect a one-off substitute (someone covering for the usual teacher).
+        enrollment: { columns: { instrument: true, lessonType: true, groupName: true, teacherId: true } },
       },
       orderBy: (l, { asc }) => [asc(l.startsAt)],
     });
+
+    const withPayment = await this.attachPaymentStatus(rows);
 
     if (actor?.role === 'teacher') {
       const staffId = await this.resolveStaffId(orgId, actor.userId);
@@ -183,9 +188,11 @@ export class SchedulingService {
       // from lessons this teacher doesn't teach. The teacherId/studentId filters
       // work the same as for management here. This is read-only: every mutation
       // still goes through assertOwnsLesson, so seeing a lesson never means being
-      // able to touch it.
+      // able to touch it. Payment status IS shown across teachers — the studio
+      // owner wants any teacher glancing at the calendar to see who's paid,
+      // without exposing payroll (that stays gated in staff.service.ts).
       if (params.scope === 'all') {
-        let scoped = rows;
+        let scoped = withPayment;
         if (params.teacherId) scoped = scoped.filter(r => r.teacherId === params.teacherId);
         if (params.studentId) scoped = scoped.filter(r => r.studentId === params.studentId);
         return scoped.map(r => (r.teacherId === staffId ? r : { ...r, notes: null }));
@@ -195,14 +202,37 @@ export class SchedulingService {
       // teacherId param — it must not be possible to view another teacher's
       // schedule by passing their id. studentId still narrows further, e.g.
       // "this student's lessons that I teach". Attendance relies on this scoping.
-      let scoped = rows.filter(r => r.teacherId === staffId);
+      let scoped = withPayment.filter(r => r.teacherId === staffId);
       if (params.studentId) scoped = scoped.filter(r => r.studentId === params.studentId);
       return scoped;
     }
 
-    if (params.teacherId) return rows.filter(r => r.teacherId === params.teacherId);
-    if (params.studentId) return rows.filter(r => r.studentId === params.studentId);
-    return rows;
+    if (params.teacherId) return withPayment.filter(r => r.teacherId === params.teacherId);
+    if (params.studentId) return withPayment.filter(r => r.studentId === params.studentId);
+    return withPayment;
+  }
+
+  // Batch-derives a per-lesson payment status from the invoice line item it was
+  // itemised onto (if any). One query for the whole page of lessons rather than
+  // N+1 — the calendar can render 100+ lessons for a busy week.
+  //   paid     → itemised on an invoice marked paid
+  //   unpaid   → itemised on a draft/sent invoice
+  //   void     → itemised on a voided invoice
+  //   unbilled → not yet itemised onto any invoice (e.g. lesson hasn't happened,
+  //              or billing hasn't run yet for its period)
+  private async attachPaymentStatus<T extends { id: string }>(rows: T[]): Promise<(T & { paymentStatus: 'paid' | 'unpaid' | 'void' | 'unbilled' })[]> {
+    if (rows.length === 0) return [];
+    const billed = await this.db.db
+      .select({ lessonId: invoiceLineItems.lessonId, status: invoices.status })
+      .from(invoiceLineItems)
+      .innerJoin(invoices, eq(invoiceLineItems.invoiceId, invoices.id))
+      .where(inArray(invoiceLineItems.lessonId, rows.map(r => r.id)));
+    const map = new Map<string, 'paid' | 'unpaid' | 'void'>();
+    for (const b of billed) {
+      if (!b.lessonId) continue;
+      map.set(b.lessonId, b.status === 'paid' ? 'paid' : b.status === 'void' ? 'void' : 'unpaid');
+    }
+    return rows.map(r => ({ ...r, paymentStatus: map.get(r.id) ?? 'unbilled' }));
   }
 
   async getLesson(orgId: string, id: string, actor?: Actor) {
@@ -212,18 +242,19 @@ export class SchedulingService {
         student: { columns: { id: true, firstName: true, lastName: true } },
         teacher: { columns: { id: true, firstName: true, lastName: true } },
         attendance: true,
-        enrollment: { columns: { id: true, instrument: true, lessonType: true, groupName: true } },
+        enrollment: { columns: { id: true, instrument: true, lessonType: true, groupName: true, teacherId: true } },
       },
     });
     if (!lesson) throw new NotFoundException('Lesson not found');
+    const [withPayment] = await this.attachPaymentStatus([lesson]);
     if (actor?.role === 'teacher') {
       const staffId = await this.resolveStaffId(orgId, actor.userId);
       // A teacher can open any lesson's detail from the whole-studio calendar,
       // but another teacher's private notes are withheld. Mutations remain gated
       // by assertOwnsLesson, so read access here grants nothing more.
-      if (lesson.teacherId !== staffId) return { ...lesson, notes: null };
+      if (lesson.teacherId !== staffId) return { ...withPayment!, notes: null };
     }
-    return lesson;
+    return withPayment!;
   }
 
   // `notify` defaults true (a genuine one-off booking). Both bulk call sites —

@@ -10,7 +10,7 @@ import {
   FileText, BarChart3, Settings,
   Briefcase, CreditCard, UserCheck, BookOpen, Landmark,
   Clock, History, ChevronLeft, ChevronRight, ChevronDown,
-  LogOut, PanelLeftClose, PanelLeftOpen, Megaphone, CalendarClock, CalendarPlus, Send, Menu,
+  LogOut, PanelLeftClose, PanelLeftOpen, Megaphone, CalendarPlus, Send, Menu,
 } from 'lucide-react';
 import type { BaseRole } from '@music-life/types';
 import { apiFetch } from '@/lib/api';
@@ -32,14 +32,12 @@ const NAV: NavItem[] = [
   { label: 'Add to calendar', href: '/app/family/calendar', icon: <CalendarPlus size={16} /> },
   { label: 'Calendar',     href: '/app/calendar',          icon: <Calendar size={16} /> },
   { label: 'Attendance',   href: '/app/attendance',        icon: <ClipboardCheck size={16} /> },
-  { label: 'Booking requests', href: '/app/lesson-requests', icon: <CalendarPlus size={16} /> },
-  { label: 'Reschedules',  href: '/app/reschedule-requests', icon: <CalendarClock size={16} /> },
+  { label: 'Requests',     href: '/app/lesson-requests',   icon: <CalendarPlus size={16} /> },
   { label: 'My availability', href: '/app/availability',    icon: <Clock size={16} /> },
   { label: 'Notes',        href: '/app/notes',             icon: <FileText size={16} /> },
   { label: 'Students',     href: '/app/students',          icon: <UserCheck size={16} /> },
   { label: 'Families',     href: '/app/families',          icon: <Home size={16} /> },
   { label: 'Staff',        href: '/app/staff',             icon: <Briefcase size={16} /> },
-  { label: 'Colleagues',   href: '/app/staff/colleagues',  icon: <Briefcase size={16} /> },
   { label: 'Payroll',      href: '/app/staff/payroll',     icon: <PoundSterling size={16} /> },
   // Separate from Payroll on purpose: "what am I owed" and "run the studio's
   // payroll" are different jobs, and the Payroll page is manager-only.
@@ -60,8 +58,8 @@ const NAV: NavItem[] = [
 // Group nav sections
 const GROUPS = [
   { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History','Lesson notes','Add to calendar'] },
-  { label: 'Studio',   items: ['Calendar','Attendance','Booking requests','Reschedules','My availability','Notes','New students','Messages'] },
-  { label: 'People',   items: ['Students','Families','Staff','Colleagues','Payroll','My pay'] },
+  { label: 'Studio',   items: ['Calendar','Attendance','Requests','My availability','Notes','New students','Messages'] },
+  { label: 'People',   items: ['Students','Families','Staff','Payroll','My pay'] },
   { label: 'Finance',  items: ['Billing','Payments'] },
   { label: 'Content',  items: ['Resources','Library subscribers','Repertoire','Studio News','Email everyone'] },
   { label: 'Admin',    items: ['Reports','Settings'] },

@@ -81,7 +81,7 @@ const ROUTE_DATA: Record<string, string> = {
   '/app/news': '/news',
   '/app/messaging': '/threads',
   '/app/resources': '/resources',
-  '/app/reschedule-requests': '/reschedule-requests?status=pending',
+  '/app/lesson-requests': '/lesson-requests?status=pending',
   '/app/family/dashboard': '/family/dashboard',
   '/app/family/notes': '/family/notes',
 };

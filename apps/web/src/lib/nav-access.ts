@@ -29,16 +29,14 @@ export const ROUTE_ACCESS: RouteAccess[] = [
   { href: '/app/calendar',              roles: ['system_admin', 'admin', 'manager', 'receptionist', 'teacher'] },
   { href: '/app/attendance',            roles: ['system_admin', 'admin', 'manager', 'teacher'] },
   { href: '/app/lesson-requests',       roles: ['system_admin', 'admin', 'manager', 'receptionist', 'teacher'] },
-  { href: '/app/reschedule-requests',   roles: ['system_admin', 'admin', 'manager', 'receptionist', 'teacher'] },
   { href: '/app/availability',          roles: ['teacher'] },
   { href: '/app/notes',                 roles: ['system_admin', 'admin', 'manager', 'teacher'] },
   { href: '/app/students',              roles: ['system_admin', 'admin', 'manager', 'receptionist', 'teacher'] },
   { href: '/app/families',              roles: ['system_admin', 'admin', 'manager', 'receptionist'] },
   { href: '/app/staff/payroll',         roles: ['system_admin', 'admin', 'manager'] },
-  // Name + contact only (see StaffService.directory) — open to teachers too,
-  // unlike the rest of /app/staff which is the full admin record.
-  { href: '/app/staff/colleagues',      roles: ['system_admin', 'admin', 'manager', 'teacher'] },
-  { href: '/app/staff',                 roles: ['system_admin', 'admin'] },
+  // One page, two views: admins get the full staff record, managers/teachers
+  // get the read-only colleagues directory (StaffPage branches by role).
+  { href: '/app/staff',                 roles: ['system_admin', 'admin', 'manager', 'teacher'] },
   { href: '/app/my-pay',                roles: ['teacher'] },
   { href: '/app/billing/reconciliation', roles: ['system_admin', 'admin', 'manager', 'receptionist'] },
   { href: '/app/billing',               roles: ['system_admin', 'admin', 'manager', 'receptionist', 'guardian', 'student'] },
