@@ -90,10 +90,8 @@ export class RegistrationService {
       body: `New registration from ${escapeHtml(dto.contactName)} for ${escapeHtml(dto.studentFirstName)} ${escapeHtml(dto.studentLastName)}.`,
     }).catch(e => this.logger.warn('Notification failed', e));
 
-    // Confirmation to the registrant. This is also what auto-subscribes them to
-    // Mailrelay (ensureSubscriber runs inside email.send), so it must fire on
-    // submit — not just on approval — or the family gets no acknowledgement and
-    // is never added to the mailing list.
+    // Confirmation to the registrant — must fire on submit, not just approval,
+    // or the family gets no acknowledgement at all.
     if (dto.contactEmail) {
       this.notifications.trigger('registration.submitted', {
         orgId: org.id,
