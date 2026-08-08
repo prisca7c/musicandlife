@@ -16,6 +16,7 @@ import type { BaseRole } from '@music-life/types';
 import { apiFetch } from '@/lib/api';
 import { prefetchRoute, clearApiCache, useApi } from '@/lib/swr';
 import { canAccess } from '@/lib/nav-access';
+import { NotificationBell } from '@/components/notification-bell';
 
 // Presentation only — which roles may see each link lives in nav-access.ts
 // (shared with the middleware route guard) so the sidebar and the URL guard can
@@ -38,6 +39,7 @@ const NAV: NavItem[] = [
   { label: 'Students',     href: '/app/students',          icon: <UserCheck size={16} /> },
   { label: 'Families',     href: '/app/families',          icon: <Home size={16} /> },
   { label: 'Staff',        href: '/app/staff',             icon: <Briefcase size={16} /> },
+  { label: 'Colleagues',   href: '/app/staff/colleagues',  icon: <Briefcase size={16} /> },
   { label: 'Payroll',      href: '/app/staff/payroll',     icon: <PoundSterling size={16} /> },
   // Separate from Payroll on purpose: "what am I owed" and "run the studio's
   // payroll" are different jobs, and the Payroll page is manager-only.
@@ -59,7 +61,7 @@ const NAV: NavItem[] = [
 const GROUPS = [
   { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History','Lesson notes','Add to calendar'] },
   { label: 'Studio',   items: ['Calendar','Attendance','Booking requests','Reschedules','My availability','Notes','New students','Messages'] },
-  { label: 'People',   items: ['Students','Families','Staff','Payroll','My pay'] },
+  { label: 'People',   items: ['Students','Families','Staff','Colleagues','Payroll','My pay'] },
   { label: 'Finance',  items: ['Billing','Payments'] },
   { label: 'Content',  items: ['Resources','Library subscribers','Repertoire','Studio News','Email everyone'] },
   { label: 'Admin',    items: ['Reports','Settings'] },
@@ -291,10 +293,28 @@ export function AppShell({ role, children }: { role: BaseRole; children: React.R
             </div>
             <span className="text-white font-extrabold text-sm truncate">Music &amp; Life</span>
           </div>
+          <div className="ml-auto text-white">
+            <NotificationBell />
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 md:p-7">
-          {children}
+        {/* Desktop top bar — just the bell, so it's reachable without a persistent header eating space. */}
+        <div className="hidden md:flex items-center justify-end h-12 px-6 border-b shrink-0" style={{ borderColor: 'var(--bd)' }}>
+          <NotificationBell />
         </div>
+        {/* The calendar wants to fill the whole screen edge-to-edge with its own
+            single scroll region, not sit padded inside another scrolling
+            container — a scrollable card inside a scrollable page reads as a
+            cramped "rectangle", not a real calendar. Every other page keeps the
+            standard padded/scrolling frame. */}
+        {pathname === '/app/calendar' ? (
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            {children}
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-4 md:p-7">
+            {children}
+          </div>
+        )}
       </main>
     </div>
   );

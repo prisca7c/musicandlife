@@ -117,7 +117,7 @@ export function SearchableSelect({
                   key={opt.value === '' ? '__empty__' : opt.value}
                   type="button"
                   onClick={() => pick(opt)}
-                  className="w-full text-left px-3 py-[7px] text-sm transition-colors hover:bg-[var(--sage-lt)]"
+                  className="w-full text-left px-3 py-[7px] text-sm whitespace-nowrap transition-colors hover:bg-[var(--sage-lt)]"
                   style={{
                     background: active ? 'var(--sage-lt)' : undefined,
                     color: active ? 'var(--sage-dk)' : opt.value === '' ? 'var(--txt4)' : 'var(--txt)',

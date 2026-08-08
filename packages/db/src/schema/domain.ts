@@ -140,10 +140,19 @@ export const staffMembers = pgTable(
     firstName: text('first_name').notNull(),
     lastName: text('last_name').notNull(),
     title: text('title'),
+    phone: text('phone'),
+    address: text('address'),
+    notes: text('notes'),
     instruments: text('instruments').array().notNull().default([]),
+    groupTags: text('group_tags').array().notNull().default([]),
+    initialLessonCategory: text('initial_lesson_category'),
     defaultDuration: integer('default_duration').notNull().default(60),
     payrollType: text('payroll_type', { enum: ['hourly'] }).notNull().default('hourly'),
     hourlyRate: integer('hourly_rate').notNull().default(0),
+    // Pence. A carried-over running balance (e.g. from a prior system) rather
+    // than something derived from payrollRuns — those only cover runs created
+    // in this app, so they can't reconstruct pre-migration history.
+    payrollBalance: integer('payroll_balance').notNull().default(0),
     status: text('status', { enum: ['active', 'inactive'] }).notNull().default('active'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

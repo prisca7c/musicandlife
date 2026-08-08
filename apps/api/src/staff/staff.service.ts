@@ -26,6 +26,7 @@ export class StaffService {
       with: {
         user: { columns: { id: true, email: true } },
         privileges: { columns: { privileges: true } },
+        assignments: { columns: { id: true } },
       },
       orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
     });
@@ -40,6 +41,21 @@ export class StaffService {
     return this.db.db.query.staffMembers.findMany({
       where: and(eq(staffMembers.organizationId, orgId), eq(staffMembers.status, 'active')),
       columns: { id: true, firstName: true, lastName: true },
+      orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
+    });
+  }
+
+  /**
+   * The colleague directory: any teacher may see every other active teacher's
+   * name and contact info (phone + login email), but nothing else — no notes,
+   * pay rate, payroll balance, or tags. Deliberately mirrors roster()'s minimal
+   * `columns` projection rather than findAll()'s full record.
+   */
+  async directory(orgId: string) {
+    return this.db.db.query.staffMembers.findMany({
+      where: and(eq(staffMembers.organizationId, orgId), eq(staffMembers.status, 'active')),
+      columns: { id: true, firstName: true, lastName: true, title: true, phone: true },
+      with: { user: { columns: { email: true } } },
       orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
     });
   }

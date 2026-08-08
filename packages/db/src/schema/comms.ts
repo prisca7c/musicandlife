@@ -4,6 +4,25 @@ import {
 import { organizations, users } from './auth';
 import { staffMembers } from './domain';
 
+// ─── In-app notifications ───────────────────────────────────────────────────
+// A lightweight in-app mirror of NotificationsService.trigger() — written
+// alongside (never instead of) the email send, so a user sees a banner even if
+// they never check that inbox. `body` is always plain text (HTML stripped at
+// write time), since it's rendered directly, not through an email client.
+export const inAppNotifications = pgTable(
+  'in_app_notifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('in_app_notifications_user_idx').on(t.userId, t.readAt)],
+);
+
 // ─── Messaging ────────────────────────────────────────────────────────────────
 export const threads = pgTable(
   'threads',

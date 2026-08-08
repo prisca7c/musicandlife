@@ -764,7 +764,10 @@ export class FamilyPortalController {
         eq(staffMembers.status, 'active'),
         inArray(staffMembers.id, teacherIds),
       ),
-      columns: { id: true, firstName: true, lastName: true, instruments: true, defaultDuration: true },
+      // Contact info here is scoped to only THIS family's assigned teacher(s) —
+      // never the whole roster — via the teacherIds filter above.
+      columns: { id: true, firstName: true, lastName: true, phone: true, instruments: true, defaultDuration: true },
+      with: { user: { columns: { email: true } } },
     });
   }
 

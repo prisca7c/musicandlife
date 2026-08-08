@@ -20,10 +20,43 @@ export class CreateStaffDto {
   title?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  address?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  notes?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  initialLessonCategory?: string;
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   @MaxLength(80, { each: true })
   instruments?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(80, { each: true })
+  groupTags?: string[];
+
+  // Pence. Carried-over running balance — see schema comment on payrollBalance.
+  @IsOptional()
+  @IsInt()
+  @Min(-100_000_000)
+  @Max(100_000_000)
+  payrollBalance?: number;
 
   @IsOptional()
   @IsInt()

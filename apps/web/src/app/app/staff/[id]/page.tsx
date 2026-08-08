@@ -7,6 +7,7 @@ import { PrivilegeMatrix } from '@/components/privilege-matrix';
 import { StaffAvailability } from '@/components/staff-availability';
 import { StaffInstruments } from '@/components/staff-instruments';
 import { StaffPayrollEditor } from '@/components/staff-payroll-editor';
+import { StaffAdminDetails } from '@/components/staff-admin-details';
 import { AssignStudentsButton } from '@/components/assign-students-button';
 import { BackButton } from '@/components/back-button';
 import { StaffStatusToggle } from '@/components/staff-status-toggle';
@@ -16,10 +17,16 @@ interface StaffDetail {
   firstName: string;
   lastName: string;
   title: string | null;
+  phone: string | null;
+  address: string | null;
+  notes: string | null;
+  groupTags: string[];
+  initialLessonCategory: string | null;
   instruments: string[];
   defaultDuration: number;
   payrollType: string;
   hourlyRate: number;
+  payrollBalance: number;
   status: string;
   user: { id: string; email: string } | null;
   privileges: { privileges: Record<string, boolean> } | null;
@@ -64,12 +71,6 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
                   <dd className="font-medium text-right">{member.user.email}</dd>
                 </div>
               )}
-              {member.title && (
-                <div className="flex justify-between gap-3">
-                  <dt style={{ color: 'var(--txt3)' }}>Title</dt>
-                  <dd className="font-medium">{member.title}</dd>
-                </div>
-              )}
             </dl>
           </div>
 
@@ -78,6 +79,19 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
             payrollType={member.payrollType}
             hourlyRate={member.hourlyRate}
             defaultDuration={member.defaultDuration}
+          />
+
+          <StaffAdminDetails
+            staffId={member.id}
+            firstName={member.firstName}
+            lastName={member.lastName}
+            title={member.title}
+            phone={member.phone}
+            address={member.address}
+            notes={member.notes}
+            groupTags={member.groupTags}
+            initialLessonCategory={member.initialLessonCategory}
+            payrollBalance={member.payrollBalance}
           />
 
           <StaffInstruments staffId={member.id} instruments={member.instruments} />

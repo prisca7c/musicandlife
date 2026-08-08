@@ -35,6 +35,87 @@ interface LessonNote {
   author: { id: string; email: string } | null;
 }
 
+// Core profile fields (name/dob/email/notes) had no edit UI at all — PATCH
+// /students/:id already supported them, but nothing in the app called it for
+// anything but sub-resources (enrollments, status). This is that missing form.
+function EditStudentModal({ open, onClose, student, onSaved }: {
+  open: boolean; onClose: () => void;
+  student: { id: string; firstName: string; lastName: string; dob: string | null; email: string | null; notes: string | null } | null;
+  onSaved: () => void;
+}) {
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [dob, setDob] = useState('');
+  const [email, setEmail] = useState('');
+  const [notes, setNotes] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  useEffect(() => {
+    if (!student) return;
+    setFirstName(student.firstName); setLastName(student.lastName);
+    setDob(student.dob ?? ''); setEmail(student.email ?? ''); setNotes(student.notes ?? '');
+    setError('');
+  }, [student, open]);
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!student) return;
+    setSaving(true); setError('');
+    try {
+      await apiFetch(`/students/${student.id}`, {
+        method: 'PATCH', token: tok(), body: JSON.stringify({
+          firstName, lastName, dob: dob || undefined, email: email || undefined, notes: notes || undefined,
+        }),
+      });
+      onSaved(); onClose();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Edit student">
+      {error && (
+        <div className="mb-4 text-sm rounded-xl px-4 py-3"
+          style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
+          {error}
+        </div>
+      )}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="ui-label">First name <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <input value={firstName} onChange={e => setFirstName(e.target.value)} required autoFocus className="ui-input" />
+          </div>
+          <div>
+            <label className="ui-label">Last name <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <input value={lastName} onChange={e => setLastName(e.target.value)} required className="ui-input" />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="ui-label">Date of birth</label>
+            <input type="date" value={dob} onChange={e => setDob(e.target.value)} className="ui-input" />
+          </div>
+          <div>
+            <label className="ui-label">Email</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="ui-input" />
+          </div>
+        </div>
+        <div>
+          <label className="ui-label">Notes</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="ui-input" />
+        </div>
+        <div className="flex gap-3 pt-1">
+          <button type="submit" disabled={saving} className="ui-btn-primary">{saving ? 'Saving…' : 'Save'}</button>
+          <button type="button" onClick={onClose} className="ui-btn-ghost">Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boolean; onClose: () => void; studentId: string; onCreated: () => void }) {
   const [lessonType, setLessonType] = useState<'private' | 'group'>('private');
   const [duration, setDuration] = useState(60);
@@ -399,6 +480,7 @@ export default function StudentDetailPage() {
   const id = params.id;
   const [showEnroll, setShowEnroll] = useState(false);
   const [editEnrollment, setEditEnrollment] = useState<EnrollmentRow | null>(null);
+  const [showEditStudent, setShowEditStudent] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const role = useRole();
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
@@ -458,6 +540,7 @@ export default function StudentDetailPage() {
     <div>
       <AddEnrollmentModal open={showEnroll} onClose={() => setShowEnroll(false)} studentId={id} onCreated={load} />
       <EditEnrollmentModal open={!!editEnrollment} onClose={() => setEditEnrollment(null)} enrollment={editEnrollment} onSaved={load} />
+      <EditStudentModal open={showEditStudent} onClose={() => setShowEditStudent(false)} student={student} onSaved={load} />
 
       <div className="mb-5">
         <BackButton label="Students" fallbackHref="/app/students" />
@@ -484,7 +567,17 @@ export default function StudentDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 space-y-4">
           <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
-            <h2 className="font-bold mb-4 text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Profile</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-bold text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Profile</h2>
+              {/* PATCH /students/:id is receptionist+ server-side; hidden rather
+                  than shown-disabled for teacher, which would just 403. */}
+              {role !== 'teacher' && (
+                <button onClick={() => setShowEditStudent(true)}
+                  className="text-[11px] font-semibold hover:underline" style={{ color: 'var(--sage)' }}>
+                  Edit
+                </button>
+              )}
+            </div>
             <dl className="space-y-3 text-sm">
               <div className="flex justify-between gap-3">
                 <dt style={{ color: 'var(--txt3)' }}>Date of birth</dt>

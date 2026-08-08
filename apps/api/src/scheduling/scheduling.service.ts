@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and, gte, lte, ne, or, isNull, inArray, sql } from 'drizzle-orm';
-import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, organizations, enrollments } from '@music-life/db';
+import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, organizations, enrollments, users } from '@music-life/db';
 import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateLessonDto } from './dto/create-lesson.dto';
@@ -226,7 +226,12 @@ export class SchedulingService {
     return lesson;
   }
 
-  async createLesson(orgId: string, dto: CreateLessonDto, opts?: { seriesSlotAt?: Date }) {
+  // `notify` defaults true (a genuine one-off booking). Both bulk call sites —
+  // materializeEnrollment's recurring backfill (could be dozens of lessons per
+  // run) and createFamilyBooking (which already sends its own richer
+  // confirmation email) — explicitly pass false so this never double-notifies
+  // or spams a family/teacher with one banner per generated week.
+  async createLesson(orgId: string, dto: CreateLessonDto, opts?: { seriesSlotAt?: Date; notify?: boolean }) {
     // A caller-supplied teacherId must belong to this org. Without this, a bad (or
     // foreign-org) id slips past the conflict check and blows up on the row's
     // foreign key — surfacing as a 500 to the family portal. Validate up front so
@@ -238,21 +243,81 @@ export class SchedulingService {
       });
       if (!teacher) throw new NotFoundException('Teacher not found');
     }
-    return this.db.db.transaction(async (tx) => {
+    const lesson = await this.db.db.transaction(async (tx) => {
       const tz = await this.getOrgTimezone(tx, orgId);
       // Interpret a naive wall-clock ("...T16:00:00") as the studio's local time.
       const startsAt = parseZonedDateTime(dto.startsAt, tz);
       await this.lockResources(tx, orgId, dto.teacherId, dto.studentId);
       await this.checkConflicts(tx, orgId, startsAt.toISOString(), dto.duration ?? 60, dto.teacherId, undefined, dto.studentId);
 
-      const [lesson] = await tx
+      const [row] = await tx
         .insert(lessons)
         // seriesSlotAt (recurrence worker only) records the canonical weekly slot
         // so a later reschedule can't vacate it and trigger a duplicate top-up.
         .values({ ...dto, organizationId: orgId, startsAt, seriesSlotAt: opts?.seriesSlotAt })
         .returning();
-      return lesson!;
+      return row!;
     });
+
+    if (opts?.notify !== false) {
+      this.notifyBooked(orgId, lesson).catch((e) => this.logger.warn(`lesson.booked notify failed: ${e}`));
+    }
+    return lesson;
+  }
+
+  /**
+   * In-app + email notification when a lesson is put on the calendar by staff
+   * (the admin "Add lesson" dialog, or confirming a lesson request) — the one
+   * creation path that previously told no one. Reaches the teacher and every
+   * portal LOGIN the student's family has (guardians + the student's own
+   * account, if any) — a bare contact email with no login can't receive an
+   * in-app banner, so those still only get the family confirmation flow's
+   * separate email where applicable.
+   */
+  private async notifyBooked(orgId: string, lesson: { id: string; studentId: string; teacherId: string | null; startsAt: Date; duration: number }) {
+    const [student, teacher] = await Promise.all([
+      this.db.db.query.students.findFirst({
+        where: eq(students.id, lesson.studentId),
+        columns: { firstName: true, lastName: true, studentUserId: true },
+        with: { family: { columns: { id: true } } },
+      }),
+      lesson.teacherId
+        ? this.db.db.query.staffMembers.findFirst({
+            where: eq(staffMembers.id, lesson.teacherId),
+            columns: { firstName: true, lastName: true, userId: true },
+          })
+        : Promise.resolve(null),
+    ]);
+    if (!student) return;
+
+    const familyGuardians = student.family
+      ? await this.db.db.query.guardians.findMany({
+          where: eq(guardians.familyId, student.family.id),
+          columns: { userId: true },
+        })
+      : [];
+
+    const recipientUserIds = new Set<string>();
+    if (teacher?.userId) recipientUserIds.add(teacher.userId);
+    if (student.studentUserId) recipientUserIds.add(student.studentUserId);
+    for (const g of familyGuardians) recipientUserIds.add(g.userId);
+    if (recipientUserIds.size === 0) return;
+
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const when = formatInZone(lesson.startsAt, tz, {
+      weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
+    });
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const studentName = esc(`${student.firstName} ${student.lastName}`);
+    const teacherName = teacher ? esc(`${teacher.firstName} ${teacher.lastName}`) : 'a teacher';
+    const body = `${studentName}'s lesson with ${teacherName} is now on ${when} (${lesson.duration} min).`;
+
+    for (const userId of recipientUserIds) {
+      const recipientUser = await this.db.db.query.users.findFirst({ where: eq(users.id, userId), columns: { email: true } });
+      await this.notifications.trigger('lesson.booked', {
+        orgId, userId, email: recipientUser?.email, body,
+      });
+    }
   }
 
   // ─── Recurring weekly lessons ──────────────────────────────────────────────
@@ -358,7 +423,7 @@ export class SchedulingService {
           teacherId: enrollment.teacherId ?? undefined,
           enrollmentId: enrollment.id,
           termId: enrollment.termId ?? undefined,
-        }, { seriesSlotAt: instant });
+        }, { seriesSlotAt: instant, notify: false });
         created++;
       } catch (err) {
         skippedConflicts++;
@@ -952,7 +1017,7 @@ export class SchedulingService {
       duration: dto.duration,
       isTrialLesson: dto.isTrialLesson ?? false,
       notes: dto.notes,
-    });
+    }, { notify: false }); // the caller (bookLesson) sends its own richer confirmation email
 
     // Recording a recurring rule switches on the nightly generator for this
     // enrolment; materialise the near-term window now so the series shows up
