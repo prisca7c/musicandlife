@@ -1,7 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { eq, and, ne, gte, ilike, or, inArray, sql, type SQL } from 'drizzle-orm';
-import { students, teacherAssignments, enrollments, families, staffMembers, lessons } from '@music-life/db';
+import { students, teacherAssignments, enrollments, families, staffMembers, lessons, users, memberships, passwordResetTokens } from '@music-life/db';
+import { randomBytes, createHash } from 'crypto';
 import { DbService } from '../db/db.service';
+import { EmailPort } from '../email/ports/email.port';
 import type { CreateStudentDto } from './dto/create-student.dto';
 import type { UpdateStudentDto } from './dto/update-student.dto';
 import type { BaseRole } from '@music-life/types';
@@ -9,7 +11,12 @@ import type { PageParams, Paginated } from '../common/pagination';
 
 @Injectable()
 export class StudentsService {
-  constructor(private readonly db: DbService) {}
+  private readonly logger = new Logger(StudentsService.name);
+
+  constructor(
+    private readonly db: DbService,
+    private readonly email: EmailPort,
+  ) {}
 
   private async resolveStaffId(orgId: string, userId: string): Promise<string | null> {
     const staff = await this.db.db.query.staffMembers.findFirst({
@@ -128,11 +135,58 @@ export class StudentsService {
     });
     if (!family) throw new NotFoundException('Family not found');
 
+    // The "Add student" form's email field is labelled "creates portal login",
+    // but this used to just write it into students.email as a contact address
+    // and stop there — no user, no membership, no studentUserId. The student
+    // could never actually log in, and (since messaging's recipient list reads
+    // memberships) they were invisible to "New message" too. Mirror the
+    // guardian invite flow: a fresh email gets a real login; an email that
+    // already belongs to a user in this org is just linked, not re-invited.
+    let studentUserId: string | undefined;
+    if (dto.email) {
+      const normalizedEmail = dto.email.toLowerCase();
+      const existing = await this.db.db.query.users.findFirst({ where: eq(users.email, normalizedEmail) });
+      if (existing) {
+        studentUserId = existing.id;
+        const existingMembership = await this.db.db.query.memberships.findFirst({
+          where: and(eq(memberships.userId, existing.id), eq(memberships.organizationId, orgId)),
+        });
+        if (!existingMembership) {
+          await this.db.db.insert(memberships).values({ userId: existing.id, organizationId: orgId, baseRole: 'student' });
+        }
+      } else {
+        const [newUser] = await this.db.db.insert(users).values({
+          email: normalizedEmail, passwordHash: 'INVITE_PENDING', emailVerifiedAt: new Date(),
+        }).returning();
+        studentUserId = newUser!.id;
+        await this.db.db.insert(memberships).values({ userId: newUser!.id, organizationId: orgId, baseRole: 'student' });
+        this.sendInviteEmail(newUser!.id, normalizedEmail, dto.firstName).catch((err) =>
+          this.logger.warn(`Invite email failed for ${normalizedEmail}: ${err}`),
+        );
+      }
+    }
+
     const [student] = await this.db.db
       .insert(students)
-      .values({ ...dto, organizationId: orgId })
+      .values({ ...dto, organizationId: orgId, studentUserId })
       .returning();
     return student!;
+  }
+
+  private async sendInviteEmail(userId: string, emailAddr: string, firstName: string) {
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    await this.db.db.insert(passwordResetTokens).values({ userId, tokenHash, expiresAt });
+
+    const link = `${process.env.WEB_URL}/reset-password?token=${rawToken}`;
+    await this.email.send({
+      to: emailAddr,
+      subject: "You've been added to Music & Life OS",
+      html: `<p>Hi ${firstName},</p><p>You've been added as a student at Music &amp; Life. Set your password to access your portal:</p><p><a href="${link}">Set password</a></p><p>This link expires in 7 days.</p>`,
+    });
+    this.logger.log(`Invite sent to ${emailAddr}`);
   }
 
   async update(orgId: string, id: string, dto: UpdateStudentDto) {

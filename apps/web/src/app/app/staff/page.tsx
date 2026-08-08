@@ -11,7 +11,7 @@ import { Modal } from '@/components/modal';
 import { ALL_INSTRUMENTS } from '@music-life/types';
 import { UserPlus } from 'lucide-react';
 
-interface StaffMember { id: string; firstName: string; lastName: string; title: string | null; instruments: string[]; status: string; hourlyRate: number; user: { email: string } | null; }
+interface StaffMember { id: string; firstName: string; lastName: string; title: string | null; instruments: string[]; status: string; hourlyRate: number; payrollBalance: number; user: { email: string } | null; assignments: { id: string }[]; }
 
 function AddStaffModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [error, setError] = useState('');
@@ -26,6 +26,7 @@ function AddStaffModal({ open, onClose, onCreated }: { open: boolean; onClose: (
       await apiFetch('/staff', { method: 'POST', token: tok(), body: JSON.stringify({
         firstName: f.get('firstName'), lastName: f.get('lastName'),
         email: f.get('email') || undefined, title: f.get('title') || undefined,
+        phone: f.get('phone') || undefined, address: f.get('address') || undefined,
         instruments,
         hourlyRate: f.get('hourlyRate') ? Math.round(parseFloat(f.get('hourlyRate') as string) * 100) : 0,
         defaultDuration: parseInt(f.get('defaultDuration') as string) || 60,
@@ -64,6 +65,16 @@ function AddStaffModal({ open, onClose, onCreated }: { open: boolean; onClose: (
         <div>
           <label className="ui-label">Title</label>
           <input name="title" placeholder="e.g. Piano Teacher" className="ui-input" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="ui-label">Phone</label>
+            <input name="phone" className="ui-input" />
+          </div>
+          <div>
+            <label className="ui-label">Address</label>
+            <input name="address" className="ui-input" />
+          </div>
         </div>
         <div>
           <label className="ui-label mb-2">Instruments</label>
@@ -131,13 +142,15 @@ export default function StaffPage() {
               <th>Name</th>
               <th>Title</th>
               <th>Instruments</th>
+              <th>Assigned</th>
               <th>Hourly rate</th>
+              <th>Payroll balance</th>
               <th>Status</th>
             </tr>
           </thead>
           <tbody>
             {staff.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No staff yet.
               </td></tr>
             )}
@@ -153,7 +166,9 @@ export default function StaffPage() {
                 </td>
                 <td style={{ color: 'var(--txt3)' }}>{s.title ?? '—'}</td>
                 <td className="capitalize" style={{ color: 'var(--txt3)' }}>{s.instruments.join(', ') || '—'}</td>
+                <td style={{ color: 'var(--txt3)' }}>{s.assignments.length}</td>
                 <td className="font-medium">{formatMoney(s.hourlyRate)}/hr</td>
+                <td className="font-medium">{formatMoney(s.payrollBalance)}</td>
                 <td><Badge variant={s.status}>{s.status}</Badge></td>
               </tr>
             ))}

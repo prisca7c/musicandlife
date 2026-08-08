@@ -62,6 +62,7 @@ export default function FamilyDashboardPage() {
   const { data, mutate: mutateData } = useApi<DashboardData>('/family/dashboard');
   const { firstName } = useMe();
   const { data: teacherAvail = [] } = useApi<AvailWindow[]>('/family/teacher-availability');
+  const { data: teachers = [] } = useApi<{ id: string; firstName: string; lastName: string; phone: string | null; user: { email: string } | null }[]>('/family/teachers');
   const { data: newsRaw = [] } = useApi<NewsPost[]>('/news');
   const news = newsRaw.slice(0, 3);
   const [cancelModal, setCancelModal] = useState<{ lessonId: string; hoursUntil: number } | null>(null);
@@ -397,6 +398,28 @@ export default function FamilyDashboardPage() {
             )}
           </div>
         </div>
+
+        {/* ── Your teacher(s) — name + contact only, scoped to this family's own
+             assigned teachers (never the whole studio roster) by /family/teachers. ── */}
+        {teachers.length > 0 && (
+          <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+            <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--txt3)' }}>
+              Your teacher{teachers.length > 1 ? 's' : ''}
+            </p>
+            <div className="space-y-2">
+              {teachers.map(t => (
+                <div key={t.id} className="flex items-center justify-between text-sm">
+                  <span className="font-medium">{t.firstName} {t.lastName}</span>
+                  <span className="text-right" style={{ color: 'var(--txt3)' }}>
+                    {t.user?.email && <span className="block">{t.user.email}</span>}
+                    {t.phone && <span className="block">{t.phone}</span>}
+                    {!t.user?.email && !t.phone && '—'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── Teacher availability ── */}
         {teacherAvail.length > 0 && (

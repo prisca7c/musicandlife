@@ -317,6 +317,14 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   const [saving, setSaving] = useState(false);
   const [isTeacher, setIsTeacher] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  // Validation errors (e.g. "no time picked") render at the top of the modal,
+  // but the form is long enough to scroll — someone down at "Repeat weekly"
+  // clicking submit saw nothing happen because the banner appeared off-screen
+  // above the fold. Scroll it into view whenever a new error lands.
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [error]);
 
   useEffect(() => {
     if (!open) return;
@@ -482,7 +490,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   return (
     <Modal open={open} onClose={onClose} title="Add lesson">
       {error && (
-        <div className="mb-4 text-sm rounded-xl px-4 py-3"
+        <div ref={errorRef} className="mb-4 text-sm rounded-xl px-4 py-3"
           style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
           {error}
         </div>
@@ -683,7 +691,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
           {repeat && (
             <div className="mt-3 flex items-center gap-2">
               <span className="text-sm" style={{ color: 'var(--txt3)' }}>Book the same slot for the next</span>
-              <div className="w-24">
+              <div className="w-36">
                 <SearchableSelect
                   options={[4, 8, 12, 16, 24, 36, 52].map(w => ({ value: String(w), label: `${w} weeks` }))}
                   value={repeatWeeks} onChange={setRepeatWeeks}
@@ -1260,7 +1268,7 @@ export default function CalendarPage() {
   ];
 
   return (
-    <div className="flex flex-col" style={{ height: 'calc(100vh - 96px)' }}>
+    <div className="flex flex-col h-full min-h-0">
       <AddLessonModal
         open={showAdd}
         onClose={() => { setShowAdd(false); setSlotDate(undefined); setSlotTime(undefined); }}
@@ -1285,7 +1293,7 @@ export default function CalendarPage() {
       <AssignStudentsModal open={showAssign} onClose={() => setShowAssign(false)} teachers={staff} onChanged={load} />
 
       {/* Toolbar */}
-      <div className="flex items-center justify-between mb-4 shrink-0 flex-wrap gap-2">
+      <div className="flex items-center justify-between mb-4 shrink-0 flex-wrap gap-2 px-4 md:px-7 pt-4 md:pt-7">
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={() => stepPeriod(-1)} className="ui-btn-ghost px-2.5 py-1.5">
             <ChevronLeft size={16} />
@@ -1389,7 +1397,7 @@ export default function CalendarPage() {
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-3 mb-3 shrink-0 flex-wrap">
+      <div className="flex items-center gap-3 mb-3 shrink-0 flex-wrap px-4 md:px-7">
         <span className="text-[11px] text-[var(--txt4)] font-semibold uppercase tracking-wide">Type:</span>
         <span className="flex items-center gap-1 text-[11px] text-[var(--sage)] font-semibold">
           <span className="w-3 h-3 rounded-sm border-l-2 border-[var(--sage)] bg-[var(--sage-lt)] inline-block" />
@@ -1415,7 +1423,7 @@ export default function CalendarPage() {
 
       {/* ── Week view ── */}
       {view === 'week' && (
-        <div className="flex-1 overflow-auto bg-white rounded-2xl border border-[var(--bd)] select-none">
+        <div className="flex-1 min-h-0 overflow-auto bg-white border-t border-[var(--bd)] select-none">
           {/* Sticky header row */}
           <div className="sticky top-0 z-20 bg-white border-b border-[var(--bd)] grid"
             style={{ gridTemplateColumns: '52px repeat(7, 1fr)' }}>
@@ -1527,7 +1535,7 @@ export default function CalendarPage() {
 
       {/* ── Day view: all teachers' schedules for the selected day ── */}
       {view === 'day' && (
-        <div className="flex-1 overflow-auto bg-white rounded-2xl border border-[var(--bd)] select-none">
+        <div className="flex-1 min-h-0 overflow-auto bg-white border-t border-[var(--bd)] select-none">
           {teacherCols.length === 0 ? (
             <p className="p-8 text-center text-sm" style={{ color: 'var(--txt4)' }}>No teaching staff found.</p>
           ) : (
@@ -1626,7 +1634,7 @@ export default function CalendarPage() {
 
       {/* ── Month view: a traditional 6-week grid, chips per lesson ── */}
       {view === 'month' && (
-        <div className="flex-1 overflow-auto bg-white rounded-2xl border border-[var(--bd)]">
+        <div className="flex-1 min-h-0 overflow-auto bg-white border-t border-[var(--bd)]">
           {/* Weekday header */}
           <div className="sticky top-0 z-10 grid bg-[var(--surf)] border-b border-[var(--bd)]"
             style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>

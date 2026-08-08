@@ -204,6 +204,20 @@
       "when": 1785889153003,
       "tag": "0028_easy_talos",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1786128915976,
+      "tag": "0029_burly_wraith",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1786192278696,
+      "tag": "0030_material_mentallo",
+      "breakpoints": true
     }
   ]
 }

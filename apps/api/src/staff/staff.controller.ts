@@ -56,6 +56,14 @@ export class StaffController {
     return this.staff.roster(user.orgId);
   }
 
+  // Colleague directory: name + contact info only, for every active teacher.
+  // Declared before `:id` so "directory" isn't captured as an id.
+  @Get('directory')
+  @Roles('teacher')
+  directory(@CurrentUser() user: RequestUser) {
+    return this.staff.directory(user.orgId);
+  }
+
   @Get('me')
   @Roles('teacher')
   findMe(@CurrentUser() user: RequestUser) {

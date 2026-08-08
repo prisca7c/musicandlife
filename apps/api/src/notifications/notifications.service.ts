@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import { createHash } from 'crypto';
-import { notificationRules, notificationLog, organizations, emailTemplates } from '@music-life/db';
+import { notificationRules, notificationLog, organizations, emailTemplates, inAppNotifications } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
 import { brandedEmail, loginDetailsBlock, BRAND } from '../email/branding';
@@ -21,6 +21,7 @@ export type TriggerEvent =
   | 'lesson.cancelled'
   | 'lesson.rescheduled'
   | 'booking.review_reminder'
+  | 'lesson.booked'
   | 'invoice.sent'
   | 'invoice.preview_summary'
   | 'newsletter.event'
@@ -94,6 +95,20 @@ export const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: strin
       bodyHtml: `<p style="margin:0 0 12px">This is a friendly reminder that you have a lesson <strong>tomorrow</strong>.</p><p style="margin:0">${ctx.body}</p>`,
       cta: { label: 'View your schedule', url: BRAND.portalUrl },
       footnote: "Can't make it? Please let us know as soon as possible so we can offer the slot to someone else.",
+    }),
+  }),
+  // A staff member (not the family) put a lesson straight onto the calendar —
+  // e.g. the admin "Add lesson" dialog. Family self-booking already emails via
+  // sendBookingConfirmations; this covers the staff-initiated path, which
+  // previously notified no one at all.
+  'lesson.booked': (ctx) => ({
+    subject: 'A lesson has been booked for you',
+    html: brandedEmail({
+      previewText: 'A lesson has been added to your schedule.',
+      heading: 'A lesson has been booked',
+      bodyHtml: `<p style="margin:0 0 12px">A lesson has been added to your schedule by the studio.</p><p style="margin:0">${ctx.body}</p>`,
+      cta: { label: 'View your schedule', url: BRAND.portalUrl },
+      footnote: "If this time doesn't work for you, get in touch and we'll sort it out.",
     }),
   }),
   'lesson.cancelled': (ctx) => ({
@@ -186,6 +201,7 @@ export const DEFAULT_RULES: Array<{
   { triggerEvent: 'lesson.cancelled', templateId: 'lesson.cancelled', channels: ['email'] },
   { triggerEvent: 'lesson.rescheduled', templateId: 'lesson.rescheduled', channels: ['email'] },
   { triggerEvent: 'booking.review_reminder', templateId: 'booking.review_reminder', channels: ['email'] },
+  { triggerEvent: 'lesson.booked', templateId: 'lesson.booked', channels: ['email'] },
   { triggerEvent: 'invoice.sent', templateId: 'invoice.sent', channels: ['email'] },
   { triggerEvent: 'invoice.preview_summary', templateId: 'invoice.preview_summary', channels: ['email'] },
   { triggerEvent: 'newsletter.event', templateId: 'newsletter.event', channels: ['email'] },
@@ -241,6 +257,22 @@ export class NotificationsService {
         : builtin!(ctx);
       const payloadHash = createHash('sha256').update(JSON.stringify(ctx)).digest('hex');
 
+      // In-app mirror: written for every matching rule regardless of its
+      // configured channels (in-app isn't something an org toggles per-rule
+      // today — it's a supplementary surface for whatever email already sends).
+      // Only possible when we know who to show it to.
+      if (ctx.userId) {
+        // ctx.body is the event-specific detail line(s) a caller built (e.g. "Piano
+        // with Jane Smith, Tue 12 Aug at 4:00pm") — not the full branded email
+        // wrapper (rendered.html), which would dump header/footer/CTA boilerplate
+        // into the banner too.
+        const plainBody = ctx.body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        await this.db.db.insert(inAppNotifications).values({
+          organizationId: ctx.orgId, userId: ctx.userId,
+          title: rendered.subject, body: plainBody || rendered.subject,
+        }).catch((err) => this.logger.warn(`In-app notification write failed for event=${event}: ${err}`));
+      }
+
       for (const channel of rule.channels ?? ['email']) {
         try {
           if (channel === 'email' && ctx.email) {
@@ -259,6 +291,51 @@ export class NotificationsService {
         }
       }
     }
+  }
+
+  // ─── In-app notifications (reader side) ────────────────────────────────────
+  async getMyNotifications(orgId: string, userId: string) {
+    return this.db.db.query.inAppNotifications.findMany({
+      where: and(eq(inAppNotifications.organizationId, orgId), eq(inAppNotifications.userId, userId)),
+      orderBy: (n, { desc }) => [desc(n.createdAt)],
+      limit: 30,
+    });
+  }
+
+  async getUnreadCount(orgId: string, userId: string) {
+    const [row] = await this.db.db
+      .select({ c: sql<number>`count(*)::int` })
+      .from(inAppNotifications)
+      .where(and(
+        eq(inAppNotifications.organizationId, orgId),
+        eq(inAppNotifications.userId, userId),
+        isNull(inAppNotifications.readAt),
+      ));
+    return { count: row?.c ?? 0 };
+  }
+
+  async markRead(orgId: string, userId: string, id: string) {
+    await this.db.db
+      .update(inAppNotifications)
+      .set({ readAt: new Date() })
+      .where(and(
+        eq(inAppNotifications.id, id),
+        eq(inAppNotifications.userId, userId),
+        eq(inAppNotifications.organizationId, orgId),
+      ));
+    return { id };
+  }
+
+  async markAllRead(orgId: string, userId: string) {
+    await this.db.db
+      .update(inAppNotifications)
+      .set({ readAt: new Date() })
+      .where(and(
+        eq(inAppNotifications.organizationId, orgId),
+        eq(inAppNotifications.userId, userId),
+        isNull(inAppNotifications.readAt),
+      ));
+    return { ok: true };
   }
 
   async getRules(orgId: string) {

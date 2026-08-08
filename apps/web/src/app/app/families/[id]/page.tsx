@@ -26,6 +26,86 @@ interface FamilyDetail {
   guardians: { id: string; relationship: string; user: { id: string; email: string } }[];
 }
 
+// Core identity fields (name/contact/address) had no edit UI at all — PATCH
+// /families/:id already supported them, but the page only ever let you edit
+// billing settings and resource access, never the family's own details.
+function EditFamilyModal({ open, onClose, family, onSaved }: {
+  open: boolean; onClose: () => void;
+  family: { id: string; name: string; contactName: string | null; phone: string | null; email: string | null; address: string | null } | null;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [contactName, setContactName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [address, setAddress] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  useEffect(() => {
+    if (!family) return;
+    setName(family.name); setContactName(family.contactName ?? '');
+    setPhone(family.phone ?? ''); setEmail(family.email ?? ''); setAddress(family.address ?? '');
+    setError('');
+  }, [family, open]);
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!family) return;
+    setSaving(true); setError('');
+    try {
+      await apiFetch(`/families/${family.id}`, {
+        method: 'PATCH', token: tok(), body: JSON.stringify({
+          name, contactName: contactName || undefined, phone: phone || undefined,
+          email: email || undefined, address: address || undefined,
+        }),
+      });
+      onSaved(); onClose();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Edit family">
+      {error && (
+        <div className="mb-4 text-sm rounded-xl px-4 py-3"
+          style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
+          {error}
+        </div>
+      )}
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="ui-label">Family name <span style={{ color: 'var(--coral)' }}>*</span></label>
+          <input value={name} onChange={e => setName(e.target.value)} required autoFocus className="ui-input" />
+        </div>
+        <div>
+          <label className="ui-label">Contact name</label>
+          <input value={contactName} onChange={e => setContactName(e.target.value)} className="ui-input" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="ui-label">Phone</label>
+            <input value={phone} onChange={e => setPhone(e.target.value)} className="ui-input" />
+          </div>
+          <div>
+            <label className="ui-label">Email</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="ui-input" />
+          </div>
+        </div>
+        <div>
+          <label className="ui-label">Address</label>
+          <textarea value={address} onChange={e => setAddress(e.target.value)} rows={2} className="ui-input" />
+        </div>
+        <div className="flex gap-3 pt-1">
+          <button type="submit" disabled={saving} className="ui-btn-primary">{saving ? 'Saving…' : 'Save'}</button>
+          <button type="button" onClick={onClose} className="ui-btn-ghost">Cancel</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 // Resource-access subscription — separate from lesson billing. Inline date editor.
 function ResourceAccessCard({ family, onSaved }: { family: FamilyDetail; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
@@ -351,6 +431,7 @@ export default function FamilyDetailPage() {
   const [showCreateInvoice, setShowCreateInvoice] = useState(false);
   const [showInvoicingSettings, setShowInvoicingSettings] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
+  const [showEditFamily, setShowEditFamily] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   // Merge is destructive → managers and above only (mirrors the API's @Roles).
@@ -379,6 +460,7 @@ export default function FamilyDetailPage() {
         family={family} onSaved={load} />}
       {family && <MergeFamilyModal open={showMerge} onClose={() => setShowMerge(false)}
         targetId={family.id} targetName={family.name} onMerged={load} />}
+      <EditFamilyModal open={showEditFamily} onClose={() => setShowEditFamily(false)} family={family} onSaved={load} />
 
       <div className="mb-5">
         <BackButton label="Families" fallbackHref="/app/families" />
@@ -406,7 +488,13 @@ export default function FamilyDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
-            <h2 className="font-bold mb-4 text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Contact</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-bold text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Contact</h2>
+              <button onClick={() => setShowEditFamily(true)}
+                className="text-[11px] font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}>
+                Edit
+              </button>
+            </div>
             <dl className="space-y-3 text-sm">
               {family.email && (
                 <div className="flex justify-between gap-3">

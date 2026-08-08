@@ -35,6 +35,9 @@ export const ROUTE_ACCESS: RouteAccess[] = [
   { href: '/app/students',              roles: ['system_admin', 'admin', 'manager', 'receptionist', 'teacher'] },
   { href: '/app/families',              roles: ['system_admin', 'admin', 'manager', 'receptionist'] },
   { href: '/app/staff/payroll',         roles: ['system_admin', 'admin', 'manager'] },
+  // Name + contact only (see StaffService.directory) — open to teachers too,
+  // unlike the rest of /app/staff which is the full admin record.
+  { href: '/app/staff/colleagues',      roles: ['system_admin', 'admin', 'manager', 'teacher'] },
   { href: '/app/staff',                 roles: ['system_admin', 'admin'] },
   { href: '/app/my-pay',                roles: ['teacher'] },
   { href: '/app/billing/reconciliation', roles: ['system_admin', 'admin', 'manager', 'receptionist'] },
