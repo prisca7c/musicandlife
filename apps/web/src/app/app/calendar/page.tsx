@@ -134,31 +134,49 @@ function computeLayout(dayLessons: Lesson[]): LessonLayout[] {
     (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
   );
 
-  // Greedy column assignment
-  const colEnds: number[] = []; // colEnds[i] = earliest ms when column i is free
-  const assignment = new Map<string, number>();
-
+  // Split into clusters of transitively-overlapping lessons first (a sweep that
+  // starts a new cluster whenever a gap opens up), then size every lesson in a
+  // cluster by that cluster's peak concurrency. Sizing each lesson only against
+  // the lessons it directly touches undercounts columns for a lesson that's
+  // linked into a busier cluster through an intermediate lesson it doesn't
+  // itself overlap — it would get a totalCols too small for the cluster, so its
+  // width and its neighbours' widths disagree and blocks render on top of each
+  // other instead of tiling edge-to-edge.
+  const clusters: Lesson[][] = [];
+  let current: Lesson[] = [];
+  let clusterEnd = -Infinity;
   for (const l of sorted) {
     const start = new Date(l.startsAt).getTime();
-    const end   = start + l.duration * 60000;
-    let col = colEnds.findIndex(e => e <= start);
-    if (col === -1) { col = colEnds.length; colEnds.push(end); }
-    else { colEnds[col] = end; }
-    assignment.set(l.id, col);
-  }
-
-  // For each lesson: totalCols = max column index among all overlapping lessons + 1
-  return sorted.map(l => {
-    const start = new Date(l.startsAt).getTime();
-    const end   = start + l.duration * 60000;
-    let maxCol = assignment.get(l.id)!;
-    for (const other of sorted) {
-      const os = new Date(other.startsAt).getTime();
-      const oe = os + other.duration * 60000;
-      if (os < end && oe > start) maxCol = Math.max(maxCol, assignment.get(other.id)!);
+    const end = start + l.duration * 60000;
+    if (current.length > 0 && start >= clusterEnd) {
+      clusters.push(current);
+      current = [];
+      clusterEnd = -Infinity;
     }
-    return { ...l, col: assignment.get(l.id)!, totalCols: maxCol + 1 };
-  });
+    current.push(l);
+    clusterEnd = Math.max(clusterEnd, end);
+  }
+  if (current.length > 0) clusters.push(current);
+
+  const result: LessonLayout[] = [];
+  for (const cluster of clusters) {
+    // Greedy column assignment within this cluster only.
+    const colEnds: number[] = []; // colEnds[i] = earliest ms when column i is free
+    const assignment = new Map<string, number>();
+    for (const l of cluster) {
+      const start = new Date(l.startsAt).getTime();
+      const end = start + l.duration * 60000;
+      let col = colEnds.findIndex(e => e <= start);
+      if (col === -1) { col = colEnds.length; colEnds.push(end); }
+      else { colEnds[col] = end; }
+      assignment.set(l.id, col);
+    }
+    const totalCols = colEnds.length;
+    for (const l of cluster) {
+      result.push({ ...l, col: assignment.get(l.id)!, totalCols });
+    }
+  }
+  return result;
 }
 
 // ─── Instrument colours ───────────────────────────────────────────────────────
