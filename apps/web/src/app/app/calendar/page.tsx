@@ -343,7 +343,10 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   const [manualTime, setManualTime] = useState('');      // fallback when no teacher assigned
   const [letTeacherChoose, setLetTeacherChoose] = useState(true);
   const [repeat, setRepeat] = useState(false);
-  const [repeatWeeks, setRepeatWeeks] = useState('12');
+  // 'ongoing' = no end date, matching the family self-booking flow's default —
+  // the daily recurrence worker keeps topping up new weeks forever on its own,
+  // so there was never a real reason to force picking a stop point up front.
+  const [repeatWeeks, setRepeatWeeks] = useState('ongoing');
   const [result, setResult] = useState<AddResult | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -365,7 +368,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
     setDate(defaultDate ?? ''); setNotes('');
     setSlots([]); setNoWindows(false); setPicks([]); setManualTime(defaultTime ?? '');
     setLetTeacherChoose(true);
-    setRepeat(false); setRepeatWeeks('12'); setResult(null); setError('');
+    setRepeat(false); setRepeatWeeks('ongoing'); setResult(null); setError('');
     const t = tok();
     const role = getRoleFromToken(t);
     const teacherSelf = role === 'teacher';
@@ -480,12 +483,25 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
         // recurring rule actually written to the enrollment. Anchor at noon UTC
         // and read getUTCDay() instead — zone-independent, same as elsewhere.
         const weekday = WEEKDAY_KEYS[(new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7];
+        // A finite pick needs its own endDate on the rule — without it the
+        // daily recurrence worker has no way to know to stop, and would just
+        // keep extending the series forever regardless of what was chosen here.
+        const endDate = repeatWeeks === 'ongoing'
+          ? undefined
+          : studioDayString(new Date(new Date(`${date}T12:00:00Z`).getTime() + (parseInt(repeatWeeks) || 12) * 7 * 86400000));
         await apiFetch(`/enrollments/${enrollmentId}`, {
-          method: 'PATCH', token: t, body: JSON.stringify({ scheduleRule: { weekday, startTime: times[0] } }),
+          method: 'PATCH', token: t, body: JSON.stringify({ scheduleRule: { weekday, startTime: times[0], endDate } }),
         });
         const r = await apiFetch<{ created: number; through: string }>('/lessons/recurring', {
           method: 'POST', token: t,
-          body: JSON.stringify({ enrollmentId, weeks: parseInt(repeatWeeks) || 12, startFrom: date }),
+          body: JSON.stringify({
+            enrollmentId,
+            // 'ongoing': omit weeks entirely so the API's own default window
+            // applies — the series doesn't stop there, the daily worker keeps
+            // extending it for as long as the enrolment stays active.
+            weeks: repeatWeeks === 'ongoing' ? undefined : parseInt(repeatWeeks) || undefined,
+            startFrom: date,
+          }),
         });
         onCreated();
         setResult({ kind: 'weekly', created: r.created, through: r.through });
@@ -721,14 +737,24 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
             <span className="text-sm font-semibold" style={{ color: 'var(--txt)' }}>Repeat weekly</span>
           </label>
           {repeat && (
-            <div className="mt-3 flex items-center gap-2">
-              <span className="text-sm" style={{ color: 'var(--txt3)' }}>Book the same slot for the next</span>
-              <div className="w-36">
-                <SearchableSelect
-                  options={[4, 8, 12, 16, 24, 36, 52].map(w => ({ value: String(w), label: `${w} weeks` }))}
-                  value={repeatWeeks} onChange={setRepeatWeeks}
-                />
+            <div className="mt-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm" style={{ color: 'var(--txt3)' }}>Book this slot</span>
+                <div className="w-44">
+                  <SearchableSelect
+                    options={[
+                      { value: 'ongoing', label: 'Ongoing (no end date)' },
+                      ...[4, 8, 12, 16, 24, 36, 52].map(w => ({ value: String(w), label: `${w} weeks, then stop` })),
+                    ]}
+                    value={repeatWeeks} onChange={setRepeatWeeks}
+                  />
+                </div>
               </div>
+              <p className="text-[11px] mt-1.5" style={{ color: 'var(--txt4)' }}>
+                {repeatWeeks === 'ongoing'
+                  ? 'Keeps booking every week automatically until someone cancels it.'
+                  : `Books every week for ${repeatWeeks} weeks, then stops on its own.`}
+              </p>
             </div>
           )}
         </div>

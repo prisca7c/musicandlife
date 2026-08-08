@@ -365,7 +365,7 @@ export class SchedulingService {
     enrollmentId: string,
     opts?: { weeks?: number; fromDate?: string },
   ): Promise<{ created: number; skippedExisting: number; skippedConflicts: number; through: string; weeks: number }> {
-    const weeks = Math.min(Math.max(opts?.weeks ?? RECURRENCE_WINDOW_WEEKS, 1), 52);
+    const weeks = Math.min(Math.max(opts?.weeks ?? RECURRENCE_WINDOW_WEEKS, 1), 520);
 
     const enrollment = await this.db.db.query.enrollments.findFirst({
       where: and(eq(enrollments.id, enrollmentId), eq(enrollments.organizationId, orgId)),
