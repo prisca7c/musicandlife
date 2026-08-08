@@ -13,6 +13,59 @@ import { UserPlus } from 'lucide-react';
 
 interface StaffMember { id: string; firstName: string; lastName: string; title: string | null; instruments: string[]; status: string; hourlyRate: number; payrollBalance: number; user: { email: string } | null; assignments: { id: string }[]; }
 
+interface Colleague { id: string; firstName: string; lastName: string; title: string | null; phone: string | null; user: { email: string } | null; }
+
+function getRoleFromToken(token?: string): string {
+  try {
+    if (!token) return '';
+    const payload = JSON.parse(atob(token.split('.')[1]!));
+    return payload.role ?? '';
+  } catch { return ''; }
+}
+
+// Same underlying people, different lens: admins get the full staff record
+// (pay, payroll balance, status) with add/manage actions; managers and
+// teachers get a read-only name+contact directory — GET /staff/directory
+// projects exactly those columns server-side, so this is UI routing only,
+// not the privacy boundary itself.
+function ColleaguesDirectory() {
+  const { data: colleagues = [] } = useApi<Colleague[]>('/staff/directory');
+
+  return (
+    <div>
+      <PageHeader title="Colleagues" subtitle={`${colleagues.length} teacher${colleagues.length !== 1 ? 's' : ''}`} />
+
+      <div className="data-table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Title</th>
+              <th>Email</th>
+              <th>Phone</th>
+            </tr>
+          </thead>
+          <tbody>
+            {colleagues.length === 0 && (
+              <tr><td colSpan={4} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+                No other teachers yet.
+              </td></tr>
+            )}
+            {colleagues.map(c => (
+              <tr key={c.id}>
+                <td className="font-semibold" style={{ color: 'var(--sage-dk)' }}>{c.firstName} {c.lastName}</td>
+                <td style={{ color: 'var(--txt3)' }}>{c.title ?? '—'}</td>
+                <td style={{ color: 'var(--txt3)' }}>{c.user?.email ?? '—'}</td>
+                <td style={{ color: 'var(--txt3)' }}>{c.phone ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function AddStaffModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -117,10 +170,17 @@ function AddStaffModal({ open, onClose, onCreated }: { open: boolean; onClose: (
 
 export default function StaffPage() {
   const [showAdd, setShowAdd] = useState(false);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  const role = getRoleFromToken(tok());
+  const isAdmin = role === 'system_admin' || role === 'admin';
 
-  // Cached read — instant on revisit, revalidates in the background.
-  const { data: staff = [], mutate } = useApi<StaffMember[]>('/staff');
+  // Cached read — instant on revisit, revalidates in the background. Only
+  // admins can call /staff (full record incl. pay); everyone else gets the
+  // directory branch below, which never issues this request.
+  const { data: staff = [], mutate } = useApi<StaffMember[]>(isAdmin ? '/staff' : null);
   const load = () => mutate();
+
+  if (!isAdmin) return <ColleaguesDirectory />;
 
   return (
     <div>

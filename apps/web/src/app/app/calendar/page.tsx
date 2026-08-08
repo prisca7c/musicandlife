@@ -14,14 +14,15 @@ import { InfoTooltip } from '@/components/info-tooltip';
 import { AddStudentModal } from '@/components/add-student-modal';
 import { AssignStudentsModal } from '@/components/assign-students-modal';
 import { PRIVATE_INSTRUMENTS, GROUP_INSTRUMENTS, lessonRate } from '@music-life/types';
-import { ChevronDown, ChevronLeft, ChevronRight, UserPlus, Users } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, UserPlus, Users, Check, X, Repeat, PoundSterling, Shuffle } from 'lucide-react';
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string; notes: string | null;
   student: { id: string; firstName: string; lastName: string } | null;
   teacher: { id: string; firstName: string; lastName: string } | null;
   attendance: { status: string } | null;
-  enrollment: { instrument: string; lessonType: string; groupName?: string | null } | null;
+  enrollment: { instrument: string; lessonType: string; groupName?: string | null; teacherId?: string | null } | null;
+  paymentStatus?: 'paid' | 'unpaid' | 'void' | 'unbilled';
 }
 interface StaffMember { id: string; firstName: string; lastName: string; }
 interface Student { id: string; firstName: string; lastName: string; }
@@ -199,16 +200,17 @@ function teacherColor(teacherId?: string | null) {
   return TEACHER_PALETTE[hash % TEACHER_PALETTE.length]!;
 }
 
-// ─── Status colours (bg/border/text) — scheduled (upcoming) vs completed (done) ───────
-const STATUS_STYLE: Record<string, { bg: string; border: string; text: string }> = {
-  scheduled:           { bg: '#EBF4FF', border: '#90BEF0', text: '#2B6CB0' },
-  completed:           { bg: '#F0FFF4', border: '#68D391', text: '#22543D' },
-  cancelled_no_makeup: { bg: '#FFF5F5', border: '#FC8181', text: '#9B2C2C' },
-  cancelled_no_pay:    { bg: '#FFFAF0', border: '#F6AD55', text: '#7B341E' },
-  cancelled_teacher:   { bg: '#FFFFF0', border: '#F6E05E', text: '#744210' },
-  cancelled_makeup:    { bg: '#F5F0FF', border: '#C4B5FD', text: '#5B3F9E' },
-  makeup:              { bg: '#F5F0FF', border: '#C4B5FD', text: '#5B3F9E' },
+// ─── Status landmarks — a small icon badge showing what happened, independent
+// of colour (which is now the teacher's). No entry = upcoming/normal, no badge.
+const STATUS_LANDMARK: Record<string, { Icon: typeof Check; color: string; title: string }> = {
+  completed:           { Icon: Check,  color: '#22543D', title: 'Present' },
+  cancelled_makeup:    { Icon: Repeat, color: '#5B3F9E', title: 'Cancelled ≥24h — makeup credit issued' },
+  cancelled_no_makeup: { Icon: X,      color: '#9B2C2C', title: 'Cancelled <24h — charged, no credit' },
+  cancelled_no_pay:    { Icon: X,      color: '#7B341E', title: 'Excused — no charge, no credit' },
+  cancelled_teacher:   { Icon: X,      color: '#744210', title: 'Teacher cancelled — no charge' },
 };
+const PAID_COLOR = '#22543D';
+const UNPAID_COLOR = '#9B2C2C';
 
 // ─── Lesson block ─────────────────────────────────────────────────────────────
 function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () => void }) {
@@ -217,48 +219,60 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
   const left   = `${(lesson.col / lesson.totalCols) * 100}%`;
   const width  = `calc(${(1 / lesson.totalCols) * 100}% - 3px)`;
 
-  const style   = STATUS_STYLE[lesson.status] ?? STATUS_STYLE.scheduled!;
-  const instr   = lesson.enrollment?.instrument;
-  const isGrp   = lesson.enrollment?.lessonType === 'group';
-  const tColor  = teacherColor(lesson.teacher?.id);
-  const iColor  = instrColor(instr);
-  const tall    = height >= 52;
-  const xtall   = height >= 72;
+  const instr    = lesson.enrollment?.instrument;
+  const isGrp    = lesson.enrollment?.lessonType === 'group';
+  const tColor   = teacherColor(lesson.teacher?.id);
+  const iColor   = instrColor(instr);
+  const tall     = height >= 52;
+  const xtall    = height >= 72;
+  const landmark = STATUS_LANDMARK[lesson.status];
+  // A substitute: someone other than the student's normal enrolled teacher is
+  // covering this one occurrence.
+  const isSub = !!lesson.enrollment?.teacherId && !!lesson.teacher && lesson.enrollment.teacherId !== lesson.teacher.id;
 
   return (
     <button
       onClick={onClick}
-      style={{ top, height, left, width, background: style.bg, borderTopColor: style.border, borderRightColor: style.border, borderBottomColor: style.border, borderLeftColor: tColor, borderLeftWidth: 3 }}
-      className="absolute rounded-r-lg border cursor-pointer text-left px-1.5 py-1 overflow-hidden transition-all hover:brightness-95 hover:shadow-md group z-10"
+      style={{ top, height, left, width, background: hexToRgba(tColor, 0.14), borderColor: hexToRgba(tColor, 0.55) }}
+      className="absolute rounded-lg border cursor-pointer text-left px-1.5 py-1 overflow-hidden transition-all hover:brightness-95 hover:shadow-md group z-10"
     >
-      {/* Time range — always shown */}
-      <p className="text-[9px] font-bold leading-none mb-0.5 tabular-nums"
-        style={{ color: style.text, opacity: 0.7 }}>
-        {fmtTime(lesson.startsAt)}–{fmtTimeEnd(lesson.startsAt, lesson.duration)}
-      </p>
+      {/* Time range + status/payment landmarks */}
+      <div className="flex items-center justify-between gap-1 mb-0.5">
+        <p className="text-[9px] font-bold leading-none tabular-nums" style={{ color: tColor, opacity: 0.75 }}>
+          {fmtTime(lesson.startsAt)}–{fmtTimeEnd(lesson.startsAt, lesson.duration)}
+        </p>
+        <span className="flex items-center gap-0.5 shrink-0">
+          {isSub && <Shuffle size={9} style={{ color: tColor }} aria-label="Substitute teacher" />}
+          {lesson.paymentStatus === 'paid' && <PoundSterling size={9} style={{ color: PAID_COLOR }} aria-label="Paid" />}
+          {lesson.paymentStatus === 'unpaid' && <PoundSterling size={9} style={{ color: UNPAID_COLOR }} aria-label="Unpaid" />}
+          {landmark && <landmark.Icon size={10} style={{ color: landmark.color }} aria-label={landmark.title} />}
+        </span>
+      </div>
 
       {/* Student name */}
-      <p className="text-[11px] font-bold leading-tight truncate" style={{ color: style.text }}>
+      <p className="text-[11px] font-bold leading-tight truncate" style={{ color: tColor }}>
         {lesson.student?.firstName} {lesson.student?.lastName}
       </p>
 
-      {/* Instrument + type badge */}
-      {tall && instr && (
+      {/* Instrument + type badge — always shown below the name (not gated on height) */}
+      {instr && (
         <p className="flex items-center gap-1 mt-0.5">
           <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={11} /></span>
           <span className="text-[10px] font-semibold capitalize truncate" style={{ color: iColor }}>
             {instr}
           </span>
-          <span className={`text-[8px] font-bold px-1 py-px rounded-full leading-none shrink-0
-            ${isGrp ? 'bg-blue-100 text-blue-700' : 'bg-[var(--sage-lt)] text-[var(--sage)]'}`}>
-            {isGrp ? 'G' : 'P'}
-          </span>
+          {tall && (
+            <span className={`text-[8px] font-bold px-1 py-px rounded-full leading-none shrink-0
+              ${isGrp ? 'bg-blue-100 text-blue-700' : 'bg-[var(--sage-lt)] text-[var(--sage)]'}`}>
+              {isGrp ? 'G' : 'P'}
+            </span>
+          )}
         </p>
       )}
 
       {/* Group name */}
       {xtall && isGrp && lesson.enrollment?.groupName && (
-        <p className="text-[10px] italic leading-tight truncate" style={{ color: style.text, opacity: 0.65 }}>
+        <p className="text-[10px] italic leading-tight truncate" style={{ color: tColor, opacity: 0.65 }}>
           {lesson.enrollment.groupName}
         </p>
       )}
@@ -267,8 +281,8 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
       {xtall && lesson.teacher && (
         <p className="flex items-center gap-1 mt-px">
           <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tColor }} />
-          <span className="text-[10px] leading-tight truncate" style={{ color: style.text, opacity: 0.65 }}>
-            {lesson.teacher.firstName} {lesson.teacher.lastName}
+          <span className="text-[10px] leading-tight truncate" style={{ color: tColor, opacity: 0.65 }}>
+            {lesson.teacher.firstName} {lesson.teacher.lastName}{isSub ? ' (sub)' : ''}
           </span>
         </p>
       )}
@@ -839,34 +853,47 @@ function NewDefaultLessonModal({ open, onClose, onCreated, defaultDate, defaultT
 
 // ─── Lesson detail modal ──────────────────────────────────────────────────────
 const PRIVATE_ATTENDANCE = [
-  { status: 'present',           label: 'Present' },
-  { status: 'absent_makeup',     label: 'Makeup (≥24h)' },
-  { status: 'absent_no_makeup',  label: 'No makeup (<24h)' },
-  { status: 'absent_no_pay',     label: 'No class, no pay' },
-  { status: 'cancelled_teacher', label: 'Teacher cancel' },
+  { status: 'present',           label: 'Present', hint: 'Lesson happened as scheduled.' },
+  { status: 'absent_makeup',     label: 'Cancelled ≥24h notice', hint: 'No charge — makeup credit issued, teacher not paid.' },
+  { status: 'absent_no_makeup',  label: 'Cancelled <24h notice', hint: 'Family is charged, no credit given, teacher is still paid.' },
+  { status: 'absent_no_pay',     label: 'Excused (no charge)', hint: 'No charge, no credit, teacher not paid — e.g. studio-approved exception.' },
+  { status: 'cancelled_teacher', label: 'Teacher cancelled', hint: 'No charge to the family, teacher not paid for this slot.' },
 ] as const;
 const GROUP_ATTENDANCE = [
-  { status: 'present',           label: 'Present' },
-  { status: 'absent_no_pay',     label: 'Absent' },
-  { status: 'cancelled_teacher', label: 'Cancelled' },
+  { status: 'present',           label: 'Present', hint: 'Lesson happened as scheduled.' },
+  { status: 'absent_no_pay',     label: 'Absent', hint: 'No charge, no credit, teacher not paid.' },
+  { status: 'cancelled_teacher', label: 'Cancelled', hint: 'No charge to the family, teacher not paid for this slot.' },
 ] as const;
 
-function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false }: {
+const PAYMENT_LABEL: Record<string, { label: string; color: string }> = {
+  paid:     { label: 'Paid',            color: 'var(--sage-dk)' },
+  unpaid:   { label: 'Unpaid',          color: 'var(--coral)' },
+  void:     { label: 'Voided invoice',  color: 'var(--txt4)' },
+  unbilled: { label: 'Not yet billed',  color: 'var(--txt4)' },
+};
+
+function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false, canManage = false, staffOptions = [] }: {
   lesson: Lesson | null; open: boolean; onClose: () => void; onUpdated: () => void;
   // When a teacher is viewing another teacher's lesson from the whole-studio
   // calendar: the schedule is visible but attendance/reschedule/cancel are not
   // theirs to touch (the API would refuse anyway — this just hides dead buttons).
   readOnly?: boolean;
+  // Admin/receptionist+ only — teachers can't reassign lessons, so the
+  // substitute picker only renders for roles that can actually call it.
+  canManage?: boolean;
+  staffOptions?: StaffMember[];
 }) {
   const [saving, setSaving] = useState(false);
   const [showReschedule, setShowReschedule] = useState(false);
   const [newDate, setNewDate] = useState('');
   const [newTime, setNewTime] = useState('');
   const [actionError, setActionError] = useState('');
+  const [showSub, setShowSub] = useState(false);
+  const [subTeacherId, setSubTeacherId] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   useEffect(() => {
-    setShowReschedule(false); setActionError('');
+    setShowReschedule(false); setActionError(''); setShowSub(false); setSubTeacherId('');
     if (lesson) {
       // Prefill date + time in the studio zone so they match what's shown elsewhere
       // and round-trip correctly (the backend interprets the naive value as studio-local).
@@ -909,6 +936,19 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false 
     } finally { setSaving(false); }
   }
 
+  async function assignSubstitute() {
+    if (!subTeacherId) return;
+    setSaving(true); setActionError('');
+    try {
+      await apiFetch(`/lessons/${lesson!.id}`, {
+        method: 'PATCH', token: tok(), body: JSON.stringify({ teacherId: subTeacherId }),
+      });
+      onUpdated(); onClose();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not assign substitute — check they\'re free at this time');
+    } finally { setSaving(false); }
+  }
+
   async function rescheduleLesson() {
     if (!newDate || !newTime) return;
     setSaving(true); setActionError('');
@@ -925,6 +965,10 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false 
   const instr = lesson.enrollment?.instrument;
   const isGrp = lesson.enrollment?.lessonType === 'group';
   const actions = isGrp ? GROUP_ATTENDANCE : PRIVATE_ATTENDANCE;
+  const isSub = !!lesson.enrollment?.teacherId && !!lesson.teacher && lesson.enrollment.teacherId !== lesson.teacher.id;
+  const normalTeacher = staffOptions.find(s => s.id === lesson.enrollment?.teacherId);
+  const payment = lesson.paymentStatus ? PAYMENT_LABEL[lesson.paymentStatus] : null;
+  const canSub = canManage && !readOnly && (lesson.status === 'scheduled' || lesson.status === 'makeup');
 
   return (
     <Modal open={open} onClose={onClose} title="Lesson details">
@@ -964,14 +1008,29 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false 
               <span className="font-medium">{lesson.enrollment.groupName}</span>
             </div>
           )}
-          <div className="flex justify-between">
-            <span style={{ color: 'var(--txt3)' }}>Teacher</span>
-            <span className="font-medium">{lesson.teacher ? `${lesson.teacher.firstName} ${lesson.teacher.lastName}` : '—'}</span>
+          <div className="flex justify-between items-start gap-4">
+            <span className="shrink-0" style={{ color: 'var(--txt3)' }}>Teacher</span>
+            <span className="text-right">
+              <span className="font-medium">{lesson.teacher ? `${lesson.teacher.firstName} ${lesson.teacher.lastName}` : '—'}</span>
+              {isSub && (
+                <span className="flex items-center justify-end gap-1 text-[11px] mt-0.5" style={{ color: 'var(--txt4)' }}>
+                  <Shuffle size={11} /> covering for {normalTeacher ? `${normalTeacher.firstName} ${normalTeacher.lastName}` : 'usual teacher'}
+                </span>
+              )}
+            </span>
           </div>
           <div className="flex justify-between items-center">
             <span style={{ color: 'var(--txt3)' }}>Status</span>
             <Badge variant={lesson.status}>{lessonStatusLabel(lesson.status)}</Badge>
           </div>
+          {payment && (
+            <div className="flex justify-between items-center">
+              <span style={{ color: 'var(--txt3)' }}>Payment</span>
+              <span className="font-semibold flex items-center gap-1" style={{ color: payment.color }}>
+                <PoundSterling size={12} /> {payment.label}
+              </span>
+            </div>
+          )}
           {lesson.attendance && (
             <div className="flex justify-between items-center">
               <span style={{ color: 'var(--txt3)' }}>Attendance</span>
@@ -989,17 +1048,48 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false 
         {!readOnly && lesson.status === 'scheduled' && (
           <div>
             <p className="text-sm font-semibold mb-2" style={{ color: 'var(--txt2)' }}>Mark attendance</p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2">
               {actions.map(a => (
                 <button key={a.status} onClick={() => markAttendance(a.status)} disabled={saving}
-                  className="text-left text-sm rounded-[9px] px-3 py-2 font-medium transition-colors disabled:opacity-50"
+                  className="text-left text-sm rounded-[9px] px-3 py-2 transition-colors disabled:opacity-50"
                   style={{ border: '1.5px solid var(--bd2)', color: 'var(--txt2)', background: '#fff' }}
                   onMouseOver={e => (e.currentTarget.style.background = 'var(--surf)')}
                   onMouseOut={e => (e.currentTarget.style.background = '#fff')}>
-                  {a.label}
+                  <span className="font-medium block">{a.label}</span>
+                  <span className="text-[11px] block mt-0.5" style={{ color: 'var(--txt4)' }}>{a.hint}</span>
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {canSub && (
+          <div>
+            {showSub ? (
+              <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
+                <p className="text-sm font-semibold" style={{ color: 'var(--txt2)' }}>Cover with a substitute teacher</p>
+                <SearchableSelect
+                  value={subTeacherId}
+                  onChange={setSubTeacherId}
+                  options={staffOptions.filter(s => s.id !== lesson.teacher?.id).map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+                  placeholder="Choose a substitute…"
+                />
+                <div className="flex gap-2">
+                  <button onClick={assignSubstitute} disabled={saving || !subTeacherId} className="ui-btn-primary text-sm">
+                    {saving ? 'Saving…' : 'Assign substitute'}
+                  </button>
+                  <button onClick={() => setShowSub(false)} className="ui-btn-ghost text-sm">Cancel</button>
+                </div>
+                <p className="text-[11px]" style={{ color: 'var(--txt4)' }}>
+                  This changes the teacher for just this one lesson — it won&apos;t affect the student&apos;s regular enrolment or future lessons.
+                </p>
+              </div>
+            ) : (
+              <button onClick={() => setShowSub(true)} disabled={saving}
+                className="ui-btn-ghost text-sm w-full flex items-center justify-center gap-1.5 disabled:opacity-50">
+                <Shuffle size={14} /> Assign a substitute teacher
+              </button>
+            )}
           </div>
         )}
 
@@ -1288,6 +1378,8 @@ export default function CalendarPage() {
         onClose={() => setSelectedLesson(null)}
         onUpdated={load}
         readOnly={role === 'teacher' && !!myStaffId && !!selectedLesson?.teacher && selectedLesson.teacher.id !== myStaffId}
+        canManage={isManagement}
+        staffOptions={staff}
       />
       <AddStudentModal open={showAddStudent} onClose={() => setShowAddStudent(false)} onCreated={load} />
       <AssignStudentsModal open={showAssign} onClose={() => setShowAssign(false)} teachers={staff} onChanged={load} />
@@ -1682,22 +1774,26 @@ export default function CalendarPage() {
                     {shown.map(l => {
                       const c = teacherColor(l.teacher?.id);
                       const cancelled = l.status.startsWith('cancelled');
+                      const landmark = STATUS_LANDMARK[l.status];
                       return (
                         <div
                           key={l.id}
                           onClick={(e) => { e.stopPropagation(); setSelectedLesson(l); }}
                           className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] font-medium truncate cursor-pointer hover:brightness-95"
                           style={{
-                            background: hexToRgba(c, 0.12),
-                            borderLeft: `2px solid ${c}`,
+                            background: hexToRgba(c, 0.14),
+                            border: `1px solid ${hexToRgba(c, 0.5)}`,
                             color: 'var(--txt2)',
                             textDecoration: cancelled ? 'line-through' : undefined,
                             opacity: cancelled ? 0.6 : 1,
                           }}
-                          title={`${fmtTime(l.startsAt)} ${l.student?.firstName ?? ''} ${l.student?.lastName ?? ''}${l.teacher ? ' · ' + l.teacher.firstName + ' ' + l.teacher.lastName : ''}`}
+                          title={`${fmtTime(l.startsAt)} ${l.student?.firstName ?? ''} ${l.student?.lastName ?? ''}${l.teacher ? ' · ' + l.teacher.firstName + ' ' + l.teacher.lastName : ''}${l.enrollment?.instrument ? ' · ' + l.enrollment.instrument : ''}`}
                         >
                           <span className="tabular-nums shrink-0" style={{ color: c }}>{fmtTime(l.startsAt)}</span>
-                          <span className="truncate">{l.student?.firstName} {l.student?.lastName?.[0] ?? ''}</span>
+                          <span className="truncate flex-1">{l.student?.firstName} {l.student?.lastName?.[0] ?? ''}</span>
+                          {l.paymentStatus === 'paid' && <PoundSterling size={8} className="shrink-0" style={{ color: PAID_COLOR }} />}
+                          {l.paymentStatus === 'unpaid' && <PoundSterling size={8} className="shrink-0" style={{ color: UNPAID_COLOR }} />}
+                          {landmark && <landmark.Icon size={8} className="shrink-0" style={{ color: landmark.color }} />}
                         </div>
                       );
                     })}
