@@ -143,8 +143,11 @@ function AdminDashboard() {
         )}
       </div>
 
-      {/* Row 1 — snapshot (scoped to own students/lessons for teachers) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      {/* Row 1 — snapshot (scoped to own students/lessons for teachers). A
+          teacher only gets 2 of these 4 cards (no Families/Teaching staff), so
+          force a 2-col grid for them — lg:grid-cols-4 with 2 cards left the
+          right half of the row (and everything above "Today's lessons") blank. */}
+      <div className={`grid grid-cols-2 ${kpis?.scoped ? '' : 'lg:grid-cols-4'} gap-4 mb-4`}>
         <StatCard label={kpis?.scoped ? 'My students' : 'Active students'} href="/app/students" icon={<UserCheck size={20} />}
           value={kpis?.students.active ?? '—'}
           sub={kpis?.students.trial ? `+ ${kpis.students.trial} on trial` : undefined} />
@@ -162,7 +165,7 @@ function AdminDashboard() {
       </div>
 
       {/* Row 2 — Activity (financials hidden for teachers) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className={`grid grid-cols-2 ${kpis?.scoped ? '' : 'lg:grid-cols-4'} gap-4 mb-6`}>
         <StatCard label="This week" href="/app/calendar" icon={<Calendar size={20} />} muted
           value={kpis?.weeklyLessons.total ?? '—'}
           sub={kpis ? `${kpis.weeklyLessons.completed} done · ${kpis.weeklyLessons.scheduled} ahead` : undefined} />
