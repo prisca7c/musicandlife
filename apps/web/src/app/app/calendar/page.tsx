@@ -247,11 +247,21 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
   // A substitute: someone other than the student's normal enrolled teacher is
   // covering this one occurrence.
   const isSub = !!lesson.enrollment?.teacherId && !!lesson.teacher && lesson.enrollment.teacherId !== lesson.teacher.id;
+  // A cancelled lesson used to render with the exact same full-strength colour
+  // as a live one — the only tell was a 10px icon — so a cancelled block still
+  // read as "there's a lesson here" at a glance. Dim it and strike the name,
+  // matching how the month view already marks cancellations.
+  const cancelled = lesson.status.startsWith('cancelled');
 
   return (
     <button
       onClick={onClick}
-      style={{ top, height, left, width, background: hexToRgba(tColor, 0.14), borderColor: hexToRgba(tColor, 0.55) }}
+      style={{
+        top, height, left, width,
+        background: hexToRgba(tColor, cancelled ? 0.06 : 0.14),
+        borderColor: hexToRgba(tColor, cancelled ? 0.3 : 0.55),
+        opacity: cancelled ? 0.65 : 1,
+      }}
       className="absolute rounded-lg border cursor-pointer text-left px-1.5 py-1 overflow-hidden transition-all hover:brightness-95 hover:shadow-md group z-10"
     >
       {/* Time range + status/payment landmarks */}
@@ -268,7 +278,7 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
       </div>
 
       {/* Student name */}
-      <p className="text-[11px] font-bold leading-tight truncate" style={{ color: tColor }}>
+      <p className="text-[11px] font-bold leading-tight truncate" style={{ color: tColor, textDecoration: cancelled ? 'line-through' : undefined }}>
         {lesson.student?.firstName} {lesson.student?.lastName}
       </p>
 
@@ -1403,18 +1413,22 @@ export default function CalendarPage() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
+      {/* Clicking a specific grid cell pre-fills that day (slotDate); the
+          generic toolbar button has no such intent, so it should default to
+          today — not whatever day/week happens to be scrolled into view,
+          which could be any date the calendar was last navigated to. */}
       <AddLessonModal
         open={showAdd}
         onClose={() => { setShowAdd(false); setSlotDate(undefined); setSlotTime(undefined); }}
         onCreated={load}
-        defaultDate={slotDate ?? (view === 'day' ? anchorStr : formatDate(weekStart))}
+        defaultDate={slotDate ?? todayStr}
         defaultTime={slotTime}
       />
       <NewDefaultLessonModal
         open={showQuickAdd}
         onClose={() => setShowQuickAdd(false)}
         onCreated={load}
-        defaultDate={view === 'day' ? anchorStr : formatDate(weekStart)}
+        defaultDate={todayStr}
       />
       <LessonDetailModal
         lesson={selectedLesson}
