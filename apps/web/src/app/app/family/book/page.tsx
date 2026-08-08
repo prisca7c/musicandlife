@@ -210,13 +210,6 @@ export default function BookLessonPage() {
   const cutoff = Date.now() + LEAD_HOURS * 3600000;
   const slotKey = (s: Slot) => `${s.enrollmentId}@${s.startsAt}`;
   const pickRank = (s: Slot) => picks.findIndex(p => slotKey(p) === slotKey(s));
-  // A back-up that overlaps a time already picked is useless — the lesson can't
-  // sit in two places at once, so the teacher could never move it there. (Easy
-  // to hit with a 60-min lesson and 15-min slots: 09:30 falls inside 09:00.)
-  const overlapsPick = (s: Slot) =>
-    picks.some(p => p.enrollmentId === s.enrollmentId
-      && slotKey(p) !== slotKey(s)
-      && Math.abs(new Date(p.startsAt).getTime() - new Date(s.startsAt).getTime()) < s.duration * 60000);
 
   function toggleSlot(s: Slot) {
     const existing = pickRank(s);
@@ -322,6 +315,16 @@ export default function BookLessonPage() {
           </div>
         )}
 
+        {/* Single teacher in scope: no filter chips needed, but the parent still
+            needs to see who they're booking with — previously this was only in
+            a hover tooltip on each slot, invisible until you moused over one. */}
+        {!multiTeacher && scopeTeachers.length === 1 && (
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: 'var(--txt3)' }}>
+            <span className="w-2 h-2 rounded-full" style={{ background: scopeTeachers[0]!.color }} />
+            with {scopeTeachers[0]!.name}
+          </span>
+        )}
+
         {multiTeacher && (
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-xs font-semibold mr-1" style={{ color: 'var(--txt3)' }}>Teachers:</span>
@@ -414,16 +417,13 @@ export default function BookLessonPage() {
                             const rank = pickRank(s);
                             const picked = rank >= 0;
                             const tooSoon = new Date(s.startsAt).getTime() < cutoff;
-                            const overlaps = !picked && overlapsPick(s);
                             const showPrice = priceAmbiguous.has(instrKey(s.studentId, s.instrument));
                             const showLabel = multiKind || showPrice;
                             const c = colorFor(s.teacherId);
                             return (
-                              <button key={slotKey(s)} disabled={tooSoon || overlaps} onClick={() => toggleSlot(s)}
+                              <button key={slotKey(s)} disabled={tooSoon} onClick={() => toggleSlot(s)}
                                 title={tooSoon
                                   ? `Online bookings need ${LEAD_HOURS}h notice — call the studio for sooner.`
-                                  : overlaps
-                                  ? 'Overlaps a time you’ve already picked.'
                                   : `${s.studentName} · ${cap(s.instrument)} · ${formatMoney(s.price)} · ${s.teacherName}`}
                                 className="relative w-full rounded-lg text-xs font-semibold border py-1.5 px-1 transition disabled:opacity-35 disabled:cursor-not-allowed"
                                 style={picked
@@ -518,19 +518,21 @@ export default function BookLessonPage() {
                     <p className="text-xs mb-2 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)' }}>
                       Books this time every week — no need to rebook. Back-up times don&apos;t apply to a weekly series.
                     </p>
-                    <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--txt2)' }}>
-                      <span className="whitespace-nowrap">Ends on (optional):</span>
+                    <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt2)' }}>
+                      Ends on (optional)
+                    </label>
+                    <div className="flex items-center gap-2">
                       <input type="date" value={recurringEnd}
                         min={picks[0] ? studioDayString(picks[0].startsAt) : undefined}
                         onChange={e => setRecurringEnd(e.target.value)}
-                        className="ui-input text-xs py-1" />
+                        className="ui-input text-xs py-1.5 flex-1 min-w-0" />
                       {recurringEnd && (
                         <button type="button" onClick={() => setRecurringEnd('')}
-                          className="text-[var(--txt4)] hover:text-[var(--txt)]" aria-label="Clear end date">
+                          className="shrink-0 text-[var(--txt4)] hover:text-[var(--txt)]" aria-label="Clear end date">
                           <X size={13} />
                         </button>
                       )}
-                    </label>
+                    </div>
                     <p className="text-[11px] mt-1" style={{ color: 'var(--txt4)' }}>
                       Leave blank to keep going until you cancel.
                     </p>
