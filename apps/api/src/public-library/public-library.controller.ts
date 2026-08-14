@@ -37,21 +37,21 @@ export class PublicLibraryController {
   // ─── Staff admin ────────────────────────────────────────────────────────────
   @Get('resource-subscribers')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('receptionist')
+  @Roles('admin')
   list(@CurrentUser() user: RequestUser) {
     return this.library.list(user.orgId);
   }
 
   @Post('resource-subscribers/:id/activate')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('receptionist')
+  @Roles('admin')
   activate(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.library.activate(user.orgId, id);
   }
 
   @Post('resource-subscribers/:id/cancel')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('receptionist')
+  @Roles('admin')
   cancel(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.library.cancel(user.orgId, id);
   }

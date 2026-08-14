@@ -13,14 +13,14 @@ export class EnrollmentsController {
   constructor(private readonly enrollments: EnrollmentsService) {}
 
   @Patch(':id')
-  @Roles('receptionist')
+  @Roles('admin')
   update(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: UpdateEnrollmentDto) {
     return this.enrollments.update(user.orgId, id, dto);
   }
 
   // Stop an ongoing weekly series (clear the rule + cancel future lessons).
   @Post(':id/stop-recurring')
-  @Roles('receptionist')
+  @Roles('admin')
   stopRecurring(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.enrollments.stopRecurring(user.orgId, id);
   }

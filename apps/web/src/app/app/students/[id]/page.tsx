@@ -554,7 +554,7 @@ export default function StudentDetailPage() {
                 admin-gated server-side) — hidden rather than shown-disabled
                 for everyone else, so a receptionist/teacher/manager on this
                 page isn't shown a button that would just 403. */}
-            {student.status !== 'withdrawn' && (role === 'admin' || role === 'system_admin') && (
+            {student.status !== 'withdrawn' && (role === 'admin') && (
               <button onClick={withdrawStudent} disabled={withdrawing}
                 className="text-xs font-semibold hover:underline disabled:opacity-50"
                 style={{ color: 'var(--coral)' }}>

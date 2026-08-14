@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, gte } from 'drizzle-orm';
 import {
   staffMembers, staffPrivileges, teacherAssignments,
-  users, memberships, passwordResetTokens, availability, blockedTime, students,
+  users, memberships, passwordResetTokens, availability, blockedTime, students, lessons,
 } from '@music-life/db';
 import { DEFAULT_TEACHER_PRIVILEGES } from '@music-life/types';
 import { randomBytes, createHash } from 'crypto';
@@ -156,8 +156,40 @@ export class StaffService {
   }
 
   async update(orgId: string, id: string, dto: UpdateStaffDto) {
-    await this.findOne(orgId, id);
+    const existing = await this.findOne(orgId, id);
     const { email: _email, ...staffData } = dto as UpdateStaffDto & { email?: string };
+
+    // Deactivating a teacher must also clear their diary — same failure mode #172
+    // already fixed for the nightly recurrence worker (it now skips inactive
+    // teachers going forward), but a teacher's already-scheduled future lessons
+    // were never cancelled, so they stayed bookable/attendable/billable under a
+    // teacher who'd left. Cancel every future scheduled lesson at no charge in
+    // the same transaction as the status flip, mirroring students.remove()'s
+    // withdrawal teardown. Past/completed lessons are untouched.
+    if (staffData.status === 'inactive' && existing.status !== 'inactive') {
+      return this.db.db.transaction(async (tx) => {
+        const now = new Date();
+        const [updated] = await tx
+          .update(staffMembers)
+          .set({ ...staffData, updatedAt: now })
+          .where(and(eq(staffMembers.id, id), eq(staffMembers.organizationId, orgId)))
+          .returning();
+
+        const cancelled = await tx
+          .update(lessons)
+          .set({ status: 'cancelled_no_pay', cancelledAt: now, updatedAt: now })
+          .where(and(
+            eq(lessons.organizationId, orgId),
+            eq(lessons.teacherId, id),
+            eq(lessons.status, 'scheduled'),
+            gte(lessons.startsAt, now),
+          ))
+          .returning({ id: lessons.id });
+
+        return { ...updated!, cancelledLessons: cancelled.length };
+      });
+    }
+
     const [updated] = await this.db.db
       .update(staffMembers)
       .set({ ...staffData, updatedAt: new Date() })

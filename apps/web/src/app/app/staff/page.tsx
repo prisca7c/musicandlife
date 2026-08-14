@@ -172,7 +172,7 @@ export default function StaffPage() {
   const [showAdd, setShowAdd] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
   const role = getRoleFromToken(tok());
-  const isAdmin = role === 'system_admin' || role === 'admin';
+  const isAdmin = role === 'admin';
 
   // Cached read — instant on revisit, revalidates in the background. Only
   // admins can call /staff (full record incl. pay); everyone else gets the

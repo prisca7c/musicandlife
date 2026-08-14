@@ -8,11 +8,11 @@ import type { BaseRole } from '@music-life/types';
  *     longer open /app/staff by typing the URL and land on an empty admin page);
  *   - app-shell.tsx filters the sidebar to the links a role is allowed to use.
  *
- * Membership is EXACT, not hierarchical — /app/attendance admits teachers but
- * not receptionists even though a receptionist outranks a teacher, so a plain
- * ROLE_LEVEL threshold would be wrong here. The API (RolesGuard) remains the
- * real security boundary; this map is about not showing people doors that only
- * open onto a 403.
+ * Membership is EXACT, not hierarchical — admin and teacher are the only two
+ * staff-side roles now, and which pages a teacher can reach isn't just "below
+ * admin," so a plain ROLE_LEVEL threshold would be wrong here. The API
+ * (RolesGuard) remains the real security boundary; this map is about not
+ * showing people doors that only open onto a 403.
  *
  * Edge-safe: pure data + string helpers, no JSX or Node APIs, so middleware
  * (edge runtime) can import it.
@@ -20,35 +20,35 @@ import type { BaseRole } from '@music-life/types';
 export interface RouteAccess { href: string; roles: BaseRole[]; }
 
 export const ROUTE_ACCESS: RouteAccess[] = [
-  { href: '/app/dashboard',             roles: ['system_admin', 'admin', 'manager', 'receptionist', 'teacher'] },
+  { href: '/app/dashboard',             roles: ['admin', 'teacher'] },
   { href: '/app/family/dashboard',      roles: ['guardian', 'student'] },
   { href: '/app/family/book',           roles: ['guardian', 'student'] },
   { href: '/app/family/history',        roles: ['guardian', 'student'] },
   { href: '/app/family/notes',          roles: ['guardian', 'student'] },
   { href: '/app/family/calendar',       roles: ['guardian', 'student'] },
-  { href: '/app/calendar',              roles: ['system_admin', 'admin', 'manager', 'receptionist', 'teacher'] },
-  { href: '/app/attendance',            roles: ['system_admin', 'admin', 'manager', 'teacher'] },
-  { href: '/app/lesson-requests',       roles: ['system_admin', 'admin', 'manager', 'receptionist', 'teacher'] },
+  { href: '/app/calendar',              roles: ['admin', 'teacher'] },
+  { href: '/app/attendance',            roles: ['admin', 'teacher'] },
+  { href: '/app/lesson-requests',       roles: ['admin', 'teacher'] },
   { href: '/app/availability',          roles: ['teacher'] },
-  { href: '/app/notes',                 roles: ['system_admin', 'admin', 'manager', 'teacher'] },
-  { href: '/app/students',              roles: ['system_admin', 'admin', 'manager', 'receptionist', 'teacher'] },
-  { href: '/app/families',              roles: ['system_admin', 'admin', 'manager', 'receptionist'] },
-  { href: '/app/staff/payroll',         roles: ['system_admin', 'admin', 'manager'] },
-  // One page, two views: admins get the full staff record, managers/teachers
-  // get the read-only colleagues directory (StaffPage branches by role).
-  { href: '/app/staff',                 roles: ['system_admin', 'admin', 'manager', 'teacher'] },
+  { href: '/app/notes',                 roles: ['admin', 'teacher'] },
+  { href: '/app/students',              roles: ['admin', 'teacher'] },
+  { href: '/app/families',              roles: ['admin'] },
+  { href: '/app/staff/payroll',         roles: ['admin'] },
+  // One page, two views: admins get the full staff record, teachers get the
+  // read-only colleagues directory (StaffPage branches by role).
+  { href: '/app/staff',                 roles: ['admin', 'teacher'] },
   { href: '/app/my-pay',                roles: ['teacher'] },
-  { href: '/app/billing/reconciliation', roles: ['system_admin', 'admin', 'manager', 'receptionist'] },
-  { href: '/app/billing',               roles: ['system_admin', 'admin', 'manager', 'receptionist', 'guardian', 'student'] },
-  { href: '/app/intake',                roles: ['system_admin', 'admin', 'manager', 'receptionist'] },
-  { href: '/app/messaging',             roles: ['system_admin', 'admin', 'manager', 'teacher', 'guardian', 'student'] },
-  { href: '/app/resource-subscribers',  roles: ['system_admin', 'admin', 'manager', 'receptionist'] },
-  { href: '/app/resources',             roles: ['system_admin', 'admin', 'manager', 'teacher', 'guardian', 'student'] },
-  { href: '/app/content',               roles: ['system_admin', 'admin', 'manager', 'teacher'] },
-  { href: '/app/news',                  roles: ['system_admin', 'admin'] },
-  { href: '/app/broadcasts',            roles: ['system_admin', 'admin', 'manager'] },
-  { href: '/app/reports',               roles: ['system_admin', 'admin', 'manager'] },
-  { href: '/app/settings',              roles: ['system_admin', 'admin'] },
+  { href: '/app/billing/reconciliation', roles: ['admin'] },
+  { href: '/app/billing',               roles: ['admin', 'guardian', 'student'] },
+  { href: '/app/intake',                roles: ['admin'] },
+  { href: '/app/messaging',             roles: ['admin', 'teacher', 'guardian', 'student'] },
+  { href: '/app/resource-subscribers',  roles: ['admin'] },
+  { href: '/app/resources',             roles: ['admin', 'teacher', 'guardian', 'student'] },
+  { href: '/app/content',               roles: ['admin', 'teacher'] },
+  { href: '/app/news',                  roles: ['admin'] },
+  { href: '/app/broadcasts',            roles: ['admin'] },
+  { href: '/app/reports',               roles: ['admin'] },
+  { href: '/app/settings',              roles: ['admin'] },
 ];
 
 /**

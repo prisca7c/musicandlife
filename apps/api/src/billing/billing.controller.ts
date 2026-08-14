@@ -16,13 +16,13 @@ export class BillingController {
   constructor(private readonly billing: BillingService) {}
 
   @Get('invoices')
-  @Roles('receptionist')
+  @Roles('admin')
   getInvoices(@CurrentUser() user: RequestUser, @Query('familyId') familyId?: string) {
     return this.billing.getInvoices(user.orgId, familyId);
   }
 
   @Post('invoices')
-  @Roles('receptionist')
+  @Roles('admin')
   createInvoice(@CurrentUser() user: RequestUser, @Body() dto: CreateInvoiceDto) {
     return this.billing.createInvoice(user.orgId, dto);
   }
@@ -30,19 +30,19 @@ export class BillingController {
   // Raise one invoice per class (enrolment) for the family, instead of a single
   // combined statement. Returns { invoices: [...] }.
   @Post('invoices/split-by-class')
-  @Roles('receptionist')
+  @Roles('admin')
   createPerClass(@CurrentUser() user: RequestUser, @Body() dto: CreateInvoiceDto) {
     return this.billing.createInvoicesPerClass(user.orgId, dto);
   }
 
   @Get('invoices/:id')
-  @Roles('receptionist')
+  @Roles('admin')
   getInvoice(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.billing.getInvoice(user.orgId, id);
   }
 
   @Post('invoices/:id/send')
-  @Roles('receptionist')
+  @Roles('admin')
   sendInvoice(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.billing.sendInvoice(user.orgId, id);
   }
@@ -54,7 +54,7 @@ export class BillingController {
   }
 
   @Post('invoices/:id/line-items')
-  @Roles('receptionist')
+  @Roles('admin')
   addLineItem(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
@@ -64,14 +64,14 @@ export class BillingController {
   }
 
   @Get('families/:id/ledger')
-  @Roles('receptionist')
+  @Roles('admin')
   getLedger(@CurrentUser() user: RequestUser, @Param('id') id: string, @Query('asOf') asOf?: string) {
     if (asOf) return this.billing.getBalanceAsOf(user.orgId, id, asOf);
     return this.billing.getLedger(user.orgId, id);
   }
 
   @Post('payments')
-  @Roles('receptionist')
+  @Roles('admin')
   recordPayment(@CurrentUser() user: RequestUser, @Body() dto: RecordPaymentDto) {
     return this.billing.recordPayment(user.orgId, dto);
   }
@@ -79,7 +79,7 @@ export class BillingController {
   // Record that a family paid for a single lesson on the spot. Produces a paid
   // per-lesson invoice; the payment cancels the lesson's attendance charge.
   @Post('lessons/:id/pay-at-lesson')
-  @Roles('receptionist')
+  @Roles('admin')
   payAtLesson(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: PayAtLessonDto) {
     return this.billing.payForLesson(user.orgId, id, dto.method);
   }

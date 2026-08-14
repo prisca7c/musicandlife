@@ -8,11 +8,7 @@ import { ROLE_LEVEL, type BaseRole } from '@music-life/types';
 
 // What each role is allowed to SEE.
 const ROLE_SCOPES: Record<BaseRole, string[]> = {
-  system_admin: ['studio', 'teacher', 'family', 'student'],
   admin: ['studio', 'teacher', 'family', 'student'],
-  manager: ['studio', 'teacher', 'family', 'student'],
-  receptionist: ['studio', 'family', 'student'],
-  technician: ['studio'],
   teacher: ['studio', 'teacher'],
   guardian: ['studio', 'family'],
   student: ['studio', 'student'],
@@ -22,14 +18,10 @@ const ROLE_SCOPES: Record<BaseRole, string[]> = {
 // can read: a teacher must NOT be able to broadcast to every parent/student in
 // the school (scopes studio/family/student all reach families). Teachers share
 // with their own families through per-student lesson notes instead; the shared
-// "teacher" pool here is staff-only. Only management/reception curate the
-// studio-wide and family/student libraries.
+// "teacher" pool here is staff-only. Only admin curates the studio-wide and
+// family/student libraries.
 const PUBLISH_SCOPES: Record<BaseRole, string[]> = {
-  system_admin: ['studio', 'teacher', 'family', 'student'],
   admin: ['studio', 'teacher', 'family', 'student'],
-  manager: ['studio', 'teacher', 'family', 'student'],
-  receptionist: ['studio', 'family', 'student'],
-  technician: ['studio'],
   teacher: ['teacher'],
   guardian: [],
   student: [],
@@ -293,7 +285,7 @@ export class ResourcesService {
     // their own and their own students' resources; without the same ownership
     // check here, any teacher could delete a colleague's — or a studio-wide —
     // resource just by holding its id, a destructive gap the read scoping hides.
-    const isManagement = ROLE_LEVEL[role] >= ROLE_LEVEL['manager'];
+    const isManagement = ROLE_LEVEL[role] >= ROLE_LEVEL['admin'];
     if (!isManagement && resource.ownerId !== userId) {
       throw new ForbiddenException('You can only delete resources you created.');
     }

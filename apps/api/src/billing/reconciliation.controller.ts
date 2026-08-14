@@ -35,19 +35,19 @@ export class ReconciliationController {
   // ─── Claims ────────────────────────────────────────────────────────────────
 
   @Get('claims')
-  @Roles('receptionist')
+  @Roles('admin')
   listClaims(@CurrentUser() u: RequestUser, @Query('status') status?: 'pending' | 'confirmed' | 'rejected') {
     return this.recon.listClaims(u.orgId, status);
   }
 
   @Post('claims/:id/confirm')
-  @Roles('receptionist')
+  @Roles('admin')
   confirmClaim(@CurrentUser() u: RequestUser, @Param('id') id: string) {
     return this.recon.confirmClaim(u.orgId, id, u.userId);
   }
 
   @Post('claims/:id/reject')
-  @Roles('receptionist')
+  @Roles('admin')
   rejectClaim(@CurrentUser() u: RequestUser, @Param('id') id: string, @Body() dto: RejectClaimDto) {
     return this.recon.rejectClaim(u.orgId, id, u.userId, dto.reason);
   }
@@ -59,7 +59,7 @@ export class ReconciliationController {
    * anything. Uploading the wrong file is the obvious way to make a mess here.
    */
   @Post('import/preview')
-  @Roles('manager')
+  @Roles('admin')
   preview(@CurrentUser() _u: RequestUser, @Body() dto: ImportStatementDto) {
     const { rows, skipped, headers } = this.recon.parseCsv(dto.csv);
     return {
@@ -72,7 +72,7 @@ export class ReconciliationController {
   }
 
   @Post('import')
-  @Roles('manager')
+  @Roles('admin')
   async importStatement(@CurrentUser() u: RequestUser, @Body() dto: ImportStatementDto) {
     // Anything without a reference can't be matched, so make sure every family
     // has one before the first import rather than after.
@@ -85,19 +85,19 @@ export class ReconciliationController {
   // ─── Exceptions ────────────────────────────────────────────────────────────
 
   @Get('unmatched')
-  @Roles('receptionist')
+  @Roles('admin')
   unmatched(@CurrentUser() u: RequestUser) {
     return this.recon.listUnmatchedTransactions(u.orgId);
   }
 
   @Post('unmatched/:id/assign')
-  @Roles('receptionist')
+  @Roles('admin')
   assign(@CurrentUser() u: RequestUser, @Param('id') id: string, @Body() dto: AssignTransactionDto) {
     return this.recon.assignTransaction(u.orgId, id, dto.familyId);
   }
 
   @Post('unmatched/:id/ignore')
-  @Roles('receptionist')
+  @Roles('admin')
   ignore(@CurrentUser() u: RequestUser, @Param('id') id: string) {
     return this.recon.ignoreTransaction(u.orgId, id);
   }
@@ -105,7 +105,7 @@ export class ReconciliationController {
   // ─── References ────────────────────────────────────────────────────────────
 
   @Post('references/backfill')
-  @Roles('manager')
+  @Roles('admin')
   backfill(@CurrentUser() u: RequestUser) {
     return this.recon.backfillReferences(u.orgId);
   }

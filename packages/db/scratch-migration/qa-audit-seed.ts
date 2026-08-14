@@ -108,8 +108,6 @@ async function main() {
 
   const teacherX = await ensureStaff(orgId, 'qa-audit-teacher-x@musiclife.test', 'teacher', 'AuditTeacher', 'X');
   const teacherY = await ensureStaff(orgId, 'qa-audit-teacher-y@musiclife.test', 'teacher', 'AuditTeacher', 'Y');
-  await ensureStaff(orgId, 'qa-audit-receptionist@musiclife.test', 'receptionist', 'AuditRecep', 'Tionist');
-  await ensureStaff(orgId, 'qa-audit-manager@musiclife.test', 'manager', 'AuditManager', 'M');
   await ensureStaff(orgId, 'qa-audit-admin@musiclife.test', 'admin', 'AuditAdmin', 'A');
 
   console.log(JSON.stringify({

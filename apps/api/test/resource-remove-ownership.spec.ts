@@ -5,7 +5,7 @@ import type { BaseRole } from '@music-life/types';
 // remove() only checked org scope, so any teacher could delete a colleague's (or
 // a studio-wide) resource by id — while every READ path scopes a teacher to
 // their own + their own students' resources. Deletion must be owner-only, with
-// management (manager+) able to administer the shared library.
+// admin able to administer the shared library.
 
 function makeService(resource: { id: string; ownerId: string } | undefined) {
   const deleteWhere = jest.fn().mockResolvedValue(undefined);
@@ -36,15 +36,15 @@ describe('ResourcesService.remove — ownership enforcement', () => {
     expect(del).not.toHaveBeenCalled(); // nothing deleted
   });
 
-  it('lets management delete any resource', async () => {
+  it('lets admin delete any resource', async () => {
     const { svc, del } = makeService({ id: 'r1', ownerId: OWNER });
-    await expect(svc.remove('org1', 'manager' as BaseRole, OTHER, 'r1')).resolves.toEqual({ id: 'r1' });
+    await expect(svc.remove('org1', 'admin' as BaseRole, OTHER, 'r1')).resolves.toEqual({ id: 'r1' });
     expect(del).toHaveBeenCalledTimes(1);
   });
 
   it('404s a missing resource without a delete', async () => {
     const { svc, del } = makeService(undefined);
-    await expect(svc.remove('org1', 'manager' as BaseRole, OTHER, 'nope')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(svc.remove('org1', 'admin' as BaseRole, OTHER, 'nope')).rejects.toBeInstanceOf(NotFoundException);
     expect(del).not.toHaveBeenCalled();
   });
 });

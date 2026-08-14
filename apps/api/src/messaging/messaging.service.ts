@@ -13,9 +13,7 @@ import type { CreateThreadDto } from './dto/create-thread.dto';
 const NON_STAFF_ROLES: BaseRole[] = ['guardian', 'student'];
 
 const ROLE_LABEL: Record<string, string> = {
-  system_admin: 'Admin', admin: 'Admin', manager: 'Manager',
-  receptionist: 'Reception', technician: 'Technician', teacher: 'Teacher',
-  guardian: 'Parent', student: 'Student',
+  admin: 'Admin', teacher: 'Teacher', guardian: 'Parent', student: 'Student',
 };
 
 @Injectable()

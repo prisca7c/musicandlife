@@ -16,19 +16,19 @@ export class PayrollController {
   constructor(private readonly payroll: PayrollService) {}
 
   @Get('staff/payroll')
-  @Roles('manager')
+  @Roles('admin')
   getRuns(@CurrentUser() u: RequestUser, @Query('staffId') staffId?: string) {
     return this.payroll.getPayrollRuns(u.orgId, staffId);
   }
 
   @Post('staff/payroll')
-  @Roles('manager')
+  @Roles('admin')
   createRun(@CurrentUser() u: RequestUser, @Body() dto: CreatePayrollRunDto) {
     return this.payroll.createPayrollRun(u.orgId, dto);
   }
 
   @Post('staff/payroll/run-all')
-  @Roles('manager')
+  @Roles('admin')
   runAll(@CurrentUser() u: RequestUser, @Body() dto: BatchPayrollRunDto) {
     return this.payroll.createPayrollRunsForAll(u.orgId, dto.periodStart, dto.periodEnd);
   }
@@ -43,7 +43,7 @@ export class PayrollController {
   }
 
   @Get('staff/payroll/:id')
-  @Roles('manager')
+  @Roles('admin')
   getRun(@CurrentUser() u: RequestUser, @Param('id') id: string) {
     return this.payroll.getPayrollRun(u.orgId, id);
   }
@@ -55,7 +55,7 @@ export class PayrollController {
   }
 
   @Get('expenses')
-  @Roles('manager')
+  @Roles('admin')
   getExpenses(@CurrentUser() u: RequestUser, @Query('staffId') staffId?: string) {
     return this.payroll.getExpenses(u.orgId, staffId);
   }
@@ -67,7 +67,7 @@ export class PayrollController {
   }
 
   @Post('expenses/:id/approve')
-  @Roles('manager')
+  @Roles('admin')
   approveExpense(@CurrentUser() u: RequestUser, @Param('id') id: string) {
     return this.payroll.approveExpense(u.orgId, id);
   }

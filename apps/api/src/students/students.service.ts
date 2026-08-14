@@ -190,7 +190,19 @@ export class StudentsService {
   }
 
   async update(orgId: string, id: string, dto: UpdateStudentDto) {
-    await this.findOne(orgId, id);
+    const existing = await this.findOne(orgId, id);
+
+    // PATCH is receptionist-level (DELETE's full teardown is admin-only), and a
+    // plain field-merge here let 'withdrawn' through status like any other
+    // value — silently skipping the whole teardown transaction below (enrolment
+    // end, schedule-rule clear, future-lesson cancellation, calendar-token
+    // rotation). That reopened the exact bug #171/#179 closed, through a second,
+    // unguarded door. Any transition into 'withdrawn' — regardless of which
+    // endpoint it comes through — must run the same transaction.
+    if (dto.status === 'withdrawn' && existing.status !== 'withdrawn') {
+      return this.withdraw(orgId, id, dto);
+    }
+
     const [updated] = await this.db.db
       .update(students)
       .set({ ...dto, updatedAt: new Date() })
@@ -201,7 +213,10 @@ export class StudentsService {
 
   async remove(orgId: string, id: string) {
     await this.findOne(orgId, id);
+    return this.withdraw(orgId, id, {});
+  }
 
+  private async withdraw(orgId: string, id: string, dto: UpdateStudentDto) {
     // Withdrawing a student must also end their enrolments and clear their diary.
     // Flipping only students.status left every enrolment 'active' with its weekly
     // scheduleRule intact — and the nightly recurrence worker scans on
@@ -216,7 +231,7 @@ export class StudentsService {
       const now = new Date();
       const [updated] = await tx
         .update(students)
-        .set({ status: 'withdrawn', updatedAt: now })
+        .set({ ...dto, status: 'withdrawn', updatedAt: now })
         .where(and(eq(students.id, id), eq(students.organizationId, orgId)))
         .returning();
 

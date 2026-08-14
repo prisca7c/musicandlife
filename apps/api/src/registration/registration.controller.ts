@@ -64,21 +64,21 @@ export class RegistrationController {
   // Admin
   @Get('registrations')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('receptionist')
+  @Roles('admin')
   list(@CurrentUser() user: RequestUser, @Query('status') status?: string) {
     return this.registration.list(user.orgId, status);
   }
 
   @Post('registrations/:id/approve')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('receptionist')
+  @Roles('admin')
   approve(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.registration.approve(user.orgId, id, user.userId);
   }
 
   @Post('registrations/:id/deny')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('receptionist')
+  @Roles('admin')
   deny(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,

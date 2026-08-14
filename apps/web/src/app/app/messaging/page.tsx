@@ -140,7 +140,7 @@ export default function MessagingPage() {
   // own unread mail, and the separation makes it obvious you're reading
   // someone else's thread.
   const { me } = useMe();
-  const isAdmin = me?.membership?.role === 'admin' || me?.membership?.role === 'system_admin';
+  const isAdmin = me?.membership?.role === 'admin';
 
   // Cached read — instant on revisit, revalidates in the background.
   const { data: threads = [], error, isLoading, mutate } = useApi<Thread[]>('/threads');

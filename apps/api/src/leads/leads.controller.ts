@@ -13,17 +13,17 @@ export class LeadsController {
   constructor(private readonly leads: LeadsService) {}
 
   @Get()
-  @Roles('receptionist')
+  @Roles('admin')
   findAll(@CurrentUser() user: RequestUser) { return this.leads.findAll(user.orgId); }
 
   @Post()
-  @Roles('receptionist')
+  @Roles('admin')
   create(@CurrentUser() user: RequestUser, @Body() body: CreateLeadDto) {
     return this.leads.create(user.orgId, body);
   }
 
   @Patch(':id')
-  @Roles('receptionist')
+  @Roles('admin')
   update(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() body: UpdateLeadDto) {
     return this.leads.update(user.orgId, id, body);
   }

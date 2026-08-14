@@ -66,8 +66,7 @@ const GROUPS = [
 ];
 
 const ROLE_LABELS: Record<string, string> = {
-  system_admin: 'System Admin', admin: 'Admin', manager: 'Manager',
-  receptionist: 'Receptionist', teacher: 'Teacher', guardian: 'Parent / Guardian', student: 'Student',
+  admin: 'Admin', teacher: 'Teacher', guardian: 'Parent / Guardian', student: 'Student',
 };
 
 function initialsOf(name: string) {

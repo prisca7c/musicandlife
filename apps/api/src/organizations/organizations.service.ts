@@ -25,9 +25,9 @@ export class OrganizationsService {
     // `automation` flags below — but that floor also let any teacher-level
     // JWT read the studio's bank account name/sort code/number straight off
     // this endpoint, whether or not any UI page ever showed it to them. Strip
-    // those fields for anyone below receptionist; the billing pages that
-    // legitimately display them are already gated no lower than that.
-    const isFinanceRole = !callerRole || ROLE_LEVEL[callerRole] >= ROLE_LEVEL['receptionist'];
+    // those fields for anyone below admin; the billing pages that legitimately
+    // display them are admin-only.
+    const isFinanceRole = !callerRole || ROLE_LEVEL[callerRole] >= ROLE_LEVEL['admin'];
     const visibleSettings = isFinanceRole
       ? settings
       : Object.fromEntries(Object.entries(settings).filter(([k]) => !RESTRICTED_SETTINGS_KEYS.has(k)));

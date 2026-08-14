@@ -1712,7 +1712,13 @@ export class SchedulingService {
     const overlapping = await db.query.lessons.findMany({
       where: and(
         eq(lessons.organizationId, orgId),
-        eq(lessons.status, 'scheduled'),
+        // 'completed' must clash too: a lesson that already happened (or was
+        // marked present) still occupies its slot. Checking 'scheduled' alone
+        // let a second, unrelated booking (e.g. a different enrollment for the
+        // same student) land in the exact same teacher/time slot once the first
+        // lesson had been marked complete — producing a real double-booking
+        // that this check was supposed to catch.
+        inArray(lessons.status, ['scheduled', 'completed']),
         lte(lessons.startsAt, end),
         // Lower bound only prunes the candidate set; true overlap is decided
         // in-memory below. It MUST reach back at least as far as the longest
