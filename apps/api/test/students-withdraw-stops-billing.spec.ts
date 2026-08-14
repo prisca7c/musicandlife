@@ -50,7 +50,7 @@ function makeService(opts: { siblingRemains?: boolean } = {}) {
       transaction: (fn: (tx: unknown) => Promise<unknown>) => fn(makeTx()),
     },
   };
-  return { svc: new StudentsService(db as never), captured };
+  return { svc: new StudentsService(db as never, {} as never), captured };
 }
 
 // Stamp table identity onto the drizzle table objects the service imports.

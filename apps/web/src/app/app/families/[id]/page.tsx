@@ -439,7 +439,7 @@ export default function FamilyDetailPage() {
   useEffect(() => {
     try {
       const role = JSON.parse(atob((tok() ?? '').split('.')[1] || ''))?.role;
-      setCanMerge(['system_admin', 'admin', 'manager'].includes(role));
+      setCanMerge(role === 'admin');
     } catch { setCanMerge(false); }
   }, []);
 

@@ -12,13 +12,13 @@ import { ROLE_LEVEL, type BaseRole, type RequestUser } from '@music-life/types';
 /**
  * A post's `publishedAt` can be set in the future to schedule it (the create/
  * update DTOs accept it, and there's a composite (org, publishedAt) index).
- * Everyone at or above manager manages the news queue and so sees scheduled
- * posts; every other reader (teachers, guardians, students, reception) must only
- * see posts whose publish time has arrived. Returns the cutoff a reader is bound
- * by, or null for management (no bound). Pure, so the gate can be unit-tested.
+ * Admin manages the news queue and so sees scheduled posts; every other reader
+ * (teachers, guardians, students) must only see posts whose publish time has
+ * arrived. Returns the cutoff a reader is bound by, or null for admin (no
+ * bound). Pure, so the gate can be unit-tested.
  */
 export function newsPublishedCutoff(role: BaseRole, now: Date): Date | null {
-  return ROLE_LEVEL[role] >= ROLE_LEVEL['manager'] ? null : now;
+  return ROLE_LEVEL[role] >= ROLE_LEVEL['admin'] ? null : now;
 }
 
 @Controller('news')

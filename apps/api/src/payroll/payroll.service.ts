@@ -26,12 +26,12 @@ export function periodEndInclusive(end: Date): Date {
 export class PayrollService {
   constructor(private readonly db: DbService) {}
 
-  // Which staff record a payroll write applies to. Managers+ may file on behalf
-  // of any staff member (an explicit staffId is honoured); a teacher is always
+  // Which staff record a payroll write applies to. Admin may file on behalf of
+  // any staff member (an explicit staffId is honoured); a teacher is always
   // pinned to their own record so they can't attribute expenses / rate-change
   // requests to a colleague by passing someone else's id.
   private async resolveTargetStaffId(orgId: string, actor: Actor, requestedStaffId?: string): Promise<string> {
-    const isManagement = ROLE_LEVEL[actor.role] >= ROLE_LEVEL['manager'];
+    const isManagement = ROLE_LEVEL[actor.role] >= ROLE_LEVEL['admin'];
     if (isManagement && requestedStaffId) {
       const staff = await this.db.db.query.staffMembers.findFirst({
         where: and(eq(staffMembers.id, requestedStaffId), eq(staffMembers.organizationId, orgId)),

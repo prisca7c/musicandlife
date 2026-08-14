@@ -43,16 +43,7 @@ export const memberships = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
     baseRole: text('base_role', {
-      enum: [
-        'system_admin',
-        'admin',
-        'manager',
-        'receptionist',
-        'technician',
-        'teacher',
-        'guardian',
-        'student',
-      ],
+      enum: ['admin', 'teacher', 'guardian', 'student'],
     }).notNull(),
     status: text('status', { enum: ['active', 'suspended', 'removed'] })
       .notNull()

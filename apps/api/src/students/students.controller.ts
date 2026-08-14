@@ -34,7 +34,7 @@ export class StudentsController {
   }
 
   @Post()
-  @Roles('receptionist')
+  @Roles('admin')
   create(@CurrentUser() user: RequestUser, @Body() dto: CreateStudentDto) {
     return this.students.create(user.orgId, dto);
   }
@@ -46,7 +46,7 @@ export class StudentsController {
   }
 
   @Patch(':id')
-  @Roles('receptionist')
+  @Roles('admin')
   update(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: UpdateStudentDto) {
     return this.students.update(user.orgId, id, dto);
   }
@@ -64,7 +64,7 @@ export class StudentsController {
   }
 
   @Post(':id/enrollments')
-  @Roles('receptionist')
+  @Roles('admin')
   createEnrollment(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,

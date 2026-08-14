@@ -43,7 +43,7 @@ export class StaffController {
   constructor(private readonly staff: StaffService) {}
 
   @Get()
-  @Roles('manager')
+  @Roles('admin')
   findAll(@CurrentUser() user: RequestUser) {
     return this.staff.findAll(user.orgId);
   }
@@ -80,7 +80,7 @@ export class StaffController {
 
   // All teachers' windows (manager+) — powers the admin calendar availability overlay.
   @Get('availability/all')
-  @Roles('manager')
+  @Roles('admin')
   getAllAvailability(@CurrentUser() user: RequestUser) {
     return this.staff.getAllAvailability(user.orgId);
   }
@@ -121,19 +121,19 @@ export class StaffController {
   }
 
   @Post()
-  @Roles('manager')
+  @Roles('admin')
   create(@CurrentUser() user: RequestUser, @Body() dto: CreateStaffDto) {
     return this.staff.create(user.orgId, dto);
   }
 
   @Get(':id')
-  @Roles('manager')
+  @Roles('admin')
   findOne(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.staff.findOne(user.orgId, id);
   }
 
   @Patch(':id')
-  @Roles('manager')
+  @Roles('admin')
   update(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: UpdateStaffDto) {
     return this.staff.update(user.orgId, id, dto);
   }
@@ -149,7 +149,7 @@ export class StaffController {
   }
 
   @Post(':id/assignments')
-  @Roles('manager')
+  @Roles('admin')
   assign(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
@@ -159,7 +159,7 @@ export class StaffController {
   }
 
   @Delete(':id/assignments/:studentId')
-  @Roles('manager')
+  @Roles('admin')
   removeAssignment(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
@@ -170,13 +170,13 @@ export class StaffController {
 
   // ─── Availability ──────────────────────────────────────────────────────────
   @Get(':id/availability')
-  @Roles('manager')
+  @Roles('admin')
   getAvailability(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.staff.getAvailability(user.orgId, id);
   }
 
   @Post(':id/availability')
-  @Roles('manager')
+  @Roles('admin')
   addAvailability(
     @CurrentUser() user: RequestUser,
     @Param('id') id: string,
@@ -188,19 +188,19 @@ export class StaffController {
 
   // ─── A teacher's time off (manager view) ───────────────────────────────────
   @Get(':id/time-off')
-  @Roles('manager')
+  @Roles('admin')
   getTimeOff(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.staff.getTimeOff(user.orgId, id);
   }
 
   @Post(':id/time-off')
-  @Roles('manager')
+  @Roles('admin')
   addTimeOff(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: AddTimeOffDto) {
     return this.staff.addTimeOff(user.orgId, id, dto.startsAt, dto.endsAt, dto.reason);
   }
 
   @Delete(':id/time-off/:timeOffId')
-  @Roles('manager')
+  @Roles('admin')
   @HttpCode(200)
   removeTimeOff(
     @CurrentUser() user: RequestUser,
@@ -211,7 +211,7 @@ export class StaffController {
   }
 
   @Delete(':id/availability/:windowId')
-  @Roles('manager')
+  @Roles('admin')
   @HttpCode(200)
   removeAvailability(
     @CurrentUser() user: RequestUser,

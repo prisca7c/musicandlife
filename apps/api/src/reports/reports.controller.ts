@@ -37,7 +37,7 @@ export class ReportsController {
   }
 
   @Get('attendance')
-  @Roles('manager')
+  @Roles('admin')
   async attendance(
     @CurrentUser() user: RequestUser,
     @Query('from', ParseIsoDatePipe) from = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
@@ -51,7 +51,7 @@ export class ReportsController {
   }
 
   @Get('revenue')
-  @Roles('manager')
+  @Roles('admin')
   async revenue(
     @CurrentUser() user: RequestUser,
     @Query('from', ParseIsoDatePipe) from = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
@@ -65,7 +65,7 @@ export class ReportsController {
   }
 
   @Get('enrollments')
-  @Roles('manager')
+  @Roles('admin')
   async enrollments(
     @CurrentUser() user: RequestUser,
     @Query('format') format?: string,
@@ -77,7 +77,7 @@ export class ReportsController {
   }
 
   @Get('retention')
-  @Roles('manager')
+  @Roles('admin')
   async retention(
     @CurrentUser() user: RequestUser,
     @Query('format') format?: string,
@@ -89,7 +89,7 @@ export class ReportsController {
   }
 
   @Get('student-invoice-pdf')
-  @Roles('manager')
+  @Roles('admin')
   studentInvoicePdf(
     @CurrentUser() user: RequestUser,
     @Query('studentId') studentId: string,
@@ -100,7 +100,7 @@ export class ReportsController {
   }
 
   @Get('teacher-payroll-pdf')
-  @Roles('manager')
+  @Roles('admin')
   teacherPayrollPdf(
     @CurrentUser() user: RequestUser,
     @Query('staffId') staffId: string,
@@ -111,7 +111,7 @@ export class ReportsController {
   }
 
   @Get('student-attendance-pdf')
-  @Roles('manager')
+  @Roles('admin')
   studentAttendancePdf(
     @CurrentUser() user: RequestUser,
     @Query('studentId') studentId: string,

@@ -34,7 +34,7 @@ export class SchedulingController {
   }
 
   @Post('lessons')
-  @Roles('receptionist')
+  @Roles('admin')
   createLesson(@CurrentUser() user: RequestUser, @Body() dto: CreateLessonDto) {
     return this.scheduling.createLesson(user.orgId, dto);
   }
@@ -43,7 +43,7 @@ export class SchedulingController {
   // waiting for the daily recurrence worker (so booking a weekly lesson shows up
   // on the calendar immediately).
   @Post('lessons/recurring')
-  @Roles('receptionist')
+  @Roles('admin')
   generateRecurring(@CurrentUser() user: RequestUser, @Body() dto: GenerateRecurringDto) {
     return this.scheduling.materializeEnrollment(user.orgId, dto.enrollmentId, {
       weeks: dto.weeks,
@@ -58,7 +58,7 @@ export class SchedulingController {
   }
 
   @Patch('lessons/:id')
-  @Roles('receptionist')
+  @Roles('admin')
   updateLesson(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: UpdateLessonDto) {
     return this.scheduling.updateLesson(user.orgId, id, dto);
   }
@@ -100,7 +100,7 @@ export class SchedulingController {
 
   // ─── Lesson requests (front desk proposes ranked times, teacher confirms) ───
   @Post('lesson-requests')
-  @Roles('receptionist')
+  @Roles('admin')
   createLessonRequest(@CurrentUser() user: RequestUser, @Body() dto: CreateLessonRequestDto) {
     return this.scheduling.createLessonRequest(user.orgId, dto, user.userId);
   }

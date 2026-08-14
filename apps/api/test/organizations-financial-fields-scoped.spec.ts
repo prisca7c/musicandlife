@@ -5,8 +5,8 @@ import { OrganizationsService } from '../src/organizations/organizations.service
  * (rendered on teacher-visible pages) needs the `automation` flags — but that
  * floor also let any teacher-level JWT read the studio's bank account name/
  * sort code/number, data no teacher-facing UI page ever shows and that
- * billing pages gate no lower than receptionist. findById must strip those
- * fields for anyone below receptionist.
+ * billing pages are admin-only. findById must strip those fields for anyone
+ * below admin.
  */
 const SETTINGS = {
   bankAccountName: 'Music & Life Ltd', bankSortCode: '12-34-56', bankAccountNumber: '12345678',
@@ -39,17 +39,12 @@ describe('OrganizationsService.findById — financial fields scoped by role', ()
     expect((org as Record<string, unknown>).timezone).toBe('Europe/London');
   });
 
-  it('shows bank/invoice fields to a receptionist', async () => {
-    const svc = makeService();
-    const org = await svc.findById('org-1', 'receptionist');
-    expect((org as Record<string, unknown>).bankAccountName).toBe('Music & Life Ltd');
-    expect((org as Record<string, unknown>).bankSortCode).toBe('12-34-56');
-  });
-
   it('shows bank/invoice fields to an admin', async () => {
     const svc = makeService();
     const org = await svc.findById('org-1', 'admin');
     expect((org as Record<string, unknown>).bankAccountNumber).toBe('12345678');
+    expect((org as Record<string, unknown>).bankAccountName).toBe('Music & Life Ltd');
+    expect((org as Record<string, unknown>).bankSortCode).toBe('12-34-56');
   });
 
   it('shows everything when no role is passed (internal/server-side callers)', async () => {

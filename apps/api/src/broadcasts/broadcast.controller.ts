@@ -16,13 +16,13 @@ export class BroadcastController {
   constructor(private readonly broadcast: BroadcastService) {}
 
   @Get('audiences')
-  @Roles('manager')
+  @Roles('admin')
   audiences(@CurrentUser() user: RequestUser) {
     return this.broadcast.audienceCounts(user.orgId);
   }
 
   @Post('test')
-  @Roles('manager')
+  @Roles('admin')
   test(@CurrentUser() user: RequestUser, @Body() dto: BroadcastTestDto) {
     return this.broadcast.sendTest(user.orgId, user.userId, dto.subject, dto.body);
   }
@@ -30,14 +30,14 @@ export class BroadcastController {
   // The subgroup options offered on the compose screen (instruments actually
   // taught, named group classes, teachers with students).
   @Get('segments')
-  @Roles('manager')
+  @Roles('admin')
   segments(@CurrentUser() user: RequestUser) {
     return this.broadcast.segments(user.orgId);
   }
 
   // Headcount for the current selection, so nothing is ever sent blind.
   @Post('preview')
-  @Roles('manager')
+  @Roles('admin')
   preview(@CurrentUser() user: RequestUser, @Body() dto: BroadcastPreviewDto) {
     return this.broadcast.preview(user.orgId, dto.audience, dto.filter);
   }
@@ -48,7 +48,7 @@ export class BroadcastController {
   // email blast — a compromised or scripted manager session could fire up to
   // 120 broadcasts a minute. Real usage is at most a handful a day.
   @Post('send')
-  @Roles('manager')
+  @Roles('admin')
   @Throttle({ default: { ttl: 60_000, limit: 5 } })
   send(@CurrentUser() user: RequestUser, @Body() dto: BroadcastSendDto) {
     return this.broadcast.send(user.orgId, dto.audience, dto.subject, dto.body, dto.filter);

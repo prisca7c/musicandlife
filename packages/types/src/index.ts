@@ -1,9 +1,10 @@
+// Four roles, four portals. system_admin/manager/receptionist/technician were
+// separate tiers below admin that no real staff member ever used (only admin
+// and teacher did) — admin already passed every one of their @Roles() checks
+// via the hierarchy below, so collapsing them removes dead distinctions
+// without changing what any real account can do.
 export type BaseRole =
-  | 'system_admin'
   | 'admin'
-  | 'manager'
-  | 'receptionist'
-  | 'technician'
   | 'teacher'
   | 'guardian'
   | 'student';
@@ -15,11 +16,7 @@ export type BaseRole =
  * so an admin is never handed a downgraded token role).
  */
 export const ROLE_LEVEL: Record<BaseRole, number> = {
-  system_admin: 100,
   admin: 90,
-  manager: 70,
-  receptionist: 50,
-  technician: 40,
   teacher: 30,
   guardian: 20,
   student: 10,

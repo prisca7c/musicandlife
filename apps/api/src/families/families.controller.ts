@@ -21,13 +21,13 @@ export class FamiliesController {
   constructor(private readonly families: FamiliesService) {}
 
   @Get()
-  @Roles('receptionist')
+  @Roles('admin')
   findAll(@CurrentUser() user: RequestUser, @Query('search') search?: string) {
     return this.families.findAll(user.orgId, search);
   }
 
   @Post()
-  @Roles('receptionist')
+  @Roles('admin')
   create(@CurrentUser() user: RequestUser, @Body() dto: CreateFamilyDto) {
     return this.families.create(user.orgId, dto);
   }
@@ -40,19 +40,19 @@ export class FamiliesController {
   }
 
   @Get(':id')
-  @Roles('receptionist')
+  @Roles('admin')
   findOne(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.families.findOne(user.orgId, id);
   }
 
   @Patch(':id')
-  @Roles('receptionist')
+  @Roles('admin')
   update(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: UpdateFamilyDto) {
     return this.families.update(user.orgId, id, dto);
   }
 
   @Get(':id/ledger')
-  @Roles('receptionist')
+  @Roles('admin')
   getLedger(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.families.getLedger(user.orgId, id);
   }
@@ -60,7 +60,7 @@ export class FamiliesController {
   // Merge a duplicate family into this one (`:id` is the family that survives).
   // Destructive — gated to managers and above.
   @Post(':id/merge')
-  @Roles('manager')
+  @Roles('admin')
   merge(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: MergeFamilyDto) {
     return this.families.mergeFamilies(user.orgId, id, dto.sourceFamilyId);
   }

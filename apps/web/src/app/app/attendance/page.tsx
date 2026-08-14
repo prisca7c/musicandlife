@@ -16,7 +16,7 @@ import { Check, X, AlertTriangle, Calendar, RefreshCw, Search, PoundSterling } f
 // Roles allowed to take money at the front desk. Teachers mark attendance too,
 // but they don't handle payments — so the "paid at the lesson" control is theirs
 // to see, not press.
-const CAN_TAKE_PAYMENT = ['receptionist', 'manager', 'admin', 'system_admin'];
+const CAN_TAKE_PAYMENT = ['admin'];
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string;

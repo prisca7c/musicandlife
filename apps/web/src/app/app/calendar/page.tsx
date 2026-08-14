@@ -1237,7 +1237,7 @@ export default function CalendarPage() {
   const role = useRole();
   // "Assign students" / "Add student" are front-desk tasks — only management
   // roles get them. Teachers, and any parent/student who lands here, do not.
-  const isManagement = ['system_admin', 'admin', 'manager', 'receptionist'].includes(role);
+  const isManagement = role === 'admin';
 
   // Whole-studio view. Management always sees everyone; a teacher normally sees
   // only their own lessons but can opt in to the full schedule (read-only for

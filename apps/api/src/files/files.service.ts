@@ -8,7 +8,7 @@ import { FileStoragePort } from './ports/file-storage.port';
 
 // Roles allowed to download any file in their org (e.g. admins approving
 // expense receipts). Everyone else can only download files they own.
-const MANAGEMENT_ROLES: BaseRole[] = ['system_admin', 'admin', 'manager'];
+const MANAGEMENT_ROLES: BaseRole[] = ['admin'];
 
 @Injectable()
 export class FilesService {

@@ -118,7 +118,7 @@ export default function ThreadPage() {
   const hasFamily = people.some(p => NON_STAFF.includes(p.role));
   const hasStaff = people.some(p => p.role && !NON_STAFF.includes(p.role));
   const myRole = me?.membership?.role;
-  const iAmAdmin = myRole === 'admin' || myRole === 'system_admin';
+  const iAmAdmin = myRole === 'admin';
   const showOversightNotice = hasFamily && hasStaff && !iAmAdmin;
 
   return (

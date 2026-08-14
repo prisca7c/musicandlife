@@ -124,8 +124,6 @@ function AddResourceModal({ open, onClose, onCreated, role, staff, students }: {
             // Mirror the API's publish rights: teachers may only share with the
             // teaching team — they can't broadcast to every family/student.
             const allowed = role === 'teacher' ? ['teacher']
-              : role === 'receptionist' ? ['studio', 'family', 'student']
-              : role === 'technician' ? ['studio']
               : ['studio', 'teacher', 'family', 'student'];
             const labels: Record<string, string> = {
               studio: 'All staff (studio)', teacher: 'Teachers only',
