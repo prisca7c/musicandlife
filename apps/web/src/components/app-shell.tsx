@@ -58,9 +58,9 @@ const NAV: NavItem[] = [
 // Group nav sections
 const GROUPS = [
   { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History','Lesson notes','Add to calendar'] },
-  { label: 'Studio',   items: ['Calendar','Attendance','Requests','My availability','Notes','New students','Messages'] },
-  { label: 'People',   items: ['Students','Families','Staff','Payroll','My pay'] },
-  { label: 'Finance',  items: ['Billing','Payments'] },
+  { label: 'Studio',   items: ['Calendar','Attendance','Requests','My availability','Notes','Messages'] },
+  { label: 'People',   items: ['Students','New students','Families','Staff','My pay'] },
+  { label: 'Finance',  items: ['Billing','Payments','Payroll'] },
   { label: 'Content',  items: ['Resources','Library subscribers','Repertoire','Studio News','Email everyone'] },
   { label: 'Admin',    items: ['Reports','Settings'] },
 ];
