@@ -1284,12 +1284,19 @@ export default function CalendarPage() {
   // a teacher opting into the whole studio gets a names-only roster; otherwise
   // just themselves. `/staff/me` is fetched separately so we always know the
   // signed-in teacher's own id, which decides what they can edit vs only view.
-  const staffEndpoint = role !== 'teacher' ? '/staff' : wholeStudio ? '/staff/roster' : '/staff/me';
+  //
+  // `role` is '' for one render after mount (useRole() is SSR-safe by design —
+  // see its own comment). `role !== 'teacher'` was true during that window for
+  // every viewer, so a teacher or receptionist's very first render fetched the
+  // manager-only '/staff' and '/staff/availability/all' and got a 403 before
+  // self-correcting one render later. Wait for role to resolve instead.
+  const staffEndpoint = !role ? null : role !== 'teacher' ? '/staff' : wholeStudio ? '/staff/roster' : '/staff/me';
   const { data: staffRaw } = useApi<StaffMember | StaffMember[] | null>(staffEndpoint);
   const staff = Array.isArray(staffRaw) ? staffRaw : staffRaw ? [staffRaw] : [];
   const { data: meRaw } = useApi<StaffMember | null>(role === 'teacher' ? '/staff/me' : null);
   const myStaffId = meRaw?.id ?? null;
-  const { data: availability = [] } = useApi<Availability[]>(role === 'teacher' ? '/staff/me/availability' : '/staff/availability/all');
+  const availabilityEndpoint = !role ? null : role === 'teacher' ? '/staff/me/availability' : '/staff/availability/all';
+  const { data: availability = [] } = useApi<Availability[]>(availabilityEndpoint);
 
   // Apply the teacher/student filters once, up front — everything downstream
   // (day columns, week grid, month cells, counts) reads this narrowed set.

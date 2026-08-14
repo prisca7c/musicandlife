@@ -267,12 +267,26 @@ export class SchedulingService {
     // foreign-org) id slips past the conflict check and blows up on the row's
     // foreign key — surfacing as a 500 to the family portal. Validate up front so
     // it comes back as a clean 404 and no lesson references another org's teacher.
+    // Same class of gap enrollments.create() and staff.assignStudent() already
+    // close: an inactive teacher or withdrawn student must not be booked into a
+    // new lesson (and, downstream, billed) via this path either.
     if (dto.teacherId) {
       const teacher = await this.db.db.query.staffMembers.findFirst({
         where: and(eq(staffMembers.id, dto.teacherId), eq(staffMembers.organizationId, orgId)),
-        columns: { id: true },
+        columns: { id: true, status: true },
       });
       if (!teacher) throw new NotFoundException('Teacher not found');
+      if (teacher.status !== 'active') {
+        throw new BadRequestException('This teacher is not active. Choose an active teacher, or reactivate them first.');
+      }
+    }
+    const student = await this.db.db.query.students.findFirst({
+      where: and(eq(students.id, dto.studentId), eq(students.organizationId, orgId)),
+      columns: { id: true, status: true },
+    });
+    if (!student) throw new NotFoundException('Student not found');
+    if (student.status === 'withdrawn') {
+      throw new BadRequestException('This student has been withdrawn and can’t be booked for a lesson.');
     }
     const lesson = await this.db.db.transaction(async (tx) => {
       const tz = await this.getOrgTimezone(tx, orgId);
@@ -823,6 +837,13 @@ export class SchedulingService {
   async getAvailableSlots(
     orgId: string, teacherId: string, date: string, duration = 60,
   ): Promise<{ date: string; weekday: string; noWindows: boolean; slots: string[] }> {
+    // A missing/malformed date has no `@Query()` DTO to catch it (this endpoint
+    // takes raw query params), so it fell through to `new Date(...).getUTCDay()`
+    // returning NaN, which then hit the weekday enum column as an invalid value
+    // and 500'd at the DB layer instead of failing cleanly here.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(`${date}T12:00:00Z`).getTime())) {
+      throw new BadRequestException('date must be a valid YYYY-MM-DD date');
+    }
     const tz = await this.getOrgTimezone(this.db.db, orgId);
     const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
     const weekday = SchedulingService.WEEKDAYS[dow]!;

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "notification_rules_org_event_uidx" ON "notification_rules" USING btree ("organization_id","trigger_event");
