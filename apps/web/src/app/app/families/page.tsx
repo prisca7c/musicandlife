@@ -197,7 +197,6 @@ export default function FamiliesPage() {
                 <input type="checkbox" checked={selected.size > 0 && selected.size === families.length} onChange={toggleSelectAll} />
               </th>
               <th>Family</th>
-              <th>Contact</th>
               <th>Students</th>
               <th>Balance</th>
               <th>Invoicing</th>
@@ -205,7 +204,7 @@ export default function FamiliesPage() {
           </thead>
           <tbody>
             {families.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={5} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No families yet.
               </td></tr>
             )}
@@ -215,13 +214,15 @@ export default function FamiliesPage() {
                   <input type="checkbox" checked={selected.has(f.id)} onChange={() => toggleSelected(f.id)} />
                 </td>
                 <td>
+                  {/* The parent's actual name, not the "Smith Family"-style label
+                      many records were auto-named with during the CSV migration —
+                      contactName is always the guardian's real first + last name. */}
                   <Link href={`/app/families/${f.id}`}
                     className="font-semibold hover:underline"
                     style={{ color: 'var(--sage-dk)' }}>
-                    {f.name}
+                    {f.contactName || f.name}
                   </Link>
                 </td>
-                <td style={{ color: 'var(--txt3)' }}>{f.contactName ?? '—'}</td>
                 <td className="font-medium">{f.students.length}</td>
                 <td>
                   <span style={{ color: f.balanceCached < 0 ? 'var(--coral)' : 'var(--txt2)' }}
