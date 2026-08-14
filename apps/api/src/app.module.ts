@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { SentryModule } from '@sentry/nestjs/setup';
 import { HealthModule } from './health/health.module';
 import { DbModule } from './db/db.module';
 import { EmailModule } from './email/email.module';
@@ -37,6 +38,7 @@ import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
+    SentryModule.forRoot(),
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '../../.env' }),
     // In-process cron for the periodic maintenance jobs (recurrence generation,
     // reminders, auto-invoicing, attendance auto-complete). Each job guards

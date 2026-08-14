@@ -1,5 +1,6 @@
 import type { NextConfig } from 'next';
 import path from 'path';
+import { withSentryConfig } from '@sentry/nextjs';
 
 const config: NextConfig = {
   transpilePackages: ['@music-life/types', '@react-pdf/renderer'],
@@ -40,4 +41,18 @@ const config: NextConfig = {
   },
 };
 
-export default config;
+// authToken is left unset until source-map upload is wired up (needs a
+// separate SENTRY_AUTH_TOKEN build secret) — omitting it just skips the
+// source-map upload step, error capture still works.
+//
+// tunnelRoute is deliberately omitted: it proxies client events through our
+// own /monitoring route to dodge ad-blockers, but that proxy needs SENTRY_ORG
+// + SENTRY_PROJECT set to validate the forwarded request — without them it
+// 403s every event instead of forwarding. Add it back once those are set.
+export default withSentryConfig(config, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  widenClientFileUpload: true,
+  silent: !process.env.CI,
+});

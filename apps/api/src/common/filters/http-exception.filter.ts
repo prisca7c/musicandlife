@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import * as Sentry from '@sentry/nestjs';
 import type { Request, Response } from 'express';
 
 @Catch()
@@ -35,6 +36,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
         `${req.method} ${req.url} → ${status}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
+      // Only real (5xx) failures go to Sentry — routine 4xx responses (bad
+      // input, missing auth, not found) aren't errors in the app and would
+      // just burn the event quota with noise.
+      Sentry.captureException(exception);
     }
 
     res.status(status).json({

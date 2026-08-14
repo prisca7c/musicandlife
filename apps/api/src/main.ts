@@ -1,3 +1,7 @@
+// IMPORTANT: instrument.ts must be imported before anything else so Sentry can
+// patch Node's http/db clients before they're first required.
+import './instrument';
+
 import { config as dotenvConfig } from 'dotenv';
 import { resolve } from 'path';
 // Load .env before any NestJS module initializes (so JWT_SECRET etc. are set at module load time)
