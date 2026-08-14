@@ -20,12 +20,18 @@ interface EmailTemplate {
 
 const EVENT_LABELS: Record<string, string> = {
   'registration.received': 'New registration received',
+  'registration.submitted': 'Registration submitted (confirmation to family)',
   'registration.approved': 'Registration approved',
   'registration.denied': 'Registration denied',
   'lesson.reminder_24h': 'Lesson reminder (24h before)',
+  'lesson.booked': 'Lesson booked',
   'lesson.cancelled': 'Lesson cancelled',
   'lesson.rescheduled': 'Lesson rescheduled',
+  'booking.review_reminder': 'Booking awaiting review reminder',
   'invoice.sent': 'Invoice sent to family',
+  'invoice.preview_summary': 'Invoice preview summary',
+  'newsletter.event': 'Studio news post',
+  'message.received': 'New message received',
   'payroll.approved': 'Payroll run approved',
 };
 

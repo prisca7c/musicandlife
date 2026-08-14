@@ -71,17 +71,27 @@ export const messages = pgTable(
 );
 
 // ─── Notifications ─────────────────────────────────────────────────────────────
-export const notificationRules = pgTable('notification_rules', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
-  triggerEvent: text('trigger_event').notNull(),
-  conditions: jsonb('conditions').default({}),
-  channels: text('channels').array().notNull().default(['email']),
-  templateId: text('template_id').notNull(),
-  enabled: boolean('enabled').notNull().default(true),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const notificationRules = pgTable(
+  'notification_rules',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    triggerEvent: text('trigger_event').notNull(),
+    conditions: jsonb('conditions').default({}),
+    channels: text('channels').array().notNull().default(['email']),
+    templateId: text('template_id').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // seedDefaultRules() lazily inserts one default rule per event on first
+    // trigger() — without this, two concurrent trigger() calls for the same
+    // event can both see "no rule yet" and both insert, and every later event
+    // then delivers (and in-app-notifies) twice per matching duplicate.
+    uniqueIndex('notification_rules_org_event_uidx').on(t.organizationId, t.triggerEvent),
+  ],
+);
 
 export const notificationLog = pgTable(
   'notification_log',

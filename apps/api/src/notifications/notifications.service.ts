@@ -217,19 +217,22 @@ export class NotificationsService {
     private readonly email: EmailPort,
   ) {}
 
-  /** Seed default notification rules for an org (idempotent) */
+  /**
+   * Seed default notification rules for an org (idempotent).
+   *
+   * This runs on every trigger() call (lazy-seed), so two events for the same
+   * org firing close together race here. A check-then-insert let both see "no
+   * rule yet" and both insert, producing two identical rows for one event —
+   * and since trigger()'s delivery loop has no dedup, every later occurrence
+   * of that event then delivered (email + in-app) twice. onConflictDoNothing
+   * against the (organizationId, triggerEvent) unique index makes the losing
+   * insert a no-op instead of a second row.
+   */
   async seedDefaultRules(orgId: string) {
-    for (const rule of DEFAULT_RULES) {
-      const existing = await this.db.db.query.notificationRules.findFirst({
-        where: and(
-          eq(notificationRules.organizationId, orgId),
-          eq(notificationRules.triggerEvent, rule.triggerEvent),
-        ),
-      });
-      if (!existing) {
-        await this.db.db.insert(notificationRules).values({ ...rule, organizationId: orgId });
-      }
-    }
+    await this.db.db
+      .insert(notificationRules)
+      .values(DEFAULT_RULES.map((rule) => ({ ...rule, organizationId: orgId })))
+      .onConflictDoNothing({ target: [notificationRules.organizationId, notificationRules.triggerEvent] });
   }
 
   /** Trigger an event — auto-seeds default rules for the org on first call, then delivers */

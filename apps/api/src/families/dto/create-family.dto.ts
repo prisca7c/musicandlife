@@ -1,23 +1,32 @@
-import { IsString, IsOptional, IsEmail, IsBoolean, IsIn, IsDateString, IsInt, Min, Max } from 'class-validator';
+import { IsString, IsOptional, IsEmail, IsBoolean, IsIn, IsDateString, IsInt, Min, Max, MaxLength } from 'class-validator';
 
+// Length caps mirror SubmitRegistrationDto's (the public equivalent of this
+// form) — this endpoint is staff-only, not public, but had no caps at all,
+// letting an authenticated caller store an unbounded string in a `text`
+// column with no DB-level limit.
 export class CreateFamilyDto {
   @IsString()
+  @MaxLength(200)
   name!: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(200)
   contactName?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(500)
   address?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(40)
   phone?: string;
 
   @IsOptional()
   @IsEmail()
+  @MaxLength(255)
   email?: string;
 
   @IsOptional()
@@ -63,6 +72,7 @@ export class CreateFamilyDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(2000)
   invoiceFooterNote?: string;
 
   // ─── Resource-access subscription (separate from lesson billing) ─────────
