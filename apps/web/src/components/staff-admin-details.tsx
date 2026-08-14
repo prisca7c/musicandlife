@@ -7,13 +7,13 @@ import { Check, Pencil, X } from 'lucide-react';
 
 /**
  * Admin-only fields with no dedicated editor elsewhere: contact details, group
- * tags, the initial-lesson category, internal notes, and the carried-over
- * payroll balance. Never shown to teachers or families — this page is gated to
- * admin/manager server-side, and none of this is included in the colleague
- * directory or family-portal "your teacher" projections.
+ * tags, internal notes, and the carried-over payroll balance. Never shown to
+ * teachers or families — this page is gated to admin/manager server-side, and
+ * none of this is included in the colleague directory or family-portal "your
+ * teacher" projections.
  */
 export function StaffAdminDetails({
-  staffId, firstName, lastName, title, phone, address, notes, groupTags, initialLessonCategory, payrollBalance,
+  staffId, firstName, lastName, title, phone, address, notes, groupTags, payrollBalance,
 }: {
   staffId: string;
   firstName: string;
@@ -23,7 +23,6 @@ export function StaffAdminDetails({
   address: string | null;
   notes: string | null;
   groupTags: string[];
-  initialLessonCategory: string | null;
   payrollBalance: number;
 }) {
   const [editing, setEditing] = useState(false);
@@ -33,7 +32,6 @@ export function StaffAdminDetails({
   const [phoneV, setPhoneV] = useState(phone ?? '');
   const [addressV, setAddressV] = useState(address ?? '');
   const [notesV, setNotesV] = useState(notes ?? '');
-  const [categoryV, setCategoryV] = useState(initialLessonCategory ?? '');
   const [tags, setTags] = useState<string[]>(groupTags);
   const [tagInput, setTagInput] = useState('');
   const [balanceText, setBalanceText] = useState((payrollBalance / 100).toFixed(2));
@@ -45,7 +43,7 @@ export function StaffAdminDetails({
   function cancel() {
     setFirstNameV(firstName); setLastNameV(lastName); setTitleV(title ?? '');
     setPhoneV(phone ?? ''); setAddressV(address ?? ''); setNotesV(notes ?? '');
-    setCategoryV(initialLessonCategory ?? ''); setTags(groupTags);
+    setTags(groupTags);
     setBalanceText((payrollBalance / 100).toFixed(2));
     setTagInput(''); setError(''); setEditing(false);
   }
@@ -70,7 +68,7 @@ export function StaffAdminDetails({
         body: JSON.stringify({
           firstName: firstNameV, lastName: lastNameV, title: titleV || undefined,
           phone: phoneV || undefined, address: addressV || undefined, notes: notesV || undefined,
-          initialLessonCategory: categoryV || undefined, groupTags: tags, payrollBalance: balancePence,
+          groupTags: tags, payrollBalance: balancePence,
         }),
       });
       setSavedAt(true); setEditing(false);
@@ -130,14 +128,6 @@ export function StaffAdminDetails({
             {editing
               ? <input value={addressV} onChange={e => setAddressV(e.target.value)} className="ui-input" style={{ width: 180 }} />
               : (address ?? '—')}
-          </dd>
-        </div>
-        <div className="flex justify-between items-start gap-3">
-          <dt style={{ color: 'var(--txt3)' }}>Initial lesson category</dt>
-          <dd className="font-medium text-right">
-            {editing
-              ? <input value={categoryV} onChange={e => setCategoryV(e.target.value)} className="ui-input" style={{ width: 180 }} />
-              : (initialLessonCategory ?? '—')}
           </dd>
         </div>
         <div className="flex justify-between items-start gap-3">

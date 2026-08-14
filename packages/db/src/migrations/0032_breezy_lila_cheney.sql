@@ -1,0 +1,1 @@
+ALTER TABLE "staff_members" DROP COLUMN IF EXISTS "initial_lesson_category";
