@@ -118,7 +118,7 @@ function EditStudentModal({ open, onClose, student, onSaved }: {
 
 function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boolean; onClose: () => void; studentId: string; onCreated: () => void }) {
   const [lessonType, setLessonType] = useState<'private' | 'group'>('private');
-  const [duration, setDuration] = useState(60);
+  const [duration, setDuration] = useState(30);
   const [instrument, setInstrument] = useState('');
   const [teacherId, setTeacherId] = useState('');
   const [termId, setTermId] = useState('');
@@ -213,7 +213,7 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
             <div className="flex gap-4 mt-2">
               {(['private', 'group'] as const).map(t => (
                 <label key={t} className="flex items-center gap-2 cursor-pointer text-sm">
-                  <input type="radio" checked={lessonType === t} onChange={() => { setLessonType(t); setDuration(60); setInstrument(''); }}
+                  <input type="radio" checked={lessonType === t} onChange={() => { setLessonType(t); setDuration(t === 'group' ? 60 : 30); setInstrument(''); }}
                     style={{ accentColor: 'var(--sage)' }} />
                   <span className="capitalize">{t}</span>
                 </label>
