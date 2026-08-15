@@ -15,7 +15,7 @@ import { AddStudentModal } from '@/components/add-student-modal';
 
 interface Student {
   id: string; firstName: string; lastName: string; status: string;
-  family: { id: string; name: string; contactName: string | null } | null;
+  family: { id: string; name: string; contactName: string | null; email: string | null; phone: string | null; address: string | null } | null;
   enrollments?: { instrument: string; status: string; teacher: { id: string; firstName: string; lastName: string } | null }[];
   nextLessonAt: string | null;
   creditsAvailable: number;
@@ -187,9 +187,20 @@ export default function StudentsPage() {
                   </span>
                 </td>
                 <td style={{ color: 'var(--txt3)' }}>
-                  {s.family
-                    ? <Link href={`/app/families/${s.family.id}`} className="hover:underline" style={{ color: 'var(--txt2)' }}>{s.family.contactName || s.family.name}</Link>
-                    : '—'}
+                  {s.family ? (
+                    <div>
+                      <Link href={`/app/families/${s.family.id}`} className="hover:underline font-medium" style={{ color: 'var(--txt2)' }}>
+                        {s.family.contactName || s.family.name}
+                      </Link>
+                      {(s.family.email || s.family.phone || s.family.address) && (
+                        <div className="text-[11px] leading-tight mt-0.5" style={{ color: 'var(--txt4)' }}>
+                          {s.family.email && <div className="truncate max-w-[180px]">{s.family.email}</div>}
+                          {s.family.phone && <div>{s.family.phone}</div>}
+                          {s.family.address && <div className="truncate max-w-[180px]">{s.family.address}</div>}
+                        </div>
+                      )}
+                    </div>
+                  ) : '—'}
                 </td>
                 <td style={{ color: 'var(--txt3)' }}>{instrumentsOf(s)}</td>
                 <td style={{ color: 'var(--txt3)' }}>{teachersOf(s)}</td>
