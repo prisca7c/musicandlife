@@ -126,22 +126,30 @@ function minutesFromDayStart(iso: string): number {
   return studioMinutesFromMidnight(iso) - DAY_START * 60;
 }
 
-// ─── Overlap-aware column layout ──────────────────────────────────────────────
-type LessonLayout = Lesson & { col: number; totalCols: number };
+// ─── Overlap-aware stacked layout ──────────────────────────────────────────────
+// Overlapping lessons used to be split into narrow side-by-side columns, which
+// made the box too small to read with more than two or three at once. Instead,
+// every block keeps full width and overlapping lessons stack top-to-bottom,
+// ordered chronologically (then alphabetically by student for exact ties) —
+// same ordering `sorted` below already produces, so a cluster's array order
+// *is* its stack order.
+const STACK_ROW_H = 34; // px per row once a slot is stacked — enough for time + student name to stay legible
+
+type LessonLayout = Lesson & { stackIndex: number; stackSize: number; clusterStart: string };
 
 function computeLayout(dayLessons: Lesson[]): LessonLayout[] {
-  const sorted = [...dayLessons].sort(
-    (a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime()
-  );
+  const sorted = [...dayLessons].sort((a, b) => {
+    const byTime = new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime();
+    if (byTime !== 0) return byTime;
+    const aName = `${a.student?.firstName ?? ''} ${a.student?.lastName ?? ''}`;
+    const bName = `${b.student?.firstName ?? ''} ${b.student?.lastName ?? ''}`;
+    return aName.localeCompare(bName);
+  });
 
-  // Split into clusters of transitively-overlapping lessons first (a sweep that
-  // starts a new cluster whenever a gap opens up), then size every lesson in a
-  // cluster by that cluster's peak concurrency. Sizing each lesson only against
-  // the lessons it directly touches undercounts columns for a lesson that's
-  // linked into a busier cluster through an intermediate lesson it doesn't
-  // itself overlap — it would get a totalCols too small for the cluster, so its
-  // width and its neighbours' widths disagree and blocks render on top of each
-  // other instead of tiling edge-to-edge.
+  // Split into clusters of transitively-overlapping lessons — a sweep that
+  // starts a new cluster whenever a gap opens up. A lesson linked into a
+  // busier cluster through an intermediate lesson it doesn't itself overlap
+  // still belongs in that cluster, so the whole group stacks together.
   const clusters: Lesson[][] = [];
   let current: Lesson[] = [];
   let clusterEnd = -Infinity;
@@ -160,21 +168,10 @@ function computeLayout(dayLessons: Lesson[]): LessonLayout[] {
 
   const result: LessonLayout[] = [];
   for (const cluster of clusters) {
-    // Greedy column assignment within this cluster only.
-    const colEnds: number[] = []; // colEnds[i] = earliest ms when column i is free
-    const assignment = new Map<string, number>();
-    for (const l of cluster) {
-      const start = new Date(l.startsAt).getTime();
-      const end = start + l.duration * 60000;
-      let col = colEnds.findIndex(e => e <= start);
-      if (col === -1) { col = colEnds.length; colEnds.push(end); }
-      else { colEnds[col] = end; }
-      assignment.set(l.id, col);
-    }
-    const totalCols = colEnds.length;
-    for (const l of cluster) {
-      result.push({ ...l, col: assignment.get(l.id)!, totalCols });
-    }
+    const clusterStart = cluster[0]!.startsAt; // cluster is already chronological
+    cluster.forEach((l, i) => {
+      result.push({ ...l, stackIndex: i, stackSize: cluster.length, clusterStart });
+    });
   }
   return result;
 }
@@ -232,10 +229,15 @@ const UNPAID_COLOR = '#9B2C2C';
 
 // ─── Lesson block ─────────────────────────────────────────────────────────────
 function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () => void }) {
-  const top    = (minutesFromDayStart(lesson.startsAt) / 60) * PX_PER_HOUR;
-  const height = Math.max((lesson.duration / 60) * PX_PER_HOUR - 2, 22);
-  const left   = `${(lesson.col / lesson.totalCols) * 100}%`;
-  const width  = `calc(${(1 / lesson.totalCols) * 100}% - 3px)`;
+  const stacked = lesson.stackSize > 1;
+  // All clusters use the earliest member's time to position the whole stack —
+  // stacked rows are ordered, not clock-accurate past the first one, since a
+  // block genuinely can't show both "which slot" and "exactly when" at once
+  // once several lessons share the same moment.
+  const clusterTop = (minutesFromDayStart(lesson.clusterStart) / 60) * PX_PER_HOUR;
+  const top    = stacked ? clusterTop + lesson.stackIndex * STACK_ROW_H : clusterTop;
+  const height = stacked ? STACK_ROW_H - 2 : Math.max((lesson.duration / 60) * PX_PER_HOUR - 2, 22);
+  const width  = 'calc(100% - 3px)';
 
   const instr    = lesson.enrollment?.instrument;
   const isGrp    = lesson.enrollment?.lessonType === 'group';
@@ -257,7 +259,7 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
     <button
       onClick={onClick}
       style={{
-        top, height, left, width,
+        top, height, left: 0, width,
         background: hexToRgba(tColor, cancelled ? 0.06 : 0.14),
         borderColor: hexToRgba(tColor, cancelled ? 0.3 : 0.55),
         opacity: cancelled ? 0.65 : 1,
