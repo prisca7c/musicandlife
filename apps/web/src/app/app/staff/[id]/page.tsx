@@ -21,7 +21,6 @@ interface StaffDetail {
   address: string | null;
   notes: string | null;
   groupTags: string[];
-  initialLessonCategory: string | null;
   instruments: string[];
   defaultDuration: number;
   payrollType: string;
@@ -90,7 +89,6 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
             address={member.address}
             notes={member.notes}
             groupTags={member.groupTags}
-            initialLessonCategory={member.initialLessonCategory}
             payrollBalance={member.payrollBalance}
           />
 

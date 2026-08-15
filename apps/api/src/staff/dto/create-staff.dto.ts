@@ -35,11 +35,6 @@ export class CreateStaffDto {
   notes?: string;
 
   @IsOptional()
-  @IsString()
-  @MaxLength(150)
-  initialLessonCategory?: string;
-
-  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   @MaxLength(80, { each: true })

@@ -145,7 +145,6 @@ export const staffMembers = pgTable(
     notes: text('notes'),
     instruments: text('instruments').array().notNull().default([]),
     groupTags: text('group_tags').array().notNull().default([]),
-    initialLessonCategory: text('initial_lesson_category'),
     defaultDuration: integer('default_duration').notNull().default(60),
     payrollType: text('payroll_type', { enum: ['hourly'] }).notNull().default('hourly'),
     hourlyRate: integer('hourly_rate').notNull().default(0),
