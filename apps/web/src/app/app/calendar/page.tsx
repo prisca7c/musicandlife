@@ -133,7 +133,7 @@ function minutesFromDayStart(iso: string): number {
 // ordered chronologically (then alphabetically by student for exact ties) —
 // same ordering `sorted` below already produces, so a cluster's array order
 // *is* its stack order.
-const STACK_ROW_H = 34; // px per row once a slot is stacked — enough for time + student name to stay legible
+const STACK_ROW_H = 58; // px per row once a slot is stacked — enough for time + student + instrument + teacher to all stay legible
 
 type LessonLayout = Lesson & { stackIndex: number; stackSize: number; clusterStart: string };
 
@@ -243,7 +243,6 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
   const isGrp    = lesson.enrollment?.lessonType === 'group';
   const tColor   = teacherColor(lesson.teacher?.id);
   const iColor   = instrColor(instr);
-  const tall     = height >= 52;
   const xtall    = height >= 72;
   const landmark = STATUS_LANDMARK[lesson.status];
   // A substitute: someone other than the student's normal enrolled teacher is
@@ -284,34 +283,32 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
         {lesson.student?.firstName} {lesson.student?.lastName}
       </p>
 
-      {/* Instrument + type badge — always shown below the name (not gated on height) */}
+      {/* Instrument + type badge — always shown below the name */}
       {instr && (
         <p className="flex items-center gap-1 mt-0.5">
-          <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={11} /></span>
-          <span className="text-[10px] font-semibold capitalize truncate" style={{ color: iColor }}>
+          <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={10} /></span>
+          <span className="text-[9px] font-semibold capitalize truncate" style={{ color: iColor }}>
             {instr}
           </span>
-          {tall && (
-            <span className={`text-[8px] font-bold px-1 py-px rounded-full leading-none shrink-0
-              ${isGrp ? 'bg-blue-100 text-blue-700' : 'bg-[var(--sage-lt)] text-[var(--sage)]'}`}>
-              {isGrp ? 'G' : 'P'}
-            </span>
-          )}
+          <span className={`text-[8px] font-bold px-1 py-px rounded-full leading-none shrink-0
+            ${isGrp ? 'bg-blue-100 text-blue-700' : 'bg-[var(--sage-lt)] text-[var(--sage)]'}`}>
+            {isGrp ? 'G' : 'P'}
+          </span>
         </p>
       )}
 
       {/* Group name */}
       {xtall && isGrp && lesson.enrollment?.groupName && (
-        <p className="text-[10px] italic leading-tight truncate" style={{ color: tColor, opacity: 0.65 }}>
+        <p className="text-[9px] italic leading-tight truncate" style={{ color: tColor, opacity: 0.65 }}>
           {lesson.enrollment.groupName}
         </p>
       )}
 
-      {/* Teacher name */}
-      {xtall && lesson.teacher && (
+      {/* Teacher name — always shown, not gated on block height */}
+      {lesson.teacher && (
         <p className="flex items-center gap-1 mt-px">
           <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tColor }} />
-          <span className="text-[10px] leading-tight truncate" style={{ color: tColor, opacity: 0.65 }}>
+          <span className="text-[9px] leading-tight truncate" style={{ color: tColor, opacity: 0.7 }}>
             {lesson.teacher.firstName} {lesson.teacher.lastName}{isSub ? ' (sub)' : ''}
           </span>
         </p>
@@ -1578,14 +1575,6 @@ export default function CalendarPage() {
           <span className="w-3 h-3 rounded-sm inline-block" style={{ background: hexToRgba('#3D7A55', 0.14), borderLeft: '2px solid rgba(61,122,85,0.4)' }} />
           Available
         </span>
-        <span className="w-px h-4 bg-[var(--bd2)] mx-1" />
-        <span className="text-[11px] text-[var(--txt4)] font-semibold uppercase tracking-wide">Teacher:</span>
-        {staff.map(s => (
-          <span key={s.id} className="flex items-center gap-1 text-[11px] font-semibold" style={{ color: teacherColor(s.id) }}>
-            <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: teacherColor(s.id) }} />
-            {s.firstName} {s.lastName}
-          </span>
-        ))}
       </div>
 
       {/* ── Week view ── */}
@@ -1593,8 +1582,7 @@ export default function CalendarPage() {
         <div className="flex-1 min-h-0 overflow-auto bg-white border-t border-[var(--bd)] select-none">
           {/* Sticky header row */}
           <div className="sticky top-0 z-20 bg-white border-b border-[var(--bd)] grid"
-            style={{ gridTemplateColumns: '52px repeat(7, 1fr)' }}>
-            <div className="border-r border-[var(--bd)] bg-[var(--surf)]" />
+            style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
             {DAYS.map((day, i) => {
               const d = new Date(weekStart);
               d.setDate(d.getDate() + i);
@@ -1620,20 +1608,10 @@ export default function CalendarPage() {
             })}
           </div>
 
-          {/* Body: time column + 7 day columns */}
-          <div className="grid" style={{ gridTemplateColumns: '52px repeat(7, 1fr)', minWidth: 700 }}>
-
-            {/* Time gutter */}
-            <div className="border-r border-[var(--bd)] relative" style={{ height: TOTAL_H }}>
-              {HOURS.map(h => (
-                <div key={h} className="absolute w-full flex items-start justify-end pr-2"
-                  style={{ top: (h - DAY_START) * PX_PER_HOUR, height: PX_PER_HOUR }}>
-                  <span className="text-[10px] font-semibold text-[var(--txt4)] leading-none pt-1 tabular-nums">
-                    {String(h).padStart(2, '0')}:00
-                  </span>
-                </div>
-              ))}
-            </div>
+          {/* Body: 7 day columns (no separate time-axis column — each lesson block
+              shows its own start/end time, and the leftmost column carries a faint
+              hour marker so the hour grid is still readable at a glance) */}
+          <div className="grid" style={{ gridTemplateColumns: 'repeat(7, 1fr)', minWidth: 700 }}>
 
             {/* Day columns */}
             {DAYS.map((_, di) => {
@@ -1648,10 +1626,16 @@ export default function CalendarPage() {
                   className={`relative border-r border-[var(--bd)] ${di === 6 ? 'border-r-0' : ''} ${isToday ? 'bg-[var(--sage-lt)]/20' : ''}`}
                   style={{ height: TOTAL_H }}>
 
-                  {/* Hour guide lines */}
+                  {/* Hour guide lines + faint hour marker (leftmost column only) */}
                   {HOURS.map(h => (
                     <div key={h} className="absolute inset-x-0 border-t border-[var(--bd)]"
-                      style={{ top: (h - DAY_START) * PX_PER_HOUR }} />
+                      style={{ top: (h - DAY_START) * PX_PER_HOUR }}>
+                      {di === 0 && (
+                        <span className="absolute left-1 top-0.5 text-[9px] font-semibold text-[var(--txt4)] leading-none tabular-nums pointer-events-none opacity-70">
+                          {String(h).padStart(2, '0')}:00
+                        </span>
+                      )}
+                    </div>
                   ))}
 
                   {/* Availability bands — shaded hours a teacher is free to teach */}
@@ -1709,8 +1693,7 @@ export default function CalendarPage() {
             <>
               {/* Sticky header row */}
               <div className="sticky top-0 z-20 bg-white border-b border-[var(--bd)] grid"
-                style={{ gridTemplateColumns: `52px repeat(${teacherCols.length}, minmax(140px, 1fr))` }}>
-                <div className="border-r border-[var(--bd)] bg-[var(--surf)]" />
+                style={{ gridTemplateColumns: `repeat(${teacherCols.length}, minmax(140px, 1fr))` }}>
                 {teacherCols.map(col => {
                   const count = teacherDayLessons(col.id).length;
                   return (
@@ -1727,20 +1710,8 @@ export default function CalendarPage() {
                 })}
               </div>
 
-              {/* Body */}
-              <div className="grid" style={{ gridTemplateColumns: `52px repeat(${teacherCols.length}, minmax(140px, 1fr))`, minWidth: 700 }}>
-                {/* Time gutter */}
-                <div className="border-r border-[var(--bd)] relative" style={{ height: TOTAL_H }}>
-                  {HOURS.map(h => (
-                    <div key={h} className="absolute w-full flex items-start justify-end pr-2"
-                      style={{ top: (h - DAY_START) * PX_PER_HOUR, height: PX_PER_HOUR }}>
-                      <span className="text-[10px] font-semibold text-[var(--txt4)] leading-none pt-1 tabular-nums">
-                        {String(h).padStart(2, '0')}:00
-                      </span>
-                    </div>
-                  ))}
-                </div>
-
+              {/* Body (no separate time-axis column — leftmost teacher column carries a faint hour marker) */}
+              <div className="grid" style={{ gridTemplateColumns: `repeat(${teacherCols.length}, minmax(140px, 1fr))`, minWidth: 700 }}>
                 {/* Teacher columns */}
                 {teacherCols.map((col, ci) => {
                   const layout = computeLayout(teacherDayLessons(col.id));
@@ -1751,7 +1722,13 @@ export default function CalendarPage() {
 
                       {HOURS.map(h => (
                         <div key={h} className="absolute inset-x-0 border-t border-[var(--bd)]"
-                          style={{ top: (h - DAY_START) * PX_PER_HOUR }} />
+                          style={{ top: (h - DAY_START) * PX_PER_HOUR }}>
+                          {ci === 0 && (
+                            <span className="absolute left-1 top-0.5 text-[9px] font-semibold text-[var(--txt4)] leading-none tabular-nums pointer-events-none opacity-70">
+                              {String(h).padStart(2, '0')}:00
+                            </span>
+                          )}
+                        </div>
                       ))}
                       {HOURS.map(h => (
                         <div key={`h${h}`} className="absolute inset-x-0 border-t border-dashed"
@@ -1823,7 +1800,7 @@ export default function CalendarPage() {
               const dayList = lessons
                 .filter(l => studioDayString(l.startsAt) === dayStr)
                 .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
-              const shown = dayList.slice(0, 4);
+              const shown = dayList.slice(0, 3);
               const extra = dayList.length - shown.length;
               return (
                 <button
@@ -1831,7 +1808,7 @@ export default function CalendarPage() {
                   ref={isToday ? todayCellRef : undefined}
                   onClick={() => { setAnchorDate(d); setView('day'); }}
                   className="text-left border-r border-b border-[var(--bd)] last:border-r-0 p-1.5 align-top transition-colors hover:bg-[var(--sage-lt)]/20"
-                  style={{ minHeight: 108, background: inMonth ? '#fff' : 'var(--surf)' }}
+                  style={{ minHeight: 148, background: inMonth ? '#fff' : 'var(--surf)' }}
                   title="Open this day"
                 >
                   <div className="flex items-center justify-between mb-1">
@@ -1845,30 +1822,47 @@ export default function CalendarPage() {
                       <span className="text-[9px] font-bold" style={{ color: 'var(--txt4)' }}>{dayList.length}</span>
                     )}
                   </div>
-                  <div className="space-y-0.5">
+                  {/* Chips styled like the week view's lesson blocks (same colour
+                      logic, same time/student/instrument/teacher content) so the
+                      month grid reads as "the week view, just smaller" rather
+                      than a different, sparser design. */}
+                  <div className="space-y-1">
                     {shown.map(l => {
                       const c = teacherColor(l.teacher?.id);
+                      const instr = l.enrollment?.instrument;
+                      const iColor = instrColor(instr);
                       const cancelled = l.status.startsWith('cancelled');
                       const landmark = STATUS_LANDMARK[l.status];
                       return (
                         <div
                           key={l.id}
                           onClick={(e) => { e.stopPropagation(); setSelectedLesson(l); }}
-                          className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] font-medium truncate cursor-pointer hover:brightness-95"
+                          className="rounded-md px-1 py-0.5 text-[9px] leading-tight cursor-pointer hover:brightness-95"
                           style={{
-                            background: hexToRgba(c, 0.14),
-                            border: `1px solid ${hexToRgba(c, 0.5)}`,
-                            color: 'var(--txt2)',
-                            textDecoration: cancelled ? 'line-through' : undefined,
-                            opacity: cancelled ? 0.6 : 1,
+                            background: hexToRgba(c, cancelled ? 0.06 : 0.14),
+                            border: `1px solid ${hexToRgba(c, cancelled ? 0.3 : 0.5)}`,
+                            opacity: cancelled ? 0.65 : 1,
                           }}
-                          title={`${fmtTime(l.startsAt)} ${l.student?.firstName ?? ''} ${l.student?.lastName ?? ''}${l.teacher ? ' · ' + l.teacher.firstName + ' ' + l.teacher.lastName : ''}${l.enrollment?.instrument ? ' · ' + l.enrollment.instrument : ''}`}
                         >
-                          <span className="tabular-nums shrink-0" style={{ color: c }}>{fmtTime(l.startsAt)}</span>
-                          <span className="truncate flex-1">{l.student?.firstName} {l.student?.lastName?.[0] ?? ''}</span>
-                          {l.paymentStatus === 'paid' && <PoundSterling size={8} className="shrink-0" style={{ color: PAID_COLOR }} />}
-                          {l.paymentStatus === 'unpaid' && <PoundSterling size={8} className="shrink-0" style={{ color: UNPAID_COLOR }} />}
-                          {landmark && <landmark.Icon size={8} className="shrink-0" style={{ color: landmark.color }} />}
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="tabular-nums font-bold shrink-0" style={{ color: c, opacity: 0.75 }}>{fmtTime(l.startsAt)}</span>
+                            <span className="flex items-center gap-0.5 shrink-0">
+                              {l.paymentStatus === 'paid' && <PoundSterling size={7} style={{ color: PAID_COLOR }} />}
+                              {l.paymentStatus === 'unpaid' && <PoundSterling size={7} style={{ color: UNPAID_COLOR }} />}
+                              {landmark && <landmark.Icon size={7} style={{ color: landmark.color }} />}
+                            </span>
+                          </div>
+                          <p className="font-bold truncate" style={{ color: c, textDecoration: cancelled ? 'line-through' : undefined }}>
+                            {l.student?.firstName} {l.student?.lastName}
+                          </p>
+                          {instr && (
+                            <p className="truncate font-semibold capitalize" style={{ color: iColor }}>{instr}</p>
+                          )}
+                          {l.teacher && (
+                            <p className="truncate" style={{ color: c, opacity: 0.7 }}>
+                              {l.teacher.firstName} {l.teacher.lastName}
+                            </p>
+                          )}
                         </div>
                       );
                     })}
