@@ -31,7 +31,7 @@
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.0",
     "drizzle-orm": "^0.45.2",
-    "nanoid": "^5.0.7",
+    "nanoid": "^5.1.16",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "zod": "^3.23.0"
