@@ -12,11 +12,18 @@ import { linkify } from '@/lib/linkify';
 import { useRouter } from 'next/navigation';
 import {
   Calendar, PoundSterling,
-  ChevronRight, Users, UserCheck,
-  Briefcase, TrendingUp, Music, Clock, Megaphone,
+  ChevronRight, UserCheck,
+  Clock, Megaphone, Inbox,
 } from 'lucide-react';
 
 interface NewsPost { id: string; title: string; body: string; publishedAt: string; }
+
+interface LessonRequest {
+  id: string; status: string; createdAt: string;
+  student: { firstName: string; lastName: string } | null;
+  teacher: { firstName: string; lastName: string } | null;
+  enrollment: { instrument: string } | null;
+}
 
 function getRoleFromCookie(): string {
   try {
@@ -105,6 +112,7 @@ function AdminDashboard() {
   const { data: myAvailability = [] } = useApi<AvailWindow[]>('/staff/me/availability');
   const { data: kpis } = useApi<KpiData>('/reports/dashboard');
   const { data: lessons = [] } = useApi<Lesson[]>(`/lessons?weekStart=${weekStart}`);
+  const { data: pendingRequests = [] } = useApi<LessonRequest[]>('/lesson-requests?status=pending');
   const { firstName } = useMe();
 
   // "Today" in the studio zone (matches how the calendar buckets lessons), and
@@ -117,8 +125,6 @@ function AdminDashboard() {
 
   const now = new Date();
   const monthLabel = now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
-  const breakdown = kpis?.instrumentBreakdown ?? [];
-  const maxTotal = Math.max(...breakdown.map(r => r.total), 1);
 
   return (
     <div>
@@ -143,35 +149,15 @@ function AdminDashboard() {
         )}
       </div>
 
-      {/* Row 1 — snapshot (scoped to own students/lessons for teachers). A
-          teacher only gets 2 of these 4 cards (no Families/Teaching staff), so
-          force a 2-col grid for them — lg:grid-cols-4 with 2 cards left the
-          right half of the row (and everything above "Today's lessons") blank. */}
-      <div className={`grid grid-cols-2 ${kpis?.scoped ? '' : 'lg:grid-cols-4'} gap-4 mb-4`}>
+      {/* Snapshot row — trimmed to what's actually acted on day to day.
+          Lessons-today/this-week/month counts, Families, and Teaching staff
+          were dropped: the "Today's lessons" list below already shows the
+          real schedule, and a raw count of families/staff isn't something
+          anyone checks on the way past. Financials stay admin-only. */}
+      <div className={`grid grid-cols-1 ${kpis?.scoped ? 'sm:grid-cols-1' : 'sm:grid-cols-3'} gap-4 mb-6`}>
         <StatCard label={kpis?.scoped ? 'My students' : 'Active students'} href="/app/students" icon={<UserCheck size={20} />}
           value={kpis?.students.active ?? '—'}
           sub={kpis?.students.trial ? `+ ${kpis.students.trial} on trial` : undefined} />
-        {!kpis?.scoped && (
-          <>
-            <StatCard label="Families" href="/app/families" icon={<Users size={20} />}
-              value={kpis?.families ?? '—'} />
-            <StatCard label="Teaching staff" href="/app/staff" icon={<Briefcase size={20} />}
-              value={kpis?.staff ?? '—'} sub="active" />
-          </>
-        )}
-        <StatCard label="Lessons today" href="/app/calendar" icon={<Clock size={20} />}
-          value={todayLessons.length}
-          sub={todayLessons.length > 0 ? `next: ${fmtTime(todayLessons[0]!.startsAt)}` : 'none scheduled'} />
-      </div>
-
-      {/* Row 2 — Activity (financials hidden for teachers) */}
-      <div className={`grid grid-cols-2 ${kpis?.scoped ? '' : 'lg:grid-cols-4'} gap-4 mb-6`}>
-        <StatCard label="This week" href="/app/calendar" icon={<Calendar size={20} />} muted
-          value={kpis?.weeklyLessons.total ?? '—'}
-          sub={kpis ? `${kpis.weeklyLessons.completed} done · ${kpis.weeklyLessons.scheduled} ahead` : undefined} />
-        <StatCard label={`Lessons — ${monthLabel}`} icon={<TrendingUp size={20} />} muted
-          value={kpis?.lessons.totalThisMonth ?? '—'}
-          sub={kpis ? `${kpis.lessons.completedThisMonth} completed` : undefined} />
         {!kpis?.scoped && (
           <>
             <StatCard label={`Revenue — ${monthLabel}`} href="/app/billing" icon={<PoundSterling size={20} />}
@@ -189,44 +175,52 @@ function AdminDashboard() {
         )}
       </div>
 
-      {/* Row 3 — Instrument breakdown + Today's lessons */}
+      {/* Row 3 — Pending requests + Today's lessons */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-4">
 
-        {/* Enrollment by instrument */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-[var(--bd)] overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-[var(--bd)] flex items-center justify-between">
+        {/* Pending lesson requests — reschedules/bookings waiting on someone's
+            decision, easy to lose track of once they're not the page you're on. */}
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-[var(--bd)] overflow-hidden flex flex-col">
+          <div className="px-5 py-3.5 border-b border-[var(--bd)] flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
-              <Music size={16} style={{ color: 'var(--sage)' }} />
-              <h2 className="font-bold text-[var(--txt)] text-sm">Enrolment by instrument</h2>
+              <Inbox size={16} style={{ color: 'var(--sage)' }} />
+              <h2 className="font-bold text-[var(--txt)] text-sm">Requests</h2>
+              {pendingRequests.length > 0 && (
+                <span className="text-[11px] font-bold bg-[var(--sage-lt)] text-[var(--sage)] rounded-full px-2 py-0.5">
+                  {pendingRequests.length}
+                </span>
+              )}
             </div>
-            <Link href="/app/students" className="text-xs text-[var(--sage)] hover:underline font-medium">All students →</Link>
+            <Link href="/app/lesson-requests" className="text-xs text-[var(--sage)] hover:underline font-medium">All requests →</Link>
           </div>
-          <div className="px-5 py-4 space-y-3">
-            {breakdown.length === 0 && (
-              <p className="text-sm text-[var(--txt4)] text-center py-4">No enrolment data yet.</p>
-            )}
-            {breakdown.map(row => (
-              <div key={row.instrument}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-semibold capitalize" style={{ color: instrColour(row.instrument) }}>
-                    {row.instrument}
+          {pendingRequests.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center py-10 text-[var(--txt4)] text-sm">
+              No pending requests.
+            </div>
+          ) : (
+            <div className="px-5 py-4 space-y-3 overflow-auto">
+              {pendingRequests.slice(0, 6).map(r => (
+                <Link key={r.id} href="/app/lesson-requests" className="flex items-center justify-between gap-3 group">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold truncate group-hover:underline" style={{ color: 'var(--txt)' }}>
+                      {r.student ? `${r.student.firstName} ${r.student.lastName}` : 'Unassigned student'}
+                    </span>
+                    <span className="block text-xs truncate" style={{ color: 'var(--txt4)' }}>
+                      {r.enrollment?.instrument ? `${r.enrollment.instrument} · ` : ''}
+                      {r.teacher ? `${r.teacher.firstName} ${r.teacher.lastName}` : 'No teacher'}
+                    </span>
                   </span>
-                  <div className="flex items-center gap-2 text-[11px] text-[var(--txt4)]">
-                    {row.private > 0 && <span>{row.private} private</span>}
-                    {row.group > 0 && <span className="text-blue-500">{row.group} group</span>}
-                    <span className="font-bold text-[var(--txt2)]">{row.total}</span>
-                  </div>
-                </div>
-                <div className="h-2 bg-[var(--surf)] rounded-full overflow-hidden">
-                  <div className="h-full rounded-full transition-all"
+                  <span className="text-[10px] font-bold uppercase shrink-0 px-1.5 py-0.5 rounded-full"
                     style={{
-                      width: `${(row.total / maxTotal) * 100}%`,
-                      background: instrColour(row.instrument),
-                    }} />
-                </div>
-              </div>
-            ))}
-          </div>
+                      background: r.status === 'counter_proposed' ? 'var(--surf)' : 'var(--sage-lt)',
+                      color: r.status === 'counter_proposed' ? 'var(--txt3)' : 'var(--sage-dk)',
+                    }}>
+                    {r.status === 'counter_proposed' ? 'Countered' : 'Pending'}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Today's lessons */}
