@@ -56,11 +56,15 @@ const NAV: NavItem[] = [
 ];
 
 // Group nav sections
+// Attendance/Requests and Payments/Payroll aren't listed here — they're
+// reached from tabs on the Calendar and Billing pages (SectionTabs) instead
+// of getting their own sidebar entries. Their NAV entries stay so the routes
+// remain directly reachable (bookmarks, links from elsewhere).
 const GROUPS = [
   { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History','Lesson notes','Add to calendar'] },
-  { label: 'Studio',   items: ['Calendar','Attendance','Requests','My availability','Notes','Messages'] },
+  { label: 'Studio',   items: ['Calendar','My availability','Notes','Messages'] },
   { label: 'People',   items: ['Students','New students','Families','Staff','My pay'] },
-  { label: 'Finance',  items: ['Billing','Payments','Payroll'] },
+  { label: 'Finance',  items: ['Billing'] },
   { label: 'Content',  items: ['Resources','Library subscribers','Repertoire','Studio News','Email everyone'] },
   { label: 'Admin',    items: ['Reports','Settings'] },
 ];
