@@ -70,6 +70,7 @@ function AddFamilyModal({ open, onClose, onCreated }: { open: boolean; onClose: 
           <select name="invoiceMode" className="ui-input">
             <option value="monthly_statement">Monthly statement</option>
             <option value="per_lesson">Per lesson</option>
+            <option value="custom">Custom (set the exact cadence after creating)</option>
           </select>
         </div>
         <div className="flex gap-3 pt-1">

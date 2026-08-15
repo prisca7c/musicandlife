@@ -53,10 +53,15 @@ export const families = pgTable(
     calendarToken: text('calendar_token'),
     autoInvoice: boolean('auto_invoice').notNull().default(false),
     invoiceMode: text('invoice_mode', {
-      enum: ['monthly_statement', 'per_lesson'],
+      enum: ['monthly_statement', 'per_lesson', 'custom'],
     })
       .notNull()
       .default('monthly_statement'),
+    // Only meaningful when invoiceMode = 'custom': fire an invoice every
+    // customIntervalValue customIntervalUnits (e.g. every 2 weeks), instead of
+    // the fixed monthly cadence monthly_statement/per_lesson use.
+    customIntervalValue: integer('custom_interval_value'),
+    customIntervalUnit: text('custom_interval_unit', { enum: ['day', 'week', 'month', 'year'] }),
     balanceCached: integer('balance_cached').notNull().default(0),
     // Short, stable code the family quotes on every bank transfer (e.g. ML-4F2A).
     // It is what lets an imported statement line be matched to a family without

@@ -16,7 +16,8 @@ import { invoiceStatusLabel, invoiceStatusColor } from '@/lib/invoice-status';
 interface FamilyDetail {
   id: string; name: string; contactName: string | null; address: string | null;
   phone: string | null; email: string | null; autoInvoice: boolean;
-  invoiceMode: string; balanceCached: number;
+  invoiceMode: 'monthly_statement' | 'per_lesson' | 'custom'; balanceCached: number;
+  customIntervalValue: number | null; customIntervalUnit: 'day' | 'week' | 'month' | 'year' | null;
   billingStartDate: string | null; billingMode: 'prepaid' | 'postpaid';
   invoiceDateOffsetDays: number; dueDateOffsetDays: number;
   invoiceFormat: 'condensed' | 'normal' | 'expanded'; includePreviousBalance: boolean;
@@ -527,7 +528,11 @@ export default function FamilyDetailPage() {
             <dl className="space-y-3 text-sm">
               <div className="flex justify-between gap-3">
                 <dt style={{ color: 'var(--txt3)' }}>Invoice mode</dt>
-                <dd className="font-medium capitalize">{family.invoiceMode.replace('_', ' ')}</dd>
+                <dd className="font-medium capitalize">
+                  {family.invoiceMode === 'custom' && family.customIntervalValue && family.customIntervalUnit
+                    ? `Every ${family.customIntervalValue} ${family.customIntervalUnit}${family.customIntervalValue !== 1 ? 's' : ''}`
+                    : family.invoiceMode.replace('_', ' ')}
+                </dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt style={{ color: 'var(--txt3)' }}>Auto-invoice</dt>

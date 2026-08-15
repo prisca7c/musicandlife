@@ -1,3 +1,7 @@
+'use client';
+
+import { useState } from 'react';
+
 export interface InvoicingSettings {
   billingStartDate: string | null;
   billingMode: 'prepaid' | 'postpaid';
@@ -8,12 +12,39 @@ export interface InvoicingSettings {
   autoEmailInvoice: boolean;
   invoiceFooterNote: string | null;
   autoInvoice: boolean;
+  invoiceMode: 'monthly_statement' | 'per_lesson' | 'custom';
+  customIntervalValue: number | null;
+  customIntervalUnit: 'day' | 'week' | 'month' | 'year' | null;
 }
 
 // Shared by the per-family settings modal and the families-list bulk-apply modal
 export function InvoicingSettingsFields({ defaults }: { defaults: Partial<InvoicingSettings> }) {
+  const [mode, setMode] = useState(defaults.invoiceMode ?? 'monthly_statement');
   return (
     <>
+      <div>
+        <label className="ui-label">Invoice mode</label>
+        <select name="invoiceMode" value={mode} onChange={e => setMode(e.target.value as typeof mode)} className="ui-input">
+          <option value="monthly_statement">Monthly</option>
+          <option value="per_lesson">Per lesson</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      {mode === 'custom' && (
+        <div>
+          <label className="ui-label">Invoice every</label>
+          <div className="flex gap-2">
+            <input name="customIntervalValue" type="number" min="1" max="365"
+              defaultValue={defaults.customIntervalValue ?? 1} className="ui-input" style={{ width: 90 }} />
+            <select name="customIntervalUnit" defaultValue={defaults.customIntervalUnit ?? 'month'} className="ui-input">
+              <option value="day">Day(s)</option>
+              <option value="week">Week(s)</option>
+              <option value="month">Month(s)</option>
+              <option value="year">Year(s)</option>
+            </select>
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="ui-label">Billing start date</label>
@@ -64,6 +95,7 @@ export function InvoicingSettingsFields({ defaults }: { defaults: Partial<Invoic
 }
 
 export function readInvoicingSettingsForm(f: FormData) {
+  const invoiceMode = f.get('invoiceMode') as 'monthly_statement' | 'per_lesson' | 'custom';
   return {
     billingStartDate: (f.get('billingStartDate') as string) || undefined,
     billingMode: f.get('billingMode') as 'prepaid' | 'postpaid',
@@ -74,5 +106,8 @@ export function readInvoicingSettingsForm(f: FormData) {
     autoEmailInvoice: f.get('autoEmailInvoice') === 'on',
     invoiceFooterNote: (f.get('invoiceFooterNote') as string) || undefined,
     autoInvoice: f.get('autoInvoice') === 'on',
+    invoiceMode,
+    customIntervalValue: invoiceMode === 'custom' ? (parseInt(f.get('customIntervalValue') as string) || 1) : undefined,
+    customIntervalUnit: invoiceMode === 'custom' ? (f.get('customIntervalUnit') as 'day' | 'week' | 'month' | 'year') : undefined,
   };
 }

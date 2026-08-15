@@ -37,6 +37,18 @@ export class InvoicingSettingsDto {
   @IsOptional()
   @IsBoolean()
   autoInvoice?: boolean;
+
+  @IsOptional()
+  @IsIn(['monthly_statement', 'per_lesson', 'custom'])
+  invoiceMode?: 'monthly_statement' | 'per_lesson' | 'custom';
+
+  @IsOptional()
+  @IsInt()
+  customIntervalValue?: number;
+
+  @IsOptional()
+  @IsIn(['day', 'week', 'month', 'year'])
+  customIntervalUnit?: 'day' | 'week' | 'month' | 'year';
 }
 
 export class BulkInvoicingSettingsDto {
