@@ -17,19 +17,28 @@ interface Student { id: string; firstName: string; lastName: string; status: str
 interface DashboardData { students: Student[]; }
 interface RawSlot { startsAt: string; endsAt: string; }
 
-// One available slot, tagged with the enrolment (and so the student + teacher +
-// price) it belongs to — needed once several teachers/children are overlaid on
-// one calendar.
-interface Slot {
-  startsAt: string;
+// One thing the studio has actually set the family up for: a specific child
+// taking a specific instrument with a specific teacher.
+interface Assignment {
   enrollmentId: string;
   studentId: string;
   studentName: string;
   teacherId: string;
-  teacherName: string;
   instrument: string;
   duration: number;
   price: number;
+}
+
+// One real open slot on a teacher's calendar. Availability is teacher+time
+// only — a teacher is free at 4pm or they aren't, independent of what
+// they'll be teaching then — so a slot is tagged with every assignment it
+// could be booked against, not a single fixed instrument.
+interface Slot {
+  startsAt: string;
+  teacherId: string;
+  teacherName: string;
+  duration: number;
+  candidates: Assignment[];
 }
 
 const ALL = '__all__';
@@ -62,9 +71,15 @@ export default function BookLessonPage() {
   const [recurring, setRecurring] = useState(false);
   // Optional last date for a recurring series (studio-local YYYY-MM-DD); '' = open-ended.
   const [recurringEnd, setRecurringEnd] = useState('');
-  // Ranked picks (1st = booked now, 2nd/3rd = fallbacks). All must belong to the
-  // same enrolment — you book one lesson, not a mix of teachers.
+  // Ranked time picks (1st = booked now, 2nd/3rd = fallbacks). All must belong
+  // to the same teacher+duration calendar — you book one lesson at one length,
+  // not a mix of teachers or lesson lengths.
   const [picks, setPicks] = useState<Slot[]>([]);
+  // Which assignment (child + instrument) the current picks are for. Set
+  // automatically when a slot has only one possible assignment; the family
+  // checks one explicitly when the same real time could serve more than one
+  // of their assignments with that teacher (e.g. two instruments, same length).
+  const [chosenEnrollmentId, setChosenEnrollmentId] = useState<string | null>(null);
   const [booking, setBooking] = useState(false);
   const [done, setDone] = useState<{ recurring: boolean } | null>(null);
 
@@ -81,12 +96,11 @@ export default function BookLessonPage() {
     return t ? `${t.firstName} ${t.lastName}` : 'Your teacher';
   };
 
-  // Every bookable (student, enrolment) pair in the current scope. This is what
-  // the calendar draws availability for.
-  const scope = useMemo(() => {
+  // Every bookable assignment in the current scope.
+  const assignments = useMemo(() => {
     const chosen = selectedStudent === ALL ? students : students.filter(s => s.id === selectedStudent);
     const seen = new Set<string>();
-    const out: { studentId: string; studentName: string; enrollmentId: string; instrument: string; rate: number; duration: number; teacherId: string }[] = [];
+    const out: Assignment[] = [];
     for (const s of chosen) {
       for (const e of s.enrollments ?? []) {
         // Group classes meet at a fixed shared time — they aren't self-bookable
@@ -95,18 +109,18 @@ export default function BookLessonPage() {
         // Collapse enrolments that would book the identical lesson — same child,
         // teacher, instrument (case-insensitive: "piano"/"Piano" are one thing),
         // length AND price. Anything that still differs (e.g. two piano rates) is
-        // a real choice, so we keep it and disambiguate it by price below.
+        // a real choice, so we keep it and disambiguate it in the assignment picker.
         const key = `${s.id}:${e.teacherId}:${e.instrument.trim().toLowerCase()}:${e.defaultDuration}:${e.rate}`;
         if (seen.has(key)) continue;
         seen.add(key);
         out.push({
+          enrollmentId: e.id,
           studentId: s.id,
           studentName: `${s.firstName} ${s.lastName}`,
-          enrollmentId: e.id,
-          instrument: e.instrument,
-          rate: e.rate,
-          duration: e.defaultDuration,
           teacherId: e.teacherId as string,
+          instrument: e.instrument,
+          duration: e.defaultDuration,
+          price: e.rate,
         });
       }
     }
@@ -115,10 +129,10 @@ export default function BookLessonPage() {
 
   // Distinct teachers in scope → the "see all / one at a time" filter.
   const scopeTeachers = useMemo(() => {
-    const ids = [...new Set(scope.map(e => e.teacherId))];
+    const ids = [...new Set(assignments.map(a => a.teacherId))];
     return ids.map((id, i) => ({ id, name: teacherName(id), color: TEACHER_COLORS[i % TEACHER_COLORS.length] }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, teachers]);
+  }, [assignments, teachers]);
   const colorFor = (teacherId: string) => scopeTeachers.find(t => t.id === teacherId)?.color ?? TEACHER_COLORS[0];
 
   // If the current filter no longer matches anyone in scope, fall back to "all".
@@ -126,38 +140,30 @@ export default function BookLessonPage() {
     if (teacherFilter !== ALL && !scopeTeachers.some(t => t.id === teacherFilter)) setTeacherFilter(ALL);
   }, [scopeTeachers, teacherFilter]);
 
-  const activeEnrollments = useMemo(
-    () => scope.filter(e => teacherFilter === ALL || e.teacherId === teacherFilter),
-    [scope, teacherFilter],
+  const activeAssignments = useMemo(
+    () => assignments.filter(a => teacherFilter === ALL || a.teacherId === teacherFilter),
+    [assignments, teacherFilter],
   );
 
-  // When more than one kind of lesson (a different instrument, or a different
-  // child) shares the calendar, the time alone doesn't say which is which — so
-  // we label each slot. multiChild adds the child's name on top of that.
-  const instrKey = (studentId: string, instrument: string) => `${studentId}:${instrument.trim().toLowerCase()}`;
-  const multiKind = useMemo(
-    () => new Set(activeEnrollments.map(e => instrKey(e.studentId, e.instrument))).size > 1,
-    [activeEnrollments],
-  );
   const multiChild = useMemo(
-    () => new Set(activeEnrollments.map(e => e.studentId)).size > 1,
-    [activeEnrollments],
+    () => new Set(activeAssignments.map(a => a.studentId)).size > 1,
+    [activeAssignments],
   );
-  // Same child + same instrument but different prices (e.g. two piano rates) look
-  // identical on the calendar — flag those so the slot shows its price to tell
-  // them apart. Only kicks in on a genuine clash, so normal calendars stay clean.
-  const priceAmbiguous = useMemo(() => {
-    const rates = new Map<string, Set<number>>();
-    for (const e of activeEnrollments) {
-      const k = instrKey(e.studentId, e.instrument);
-      (rates.get(k) ?? rates.set(k, new Set()).get(k)!).add(e.rate);
-    }
-    return new Set([...rates].filter(([, r]) => r.size > 1).map(([k]) => k));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeEnrollments]);
 
-  // ── Fan-out availability: one call per enrolment in view, merged. SWR can't key
-  //    a dynamic number of requests, so this loads them in parallel by hand. ──
+  // ── Distinct (teacher, duration) calendars to fetch. This is the fix: a
+  //    teacher's real open slots are fetched once per lesson length, never
+  //    once per instrument, so the same true time slot can't appear twice
+  //    fighting to look like two different bookable things. ──
+  const calendars = useMemo(() => {
+    const seen = new Map<string, { teacherId: string; duration: number }>();
+    for (const a of activeAssignments) {
+      const key = `${a.teacherId}:${a.duration}`;
+      if (!seen.has(key)) seen.set(key, { teacherId: a.teacherId, duration: a.duration });
+    }
+    return [...seen.values()];
+  }, [activeAssignments]);
+  const calendarFetchKey = calendars.map(c => `${c.teacherId}:${c.duration}`).join('|');
+
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   // The week's start date to fetch, as the STUDIO-zone day of the grid's first
@@ -167,56 +173,64 @@ export default function BookLessonPage() {
   // permanently empty every summer (no Sunday slots bookable) and fetching a
   // phantom prior Sunday. studioDayString matches the grid's day-0 key exactly.
   const ws = studioDayString(weekStart);
-  const enrollFetchKey = activeEnrollments.map(e => `${e.enrollmentId}:${e.teacherId}:${e.duration}`).join('|');
 
   const reqSeq = useRef(0);
   useEffect(() => {
-    if (activeEnrollments.length === 0) { setSlots([]); return; }
+    if (calendars.length === 0) { setSlots([]); return; }
     const seq = ++reqSeq.current;
     setLoadingSlots(true);
     Promise.all(
-      activeEnrollments.map(async (e) => {
+      calendars.map(async (c) => {
         try {
           const raw = await apiFetch<RawSlot[]>(
-            `/family/availability?teacherId=${e.teacherId}&weekStart=${ws}&duration=${e.duration}`,
+            `/family/availability?teacherId=${c.teacherId}&weekStart=${ws}&duration=${c.duration}`,
             { token: tok() },
           );
+          const candidates = activeAssignments.filter(a => a.teacherId === c.teacherId && a.duration === c.duration);
           return (raw ?? []).map<Slot>(s => ({
             startsAt: s.startsAt,
-            enrollmentId: e.enrollmentId,
-            studentId: e.studentId,
-            studentName: e.studentName,
-            teacherId: e.teacherId,
-            teacherName: teacherName(e.teacherId),
-            instrument: e.instrument,
-            duration: e.duration,
-            price: e.rate,
+            teacherId: c.teacherId,
+            teacherName: teacherName(c.teacherId),
+            duration: c.duration,
+            candidates,
           }));
         } catch { return []; }
       }),
-    ).then(perEnrollment => {
+    ).then(perCalendar => {
       if (seq !== reqSeq.current) return; // a newer request superseded this one
-      setSlots(perEnrollment.flat());
+      setSlots(perCalendar.flat());
       setLoadingSlots(false);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enrollFetchKey, ws]);
+  }, [calendarFetchKey, ws]);
 
   // Clear picks whenever the scope/week changes — stale picks would point at slots
   // no longer shown.
-  useEffect(() => { setPicks([]); setRecurring(false); setRecurringEnd(''); }, [enrollFetchKey, ws]);
+  useEffect(() => { setPicks([]); setChosenEnrollmentId(null); setRecurring(false); setRecurringEnd(''); }, [calendarFetchKey, ws]);
 
-  const lockedEnrollment = picks[0]?.enrollmentId ?? null;
+  const lockedCalendar = picks[0] ? `${picks[0].teacherId}:${picks[0].duration}` : null;
   const cutoff = Date.now() + LEAD_HOURS * 3600000;
-  const slotKey = (s: Slot) => `${s.enrollmentId}@${s.startsAt}`;
+  const slotKey = (s: Slot) => `${s.teacherId}:${s.duration}@${s.startsAt}`;
   const pickRank = (s: Slot) => picks.findIndex(p => slotKey(p) === slotKey(s));
+
+  // Every assignment the current picks could be booked against.
+  const currentCandidates = picks[0]?.candidates ?? [];
+  const currentPickKey = picks[0] ? slotKey(picks[0]) : null;
+  useEffect(() => {
+    // Auto-choose when there's only one possibility; otherwise wait for the
+    // family to check one (and clear a stale choice that no longer applies).
+    if (currentCandidates.length === 1) { setChosenEnrollmentId(currentCandidates[0]!.enrollmentId); return; }
+    setChosenEnrollmentId(prev => (currentCandidates.some(c => c.enrollmentId === prev) ? prev : null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPickKey]);
 
   function toggleSlot(s: Slot) {
     const existing = pickRank(s);
     if (existing >= 0) { setPicks(picks.filter((_, i) => i !== existing)); return; }
-    // Picks from a different enrolment start a fresh selection — one booking is
-    // one teacher/instrument for one child.
-    if (lockedEnrollment && s.enrollmentId !== lockedEnrollment) { setPicks([s]); return; }
+    // A pick from a different teacher/duration calendar starts a fresh
+    // selection — one booking is one teacher at one lesson length.
+    const cal = `${s.teacherId}:${s.duration}`;
+    if (lockedCalendar && cal !== lockedCalendar) { setPicks([s]); return; }
     if (recurring) { setPicks([s]); return; }          // a series uses one weekly time
     if (picks.length >= 3) return;                      // 1st + two fallbacks max
     setPicks([...picks, s]);
@@ -237,9 +251,11 @@ export default function BookLessonPage() {
     });
   }, [slots, weekStart]);
 
+  const chosen = currentCandidates.find(c => c.enrollmentId === chosenEnrollmentId) ?? null;
+
   async function book() {
     const first = picks[0];
-    if (!first) return;
+    if (!first || !chosen) return;
     if (recurring && !confirm(`Set up a weekly lesson with ${first.teacherName} every ${fmtDate(first.startsAt, { weekday: 'long' })} at ${fmtTime(first.startsAt)}${recurringEnd ? ` until ${recurringEnd}` : ', with no end date'}? This books an ongoing series, not a one-off lesson.`)) return;
     setBooking(true);
     try {
@@ -247,8 +263,8 @@ export default function BookLessonPage() {
         method: 'POST', token: tok(),
         body: JSON.stringify({
           teacherId: first.teacherId,
-          studentId: first.studentId,
-          enrollmentId: first.enrollmentId,
+          studentId: chosen.studentId,
+          enrollmentId: chosen.enrollmentId,
           startsAt: first.startsAt,
           startsAt2: recurring ? undefined : picks[1]?.startsAt,
           startsAt3: recurring ? undefined : picks[2]?.startsAt,
@@ -277,7 +293,7 @@ export default function BookLessonPage() {
           : 'Your first-choice time is booked. Your teacher will confirm it, or move it to one of your other choices if they need to.'}
       </p>
       <div className="flex gap-3">
-        <button onClick={() => { setDone(null); setPicks([]); setRecurring(false); setRecurringEnd(''); }}
+        <button onClick={() => { setDone(null); setPicks([]); setChosenEnrollmentId(null); setRecurring(false); setRecurringEnd(''); }}
           className="px-4 py-2 rounded-xl border border-[var(--bd2)] text-sm font-medium hover:bg-[var(--surf)]">
           Book another
         </button>
@@ -352,7 +368,7 @@ export default function BookLessonPage() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* ── Calendar ── */}
         <div className="lg:col-span-3">
-          {scope.length === 0 ? (
+          {assignments.length === 0 ? (
             <div className="bg-white rounded-2xl border border-[var(--bd)] p-12 text-center">
               <p className="text-sm" style={{ color: 'var(--txt3)' }}>
                 No bookable instruments yet. Please contact the studio to get set up.
@@ -417,14 +433,12 @@ export default function BookLessonPage() {
                             const rank = pickRank(s);
                             const picked = rank >= 0;
                             const tooSoon = new Date(s.startsAt).getTime() < cutoff;
-                            const showPrice = priceAmbiguous.has(instrKey(s.studentId, s.instrument));
-                            const showLabel = multiKind || showPrice;
                             const c = colorFor(s.teacherId);
                             return (
                               <button key={slotKey(s)} disabled={tooSoon} onClick={() => toggleSlot(s)}
                                 title={tooSoon
                                   ? `Online bookings need ${LEAD_HOURS}h notice — call the studio for sooner.`
-                                  : `${s.studentName} · ${cap(s.instrument)} · ${formatMoney(s.price)} · ${s.teacherName}`}
+                                  : `${s.teacherName} · ${s.duration} min`}
                                 className="relative w-full rounded-lg text-xs font-semibold border py-1.5 px-1 transition disabled:opacity-35 disabled:cursor-not-allowed"
                                 style={picked
                                   ? { borderColor: 'var(--sage)', background: 'var(--sage)', color: '#fff' }
@@ -436,14 +450,6 @@ export default function BookLessonPage() {
                                   {fmtTime(s.startsAt)}
                                   {picked && <span className="ml-1 text-[10px] font-black">#{rank + 1}</span>}
                                 </span>
-                                {showLabel && (
-                                  <span className="block text-[9px] font-medium leading-tight truncate"
-                                    style={{ color: picked ? 'rgba(255,255,255,0.85)' : 'var(--txt3)' }}>
-                                    {cap(s.instrument)}
-                                    {showPrice ? ` · ${formatMoney(s.price)}` : ''}
-                                    {multiChild ? ` · ${s.studentName.split(' ')[0]}` : ''}
-                                  </span>
-                                )}
                               </button>
                             );
                           })}
@@ -454,7 +460,7 @@ export default function BookLessonPage() {
                 </div>
               )}
 
-              {!loadingSlots && slots.length === 0 && scope.length > 0 && (
+              {!loadingSlots && slots.length === 0 && assignments.length > 0 && (
                 <p className="text-center text-sm mt-4" style={{ color: 'var(--txt3)' }}>
                   No available times this week. Try the next week →
                 </p>
@@ -474,12 +480,38 @@ export default function BookLessonPage() {
               </p>
             ) : (
               <>
-                <div className="mb-3 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: 'var(--bd2)', background: 'var(--surf)' }}>
-                  <p className="font-bold" style={{ color: 'var(--txt)' }}>{cap(picks[0]!.instrument)}</p>
-                  <p className="text-xs" style={{ color: 'var(--txt3)' }}>
-                    {picks[0]!.studentName} · {picks[0]!.teacherName} · {picks[0]!.duration} min · {formatMoney(picks[0]!.price)}
-                  </p>
-                </div>
+                {/* Which assignment this booking is for — only asked when the
+                    picked time could genuinely serve more than one of the
+                    family's instruments with that teacher. */}
+                {currentCandidates.length > 1 && (
+                  <div className="mb-3">
+                    <p className="text-xs font-bold mb-1.5" style={{ color: 'var(--txt2)' }}>Which lesson is this for?</p>
+                    <div className="space-y-1.5">
+                      {currentCandidates.map(c => (
+                        <label key={c.enrollmentId}
+                          className="flex items-center gap-2 text-sm cursor-pointer rounded-lg border px-2.5 py-1.5"
+                          style={{ borderColor: chosenEnrollmentId === c.enrollmentId ? 'var(--sage-md)' : 'var(--bd2)' }}>
+                          <input type="checkbox" checked={chosenEnrollmentId === c.enrollmentId}
+                            onChange={() => setChosenEnrollmentId(c.enrollmentId)}
+                            className="rounded border-[var(--bd2)]" />
+                          <span style={{ color: 'var(--txt)' }}>
+                            {cap(c.instrument)}{multiChild ? ` · ${c.studentName}` : ''}
+                            <span style={{ color: 'var(--txt4)' }}> · {formatMoney(c.price)}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {chosen && (
+                  <div className="mb-3 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: 'var(--bd2)', background: 'var(--surf)' }}>
+                    <p className="font-bold" style={{ color: 'var(--txt)' }}>{cap(chosen.instrument)}</p>
+                    <p className="text-xs" style={{ color: 'var(--txt3)' }}>
+                      {chosen.studentName} · {picks[0]!.teacherName} · {picks[0]!.duration} min · {formatMoney(chosen.price)}
+                    </p>
+                  </div>
+                )}
 
                 <ul className="space-y-1.5 mb-3">
                   {picks.map((p, i) => (
@@ -545,7 +577,7 @@ export default function BookLessonPage() {
                     flag — letting the parent set it would promise a trial price
                     the booking would never actually be charged. */}
 
-                <button onClick={book} disabled={booking}
+                <button onClick={book} disabled={booking || !chosen}
                   className="w-full bg-[var(--sage)] text-white font-bold text-sm py-2.5 rounded-xl hover:bg-[var(--sage-dk)] disabled:opacity-50 flex items-center justify-center gap-2">
                   {booking ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
                   {recurring ? 'Set up weekly lesson' : 'Book & send to teacher'}
