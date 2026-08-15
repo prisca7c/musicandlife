@@ -15,7 +15,7 @@ import { AddStudentModal } from '@/components/add-student-modal';
 
 interface Student {
   id: string; firstName: string; lastName: string; status: string;
-  family: { id: string; name: string; contactName: string | null } | null;
+  family: { id: string; name: string; contactName: string | null; email: string | null; phone: string | null; address: string | null } | null;
   enrollments?: { instrument: string; status: string; teacher: { id: string; firstName: string; lastName: string } | null }[];
   nextLessonAt: string | null;
   creditsAvailable: number;
@@ -47,12 +47,23 @@ function teachersOf(s: Student): string {
   return [...byId.values()].join(', ') || '—';
 }
 
+type SortKey = 'name' | 'family' | 'nextLesson' | 'credits';
+const SORTERS: Record<SortKey, (a: Student, b: Student) => number> = {
+  // The API already returns the page ordered by first name — this is the
+  // default, so no re-sort needed for it.
+  name: () => 0,
+  family: (a, b) => (a.family?.contactName || a.family?.name || '').localeCompare(b.family?.contactName || b.family?.name || ''),
+  nextLesson: (a, b) => (a.nextLessonAt ?? '9999').localeCompare(b.nextLessonAt ?? '9999'),
+  credits: (a, b) => b.creditsAvailable - a.creditsAvailable,
+};
+
 const PAGE_SIZE = 50;
 
 export default function StudentsPage() {
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [offset, setOffset] = useState(0);
+  const [sort, setSort] = useState<SortKey>('name');
   const [converting, setConverting] = useState<string | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
@@ -64,7 +75,8 @@ export default function StudentsPage() {
   if (search) params.set('search', search);
   const key = `/students?${params.toString()}`;
   const { data, error, isLoading, mutate } = useApi<{ data: Student[]; total: number }>(key);
-  const students = data?.data ?? [];
+  const fetched = data?.data ?? [];
+  const students = sort === 'name' ? fetched : [...fetched].sort(SORTERS[sort]);
   const total = data?.total ?? 0;
 
   // Trial students never auto-promote — approval creates them as "trial" and
@@ -101,17 +113,25 @@ export default function StudentsPage() {
         }
       />
 
-      <div className="mb-5 relative">
-        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-          style={{ color: 'var(--txt4)' }}>
-          <Search size={15} />
-        </span>
-        <input
-          value={search}
-          onChange={e => { setSearch(e.target.value); setOffset(0); }}
-          placeholder="Search by name…"
-          className="ui-search pl-9"
-        />
+      <div className="mb-5 flex items-center gap-2">
+        <div className="relative flex-1">
+          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ color: 'var(--txt4)' }}>
+            <Search size={15} />
+          </span>
+          <input
+            value={search}
+            onChange={e => { setSearch(e.target.value); setOffset(0); }}
+            placeholder="Search by name…"
+            className="ui-search pl-9"
+          />
+        </div>
+        <select value={sort} onChange={e => setSort(e.target.value as SortKey)} className="ui-input w-auto shrink-0">
+          <option value="name">Sort: Name (A–Z)</option>
+          <option value="family">Sort: Family</option>
+          <option value="nextLesson">Sort: Next lesson</option>
+          <option value="credits">Sort: Most credits</option>
+        </select>
       </div>
 
       <div className="data-table-wrap">
@@ -167,9 +187,20 @@ export default function StudentsPage() {
                   </span>
                 </td>
                 <td style={{ color: 'var(--txt3)' }}>
-                  {s.family
-                    ? <Link href={`/app/families/${s.family.id}`} className="hover:underline" style={{ color: 'var(--txt2)' }}>{s.family.contactName || s.family.name}</Link>
-                    : '—'}
+                  {s.family ? (
+                    <div>
+                      <Link href={`/app/families/${s.family.id}`} className="hover:underline font-medium" style={{ color: 'var(--txt2)' }}>
+                        {s.family.contactName || s.family.name}
+                      </Link>
+                      {(s.family.email || s.family.phone || s.family.address) && (
+                        <div className="text-[11px] leading-tight mt-0.5" style={{ color: 'var(--txt4)' }}>
+                          {s.family.email && <div className="truncate max-w-[180px]">{s.family.email}</div>}
+                          {s.family.phone && <div>{s.family.phone}</div>}
+                          {s.family.address && <div className="truncate max-w-[180px]">{s.family.address}</div>}
+                        </div>
+                      )}
+                    </div>
+                  ) : '—'}
                 </td>
                 <td style={{ color: 'var(--txt3)' }}>{instrumentsOf(s)}</td>
                 <td style={{ color: 'var(--txt3)' }}>{teachersOf(s)}</td>

@@ -199,6 +199,9 @@ export class PayrollService {
     if (staff.status !== 'active') {
       throw new BadRequestException('This teacher is not active — reactivate them first, or run payroll before deactivating.');
     }
+    if (staff.hourlyRate === null) {
+      throw new BadRequestException('This teacher has no hourly rate set — they are paid outside payroll.');
+    }
 
     // Reject a duplicate run for the same teacher+period. The batch path
     // (createPayrollRunsForAll) already skips existing runs; without the same
@@ -236,8 +239,13 @@ export class PayrollService {
     const created: { staffId: string; name: string; runId: string; gross: number; items: number }[] = [];
     let skippedExisting = 0;
     let skippedEmpty = 0;
+    let skippedNoRate = 0;
 
     for (const s of staff) {
+      // Staff paid outside payroll (no hourly rate set) have nothing for a run
+      // to compute — skip rather than crash on the null-rate arithmetic below.
+      if (s.hourlyRate === null) { skippedNoRate++; continue; }
+
       const existing = await this.db.db.query.payrollRuns.findFirst({
         where: and(
           eq(payrollRuns.organizationId, orgId),
@@ -259,7 +267,7 @@ export class PayrollService {
       created.push({ staffId: s.id, name: `${s.firstName} ${s.lastName}`, runId: run.id, gross: computed.gross, items: computed.items.length });
     }
 
-    return { staffConsidered: staff.length, created, skippedExisting, skippedEmpty };
+    return { staffConsidered: staff.length, created, skippedExisting, skippedEmpty, skippedNoRate };
   }
 
   async approvePayrollRun(orgId: string, id: string, approvedBy: string) {
@@ -344,6 +352,9 @@ export class PayrollService {
       where: and(eq(staffMembers.id, staffId), eq(staffMembers.organizationId, orgId)),
     });
     if (!staff) throw new NotFoundException('Staff not found');
+    if (staff.hourlyRate === null) {
+      throw new BadRequestException('This teacher has no hourly rate — they are paid outside payroll, so there is no rate to change.');
+    }
 
     const [req] = await this.db.db.insert(rateChangeRequests).values({
       organizationId: orgId,

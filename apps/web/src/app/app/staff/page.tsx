@@ -11,7 +11,21 @@ import { Modal } from '@/components/modal';
 import { ALL_INSTRUMENTS } from '@music-life/types';
 import { UserPlus } from 'lucide-react';
 
-interface StaffMember { id: string; firstName: string; lastName: string; title: string | null; instruments: string[]; status: string; hourlyRate: number; payrollBalance: number; user: { email: string } | null; assignments: { id: string }[]; }
+interface StaffMember {
+  id: string; firstName: string; lastName: string; title: string | null;
+  phone: string | null; address: string | null;
+  instruments: string[]; status: string;
+  hourlyRate: number | null; payrollBalance: number | null; defaultDuration: number;
+  user: { email: string } | null; assignments: { id: string }[];
+}
+
+type SortKey = 'name' | 'balance' | 'assigned';
+const SORTERS: Record<SortKey, (a: StaffMember, b: StaffMember) => number> = {
+  // 'name' uses whatever order the API already returns (its default sort).
+  name: () => 0,
+  balance: (a, b) => (b.payrollBalance ?? 0) - (a.payrollBalance ?? 0),
+  assigned: (a, b) => b.assignments.length - a.assignments.length,
+};
 
 interface Colleague { id: string; firstName: string; lastName: string; title: string | null; phone: string | null; user: { email: string } | null; }
 
@@ -170,6 +184,7 @@ function AddStaffModal({ open, onClose, onCreated }: { open: boolean; onClose: (
 
 export default function StaffPage() {
   const [showAdd, setShowAdd] = useState(false);
+  const [sort, setSort] = useState<SortKey>('name');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
   const role = getRoleFromToken(tok());
   const isAdmin = role === 'admin';
@@ -177,7 +192,8 @@ export default function StaffPage() {
   // Cached read — instant on revisit, revalidates in the background. Only
   // admins can call /staff (full record incl. pay); everyone else gets the
   // directory branch below, which never issues this request.
-  const { data: staff = [], mutate } = useApi<StaffMember[]>(isAdmin ? '/staff' : null);
+  const { data: fetched = [], mutate } = useApi<StaffMember[]>(isAdmin ? '/staff' : null);
+  const staff = sort === 'name' ? fetched : [...fetched].sort(SORTERS[sort]);
   const load = () => mutate();
 
   if (!isAdmin) return <ColleaguesDirectory />;
@@ -189,9 +205,16 @@ export default function StaffPage() {
         title="Staff"
         subtitle={`${staff.length} staff member${staff.length !== 1 ? 's' : ''}`}
         action={
-          <button onClick={() => setShowAdd(true)} className="ui-btn-primary">
-            <UserPlus size={15} /> Add staff
-          </button>
+          <div className="flex items-center gap-2">
+            <select value={sort} onChange={e => setSort(e.target.value as SortKey)} className="ui-input w-auto">
+              <option value="name">Sort: Name (A–Z)</option>
+              <option value="balance">Sort: Highest payroll balance</option>
+              <option value="assigned">Sort: Most assigned students</option>
+            </select>
+            <button onClick={() => setShowAdd(true)} className="ui-btn-primary">
+              <UserPlus size={15} /> Add staff
+            </button>
+          </div>
         }
       />
 
@@ -200,10 +223,10 @@ export default function StaffPage() {
           <thead>
             <tr>
               <th>Name</th>
-              <th>Title</th>
+              <th>Contact</th>
               <th>Instruments</th>
-              <th>Assigned</th>
-              <th>Hourly rate</th>
+              <th>Lesson length</th>
+              <th>Assigned students</th>
               <th>Payroll balance</th>
               <th>Status</th>
             </tr>
@@ -222,13 +245,22 @@ export default function StaffPage() {
                     style={{ color: 'var(--sage-dk)' }}>
                     {s.firstName} {s.lastName}
                   </Link>
-                  {s.user && <div className="text-xs mt-0.5" style={{ color: 'var(--txt4)' }}>{s.user.email}</div>}
+                  {s.title && <div className="text-xs mt-0.5" style={{ color: 'var(--txt4)' }}>{s.title}</div>}
                 </td>
-                <td style={{ color: 'var(--txt3)' }}>{s.title ?? '—'}</td>
+                <td className="text-xs leading-tight" style={{ color: 'var(--txt3)' }}>
+                  {s.user?.email && <div className="truncate max-w-[180px]">{s.user.email}</div>}
+                  {s.phone && <div>{s.phone}</div>}
+                  {s.address && <div className="truncate max-w-[180px]">{s.address}</div>}
+                  {!s.user?.email && !s.phone && !s.address && '—'}
+                </td>
                 <td className="capitalize" style={{ color: 'var(--txt3)' }}>{s.instruments.join(', ') || '—'}</td>
+                <td style={{ color: 'var(--txt3)' }}>{s.defaultDuration} min</td>
                 <td style={{ color: 'var(--txt3)' }}>{s.assignments.length}</td>
-                <td className="font-medium">{formatMoney(s.hourlyRate)}/hr</td>
-                <td className="font-medium">{formatMoney(s.payrollBalance)}</td>
+                <td className="font-medium">
+                  {/* Orlando & Yanice Bonzi are paid outside payroll — null rather
+                      than a misleading £0.00 that reads as "unpaid". */}
+                  {s.payrollBalance === null ? <span style={{ color: 'var(--txt4)' }}>—</span> : formatMoney(s.payrollBalance)}
+                </td>
                 <td><Badge variant={s.status}>{s.status}</Badge></td>
               </tr>
             ))}

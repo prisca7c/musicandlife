@@ -76,7 +76,7 @@ export class StudentsService {
     // non-withdrawn enrollments (deduped client-side). `status` lets us drop
     // withdrawn ones.
     const withRelations = {
-      family: { columns: { id: true, name: true, contactName: true } },
+      family: { columns: { id: true, name: true, contactName: true, email: true, phone: true, address: true } },
       enrollments: {
         columns: { instrument: true, status: true },
         with: { teacher: { columns: { id: true, firstName: true, lastName: true } } },
@@ -88,7 +88,7 @@ export class StudentsService {
       const all = await this.db.db.query.students.findMany({
         where: whereClause,
         with: withRelations,
-        orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
+        orderBy: (s, { asc }) => [asc(s.firstName), asc(s.lastName)],
       });
       return this.withNextLessonAndCredits(all);
     }
@@ -97,7 +97,7 @@ export class StudentsService {
       this.db.db.query.students.findMany({
         where: whereClause,
         with: withRelations,
-        orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
+        orderBy: (s, { asc }) => [asc(s.firstName), asc(s.lastName)],
         limit: page.limit,
         offset: page.offset,
       }),

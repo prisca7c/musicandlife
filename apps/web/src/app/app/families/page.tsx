@@ -9,7 +9,29 @@ import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Modal } from '@/components/modal';
 import { InvoicingSettingsFields, readInvoicingSettingsForm } from '@/components/invoicing-settings-fields';
-import { UsersRound, Search, Settings2 } from 'lucide-react';
+import { UsersRound, Search, Settings2, Send } from 'lucide-react';
+
+const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+// Drafts and emails a statement for one family in the family's own invoice
+// mode — the same two-step create-then-send flow the Billing page's "Create
+// invoice" modal uses, just collapsed into one click for the common case.
+async function sendInvoiceTo(family: Family): Promise<void> {
+  const inv = await apiFetch<{ id: string }>('/invoices', {
+    method: 'POST', token: tok(),
+    body: JSON.stringify({ familyId: family.id, mode: family.invoiceMode, itemizeLessons: true }),
+  });
+  await apiFetch(`/invoices/${inv.id}/send`, { method: 'POST', token: tok() });
+}
+
+type SortKey = 'name' | 'balance' | 'students';
+const SORTERS: Record<SortKey, (a: Family, b: Family) => number> = {
+  // The API already returns families ordered by contact name (first name) —
+  // this is the default, so no re-sort needed for it.
+  name: () => 0,
+  balance: (a, b) => a.balanceCached - b.balanceCached,
+  students: (a, b) => b.students.length - a.students.length,
+};
 
 interface Family {
   id: string; name: string; contactName: string | null; email: string | null;
@@ -84,6 +106,36 @@ function AddFamilyModal({ open, onClose, onCreated }: { open: boolean; onClose: 
   );
 }
 
+function SendInvoiceButton({ family, onSent }: { family: Family; onSent: () => void }) {
+  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+
+  async function handleClick() {
+    if (state === 'sending') return;
+    if (!window.confirm(`Draft and email an invoice to ${family.contactName || family.name} now?`)) return;
+    setState('sending');
+    try {
+      await sendInvoiceTo(family);
+      setState('sent');
+      onSent();
+      setTimeout(() => setState('idle'), 2000);
+    } catch {
+      setState('error');
+      setTimeout(() => setState('idle'), 2500);
+    }
+  }
+
+  return (
+    <button onClick={handleClick} disabled={state === 'sending'}
+      className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-md border hover:bg-[var(--sage-lt)] disabled:opacity-50"
+      style={state === 'error'
+        ? { borderColor: 'var(--coral)', color: 'var(--coral)' }
+        : { borderColor: 'var(--sage-md)', color: 'var(--sage-dk)' }}>
+      <Send size={11} />
+      {state === 'sending' ? 'Sending…' : state === 'sent' ? 'Sent' : state === 'error' ? 'Failed' : 'Send invoice'}
+    </button>
+  );
+}
+
 function BulkInvoicingSettingsModal({ open, onClose, familyIds, onApplied }: {
   open: boolean; onClose: () => void; familyIds: string[]; onApplied: () => void;
 }) {
@@ -129,11 +181,14 @@ export default function FamiliesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showBulkSettings, setShowBulkSettings] = useState(false);
+  const [bulkSending, setBulkSending] = useState(false);
+  const [sort, setSort] = useState<SortKey>('name');
 
   // The API path is the cache key — revisiting this page renders instantly from
   // cache, then revalidates. Changing the search re-keys and refetches.
   const key = search ? `/families?search=${encodeURIComponent(search)}` : '/families';
-  const { data: families = [], mutate } = useApi<Family[]>(key);
+  const { data: fetched = [], mutate } = useApi<Family[]>(key);
+  const families = sort === 'name' ? fetched : [...fetched].sort(SORTERS[sort]);
   const load = () => mutate();
 
   function toggleSelected(id: string) {
@@ -146,6 +201,21 @@ export default function FamiliesPage() {
 
   function toggleSelectAll() {
     setSelected(prev => prev.size === families.length ? new Set() : new Set(families.map(f => f.id)));
+  }
+
+  // Sends one at a time (not Promise.all) so one family's failure doesn't
+  // abort the rest of the batch — each send is independent.
+  async function sendBulk() {
+    const targets = families.filter(f => selected.has(f.id));
+    if (targets.length === 0) return;
+    if (!window.confirm(`Draft and email invoices to ${targets.length} famil${targets.length !== 1 ? 'ies' : 'y'} now?`)) return;
+    setBulkSending(true);
+    for (const f of targets) {
+      try { await sendInvoiceTo(f); } catch { /* one failure shouldn't stop the rest */ }
+    }
+    setBulkSending(false);
+    setSelected(new Set());
+    load();
   }
 
   return (
@@ -166,9 +236,14 @@ export default function FamiliesPage() {
         action={
           <div className="flex items-center gap-2">
             {selected.size > 0 && (
-              <button onClick={() => setShowBulkSettings(true)} className="ui-btn-ghost">
-                <Settings2 size={15} /> Apply invoicing settings ({selected.size})
-              </button>
+              <>
+                <button onClick={sendBulk} disabled={bulkSending} className="ui-btn-ghost">
+                  <Send size={15} /> {bulkSending ? 'Sending…' : `Send invoice (${selected.size})`}
+                </button>
+                <button onClick={() => setShowBulkSettings(true)} className="ui-btn-ghost">
+                  <Settings2 size={15} /> Apply invoicing settings ({selected.size})
+                </button>
+              </>
             )}
             <button onClick={() => setShowAdd(true)} className="ui-btn-primary">
               <UsersRound size={15} /> Add family
@@ -177,17 +252,24 @@ export default function FamiliesPage() {
         }
       />
 
-      <div className="mb-5 relative">
-        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-          style={{ color: 'var(--txt4)' }}>
-          <Search size={15} />
-        </span>
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search by name or email…"
-          className="ui-search pl-9"
-        />
+      <div className="mb-5 flex items-center gap-2">
+        <div className="relative flex-1">
+          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ color: 'var(--txt4)' }}>
+            <Search size={15} />
+          </span>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name or email…"
+            className="ui-search pl-9"
+          />
+        </div>
+        <select value={sort} onChange={e => setSort(e.target.value as SortKey)} className="ui-input w-auto shrink-0">
+          <option value="name">Sort: Name (A–Z)</option>
+          <option value="balance">Sort: Balance (lowest first)</option>
+          <option value="students">Sort: Most students</option>
+        </select>
       </div>
 
       <div className="data-table-wrap">
@@ -201,11 +283,12 @@ export default function FamiliesPage() {
               <th>Students</th>
               <th>Balance</th>
               <th>Invoicing</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {families.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No families yet.
               </td></tr>
             )}
@@ -233,6 +316,9 @@ export default function FamiliesPage() {
                 </td>
                 <td className="text-xs capitalize" style={{ color: 'var(--txt3)' }}>
                   {f.invoiceMode.replace('_', ' ')}
+                </td>
+                <td>
+                  <SendInvoiceButton family={f} onSent={load} />
                 </td>
               </tr>
             ))}

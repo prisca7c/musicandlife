@@ -47,11 +47,12 @@ export class CreateStaffDto {
   groupTags?: string[];
 
   // Pence. Carried-over running balance — see schema comment on payrollBalance.
+  // Nullable: null means "paid outside payroll", not "£0".
   @IsOptional()
   @IsInt()
   @Min(-100_000_000)
   @Max(100_000_000)
-  payrollBalance?: number;
+  payrollBalance?: number | null;
 
   @IsOptional()
   @IsInt()
@@ -60,11 +61,12 @@ export class CreateStaffDto {
   defaultDuration?: number;
 
   // Pence/hour. Upper bound keeps an overflow value from 500'ing the int column.
+  // Nullable: null means "paid outside payroll", not "£0/hr".
   @IsOptional()
   @IsInt()
   @Min(0)
   @Max(1_000_000, { message: 'Hourly rate must not exceed £10,000.' }) // £10,000/hr
-  hourlyRate?: number;
+  hourlyRate?: number | null;
 
   @IsOptional()
   @IsIn(['active', 'inactive'])

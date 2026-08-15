@@ -14,26 +14,28 @@ import { Check, Pencil } from 'lucide-react';
 export function StaffPayrollEditor({
   staffId, payrollType, hourlyRate, defaultDuration,
 }: {
-  staffId: string; payrollType: string; hourlyRate: number; defaultDuration: number;
+  staffId: string; payrollType: string; hourlyRate: number | null; defaultDuration: number;
 }) {
   const [editing, setEditing] = useState(false);
-  const [rate, setRate] = useState(hourlyRate);          // pence, source of truth
+  const [rate, setRate] = useState(hourlyRate);          // pence, source of truth (null = paid outside payroll)
   const [duration, setDuration] = useState(defaultDuration);
   // Text mirror for the £ field so partial input (e.g. "28.") stays typable.
-  const [rateText, setRateText] = useState((hourlyRate / 100).toFixed(2));
+  const [rateText, setRateText] = useState(hourlyRate === null ? '' : (hourlyRate / 100).toFixed(2));
+  const [noRate, setNoRate] = useState(hourlyRate === null);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(false);
   const [error, setError] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   function cancel() {
-    setRate(hourlyRate); setRateText((hourlyRate / 100).toFixed(2));
+    setRate(hourlyRate); setRateText(hourlyRate === null ? '' : (hourlyRate / 100).toFixed(2));
+    setNoRate(hourlyRate === null);
     setDuration(defaultDuration); setError(''); setEditing(false);
   }
 
   async function save() {
-    const pence = Math.round(parseFloat(rateText) * 100);
-    if (!Number.isFinite(pence) || pence < 0) { setError('Enter a valid rate.'); return; }
+    const pence = noRate ? null : Math.round(parseFloat(rateText) * 100);
+    if (pence !== null && (!Number.isFinite(pence) || pence < 0)) { setError('Enter a valid rate.'); return; }
     if (!Number.isInteger(duration) || duration < 5 || duration > 240) { setError('Duration must be 5–240 minutes.'); return; }
     setSaving(true); setError('');
     try {
@@ -41,7 +43,7 @@ export function StaffPayrollEditor({
         method: 'PATCH', token: tok(),
         body: JSON.stringify({ hourlyRate: pence, defaultDuration: duration }),
       });
-      setRate(pence); setRateText((pence / 100).toFixed(2));
+      setRate(pence); setRateText(pence === null ? '' : (pence / 100).toFixed(2));
       setSavedAt(true); setEditing(false);
       setTimeout(() => setSavedAt(false), 1500);
     } catch (e) {
@@ -74,11 +76,18 @@ export function StaffPayrollEditor({
           <dt style={{ color: 'var(--txt3)' }}>Rate</dt>
           <dd className="font-medium">
             {editing ? (
-              <span className="inline-flex items-center gap-1">
-                £<input type="number" step="0.01" min="0" value={rateText}
-                  onChange={e => setRateText(e.target.value)} className={inputCls} /> /hr
+              <span className="inline-flex flex-col items-end gap-1.5">
+                <span className="inline-flex items-center gap-1">
+                  £<input type="number" step="0.01" min="0" value={rateText} disabled={noRate}
+                    onChange={e => setRateText(e.target.value)} className={inputCls} style={noRate ? { opacity: 0.5 } : undefined} /> /hr
+                </span>
+                <label className="flex items-center gap-1.5 text-xs cursor-pointer" style={{ color: 'var(--txt3)' }}>
+                  <input type="checkbox" checked={noRate} onChange={e => setNoRate(e.target.checked)}
+                    className="accent-[var(--sage)]" />
+                  Paid outside payroll (no rate)
+                </label>
               </span>
-            ) : `${formatMoney(rate)}/hr`}
+            ) : rate === null ? <span style={{ color: 'var(--txt4)' }}>Paid outside payroll</span> : `${formatMoney(rate)}/hr`}
           </dd>
         </div>
         <div className="flex justify-between items-center gap-3">

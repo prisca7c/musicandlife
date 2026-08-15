@@ -9,7 +9,14 @@ import { PageHeader } from '@/components/page-header';
 import { AutomatedHint } from '@/components/automated-hint';
 import { Badge } from '@/components/badge';
 import { SearchableSelect } from '@/components/searchable-select';
+import { SectionTabs } from '@/components/section-tabs';
 import { Upload, AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
+
+const SECTION_ITEMS = [
+  { label: 'Billing', href: '/app/billing' },
+  { label: 'Payments', href: '/app/billing/reconciliation' },
+  { label: 'Payroll', href: '/app/staff/payroll' },
+];
 
 interface Claim {
   id: string; amount: number; reference: string; status: string; createdAt: string;
@@ -73,6 +80,7 @@ export default function ReconciliationPage() {
 
   return (
     <div className="p-6 max-w-6xl">
+      <SectionTabs items={SECTION_ITEMS} />
       <PageHeader
         title="Payments &amp; reconciliation"
         subtitle="Import your bank statement — matched payments post themselves"
