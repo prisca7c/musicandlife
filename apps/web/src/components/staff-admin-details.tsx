@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, KeyboardEvent } from 'react';
+import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { formatMoney } from '@/lib/money';
 import { Check, Pencil, X } from 'lucide-react';
@@ -27,6 +28,7 @@ export function StaffAdminDetails({
   groupTags: string[];
   payrollBalance: number | null;
 }) {
+  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [firstNameV, setFirstNameV] = useState(firstName);
   const [lastNameV, setLastNameV] = useState(lastName);
@@ -82,6 +84,12 @@ export function StaffAdminDetails({
         }),
       });
       setSavedAt(true); setEditing(false);
+      // This page is a Server Component — the props this component was handed
+      // (email, phone, ...) are frozen from the initial server render. Without
+      // this, the read-only view snaps back to those stale values the instant
+      // editing closes, and stays wrong until a manual reload re-fetches the
+      // page from the server.
+      router.refresh();
       setTimeout(() => setSavedAt(false), 1500);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save');
