@@ -28,8 +28,18 @@ interface StudentDetail {
     scheduleRule: { weekday: string; startTime: string } | null;
   }[];
 }
-interface StaffMember { id: string; firstName: string; lastName: string; }
+interface StaffMember { id: string; firstName: string; lastName: string; instruments: string[]; }
 interface Term { id: string; name: string; status: string; }
+
+// Teachers who teach the selected instrument, per each teacher's own
+// "Instruments taught" list. Falls back to the full staff list when nobody
+// matches (an unconfigured/legacy teacher record) so admins are never left
+// unable to assign anyone, and when no instrument is chosen yet.
+function eligibleTeachers(staff: StaffMember[], instrument: string): StaffMember[] {
+  if (!instrument) return staff;
+  const matching = staff.filter(s => s.instruments?.includes(instrument));
+  return matching.length > 0 ? matching : staff;
+}
 interface LessonNote {
   id: string; body: string; visibility: 'internal' | 'family'; createdAt: string;
   author: { id: string; email: string } | null;
@@ -243,7 +253,7 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
         <div>
           <label className="ui-label">Teacher</label>
           <SearchableSelect
-            options={staff.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+            options={eligibleTeachers(staff, instrument).map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
             value={teacherId} onChange={setTeacherId} emptyLabel="Unassigned"
           />
         </div>
@@ -361,7 +371,7 @@ function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
         <div>
           <label className="ui-label">Teacher</label>
           <SearchableSelect
-            options={staff.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+            options={eligibleTeachers(staff, enrollment?.instrument ?? '').map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
             value={teacherId} onChange={setTeacherId} emptyLabel="Unassigned" placeholder="Unassigned"
           />
         </div>
