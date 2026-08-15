@@ -157,7 +157,22 @@ export class StaffService {
 
   async update(orgId: string, id: string, dto: UpdateStaffDto) {
     const existing = await this.findOne(orgId, id);
-    const { email: _email, ...staffData } = dto as UpdateStaffDto & { email?: string };
+    const { email, ...staffData } = dto as UpdateStaffDto & { email?: string };
+
+    // Email lives on the linked `users` row (it's the login identifier), not on
+    // staffMembers — update it there, separately from the rest of the contact
+    // fields. Only meaningful for staff who already have a login; a staff row
+    // with no linked account has no email to change here.
+    if (email && existing.user) {
+      const normalized = email.trim().toLowerCase();
+      if (normalized !== existing.user.email) {
+        const clash = await this.db.db.query.users.findFirst({ where: eq(users.email, normalized) });
+        if (clash && clash.id !== existing.user.id) {
+          throw new ConflictException('Another account already uses that email.');
+        }
+        await this.db.db.update(users).set({ email: normalized }).where(eq(users.id, existing.user.id));
+      }
+    }
 
     // Deactivating a teacher must also clear their diary — same failure mode #172
     // already fixed for the nightly recurrence worker (it now skips inactive

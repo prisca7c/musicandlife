@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { eq, and, gte, lte, count, sum, inArray, sql } from 'drizzle-orm';
 import {
   students, staffMembers, families, lessons, attendance,
@@ -361,6 +361,12 @@ export class ReportsService {
       where: and(eq(staffMembers.id, staffId), eq(staffMembers.organizationId, orgId)),
     });
     if (!staff) throw new NotFoundException('Staff member not found');
+    // A teacher paid outside payroll has no rate to compute pay from — nothing
+    // for this PDF to report.
+    if (staff.hourlyRate === null) {
+      throw new BadRequestException('This teacher has no hourly rate — they are paid outside payroll.');
+    }
+    const hourlyRate = staff.hourlyRate;
 
     const org = await this.db.db.query.organizations.findFirst({ where: eq(organizations.id, orgId) });
     const tz = await getOrgTimezone(this.db.db, orgId);
@@ -397,7 +403,7 @@ export class ReportsService {
         if (l.status === 'completed' && l.attendance?.actualStartedAt && l.attendance?.actualEndedAt) {
           minutes = Math.round((l.attendance.actualEndedAt.getTime() - l.attendance.actualStartedAt.getTime()) / 60000);
         }
-        const amount = Math.round((minutes / 60) * staff.hourlyRate);
+        const amount = Math.round((minutes / 60) * hourlyRate);
         return {
           id: l.id,
           date: formatInZone(l.startsAt, tz, {}),

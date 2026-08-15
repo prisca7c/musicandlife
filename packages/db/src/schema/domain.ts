@@ -147,11 +147,15 @@ export const staffMembers = pgTable(
     groupTags: text('group_tags').array().notNull().default([]),
     defaultDuration: integer('default_duration').notNull().default(60),
     payrollType: text('payroll_type', { enum: ['hourly'] }).notNull().default('hourly'),
-    hourlyRate: integer('hourly_rate').notNull().default(0),
+    // Nullable: a teacher paid outside this app's payroll (e.g. a contractor
+    // invoiced separately) has no hourly rate at all — null reads as "not
+    // applicable", where 0 would read as "unpaid".
+    hourlyRate: integer('hourly_rate'),
     // Pence. A carried-over running balance (e.g. from a prior system) rather
     // than something derived from payrollRuns — those only cover runs created
-    // in this app, so they can't reconstruct pre-migration history.
-    payrollBalance: integer('payroll_balance').notNull().default(0),
+    // in this app, so they can't reconstruct pre-migration history. Nullable
+    // for the same reason as hourlyRate above.
+    payrollBalance: integer('payroll_balance'),
     status: text('status', { enum: ['active', 'inactive'] }).notNull().default('active'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
