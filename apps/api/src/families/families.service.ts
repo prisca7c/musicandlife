@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { eq, and, ilike, or, inArray } from 'drizzle-orm';
+import { eq, and, ilike, or, inArray, sql, asc } from 'drizzle-orm';
 import { families, guardians, students, invoices, ledgerEntries, payments, paymentClaims, bankTransactions } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateFamilyDto } from './dto/create-family.dto';
@@ -23,7 +23,10 @@ export class FamiliesService {
           )
         : eq(families.organizationId, orgId),
       with: { students: { columns: { id: true, firstName: true, lastName: true, status: true } } },
-      orderBy: (f, { asc }) => [asc(f.name)],
+      // contactName is the parent's actual "First Last" — sort by that (falling
+      // back to the auto-generated family name for the rare row without one) so
+      // the default list order matches how families are shown: by first name.
+      orderBy: (f) => [asc(sql`coalesce(${f.contactName}, ${f.name})`)],
     });
     return rows;
   }
