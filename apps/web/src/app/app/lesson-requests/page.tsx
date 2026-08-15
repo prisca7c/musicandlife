@@ -7,7 +7,16 @@ import { useApi } from '@/lib/swr';
 import { STUDIO_TZ } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
+import { SectionTabs } from '@/components/section-tabs';
 import { Check, X, CalendarPlus, CalendarClock, Repeat } from 'lucide-react';
+
+// Attendance and Requests no longer have their own sidebar entries — they
+// live "under" Calendar, reached via this tab strip instead.
+const SECTION_ITEMS = [
+  { label: 'Calendar', href: '/app/calendar' },
+  { label: 'Attendance', href: '/app/attendance' },
+  { label: 'Requests', href: '/app/lesson-requests' },
+];
 
 interface Option { rank: number; startsAt: string; ok: boolean; reason: string | null }
 interface Req {
@@ -461,6 +470,7 @@ function RequestsPageInner() {
 
   return (
     <div>
+      <SectionTabs items={SECTION_ITEMS} />
       <PageHeader
         title={
           <span className="flex items-center gap-2">

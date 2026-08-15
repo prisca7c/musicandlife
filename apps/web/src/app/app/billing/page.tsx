@@ -12,8 +12,17 @@ import { Badge } from '@/components/badge';
 import { PaidDot } from '@/components/paid-dot';
 import { Modal } from '@/components/modal';
 import { SearchableSelect } from '@/components/searchable-select';
+import { SectionTabs } from '@/components/section-tabs';
 import { Plus, PoundSterling, Trash2 } from 'lucide-react';
 import { invoiceStatusLabel, invoiceStatusColor } from '@/lib/invoice-status';
+
+// Payments and Payroll no longer have their own sidebar entries — they live
+// "under" Billing, reached via this tab strip instead.
+const SECTION_ITEMS = [
+  { label: 'Billing', href: '/app/billing' },
+  { label: 'Payments', href: '/app/billing/reconciliation' },
+  { label: 'Payroll', href: '/app/staff/payroll' },
+];
 
 interface Invoice {
   id: string; number: string; status: string; total: number; issuedOn: string; dueDate: string;
@@ -377,6 +386,7 @@ export default function BillingPage() {
     <div>
       <CreateInvoiceModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={load} />
       <RecordPaymentModal open={showPayment} onClose={() => setShowPayment(false)} onCreated={load} />
+      {!isFamilyPortal && <SectionTabs items={SECTION_ITEMS} />}
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">

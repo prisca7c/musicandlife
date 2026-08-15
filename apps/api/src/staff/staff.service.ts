@@ -28,7 +28,7 @@ export class StaffService {
         privileges: { columns: { privileges: true } },
         assignments: { columns: { id: true } },
       },
-      orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
+      orderBy: (s, { asc }) => [asc(s.firstName), asc(s.lastName)],
     });
   }
 
@@ -41,7 +41,7 @@ export class StaffService {
     return this.db.db.query.staffMembers.findMany({
       where: and(eq(staffMembers.organizationId, orgId), eq(staffMembers.status, 'active')),
       columns: { id: true, firstName: true, lastName: true },
-      orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
+      orderBy: (s, { asc }) => [asc(s.firstName), asc(s.lastName)],
     });
   }
 
@@ -56,7 +56,7 @@ export class StaffService {
       where: and(eq(staffMembers.organizationId, orgId), eq(staffMembers.status, 'active')),
       columns: { id: true, firstName: true, lastName: true, title: true, phone: true },
       with: { user: { columns: { email: true } } },
-      orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
+      orderBy: (s, { asc }) => [asc(s.firstName), asc(s.lastName)],
     });
   }
 
