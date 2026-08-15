@@ -13,28 +13,32 @@ import { Check, Pencil, X } from 'lucide-react';
  * teacher" projections.
  */
 export function StaffAdminDetails({
-  staffId, firstName, lastName, title, phone, address, notes, groupTags, payrollBalance,
+  staffId, firstName, lastName, title, email, hasAccount, phone, address, notes, groupTags, payrollBalance,
 }: {
   staffId: string;
   firstName: string;
   lastName: string;
   title: string | null;
+  email: string | null;
+  hasAccount: boolean;
   phone: string | null;
   address: string | null;
   notes: string | null;
   groupTags: string[];
-  payrollBalance: number;
+  payrollBalance: number | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [firstNameV, setFirstNameV] = useState(firstName);
   const [lastNameV, setLastNameV] = useState(lastName);
   const [titleV, setTitleV] = useState(title ?? '');
+  const [emailV, setEmailV] = useState(email ?? '');
   const [phoneV, setPhoneV] = useState(phone ?? '');
   const [addressV, setAddressV] = useState(address ?? '');
   const [notesV, setNotesV] = useState(notes ?? '');
   const [tags, setTags] = useState<string[]>(groupTags);
   const [tagInput, setTagInput] = useState('');
-  const [balanceText, setBalanceText] = useState((payrollBalance / 100).toFixed(2));
+  const [noBalance, setNoBalance] = useState(payrollBalance === null);
+  const [balanceText, setBalanceText] = useState(payrollBalance === null ? '' : (payrollBalance / 100).toFixed(2));
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(false);
   const [error, setError] = useState('');
@@ -42,9 +46,11 @@ export function StaffAdminDetails({
 
   function cancel() {
     setFirstNameV(firstName); setLastNameV(lastName); setTitleV(title ?? '');
+    setEmailV(email ?? '');
     setPhoneV(phone ?? ''); setAddressV(address ?? ''); setNotesV(notes ?? '');
     setTags(groupTags);
-    setBalanceText((payrollBalance / 100).toFixed(2));
+    setNoBalance(payrollBalance === null);
+    setBalanceText(payrollBalance === null ? '' : (payrollBalance / 100).toFixed(2));
     setTagInput(''); setError(''); setEditing(false);
   }
 
@@ -59,14 +65,18 @@ export function StaffAdminDetails({
   }
 
   async function save() {
-    const balancePence = Math.round(parseFloat(balanceText || '0') * 100);
-    if (!Number.isFinite(balancePence)) { setError('Enter a valid payroll balance.'); return; }
+    const balancePence = noBalance ? null : Math.round(parseFloat(balanceText || '0') * 100);
+    if (balancePence !== null && !Number.isFinite(balancePence)) { setError('Enter a valid payroll balance.'); return; }
+    if (hasAccount && emailV.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailV.trim())) {
+      setError('Enter a valid email.'); return;
+    }
     setSaving(true); setError('');
     try {
       await apiFetch(`/staff/${staffId}`, {
         method: 'PATCH', token: tok(),
         body: JSON.stringify({
           firstName: firstNameV, lastName: lastNameV, title: titleV || undefined,
+          ...(hasAccount ? { email: emailV.trim() || undefined } : {}),
           phone: phoneV || undefined, address: addressV || undefined, notes: notesV || undefined,
           groupTags: tags, payrollBalance: balancePence,
         }),
@@ -107,6 +117,16 @@ export function StaffAdminDetails({
           </dd>
         </div>
         <div className="flex justify-between items-start gap-3">
+          <dt style={{ color: 'var(--txt3)' }}>Email</dt>
+          <dd className="font-medium text-right">
+            {editing
+              ? hasAccount
+                ? <input type="email" value={emailV} onChange={e => setEmailV(e.target.value)} className="ui-input" style={{ width: 180 }} />
+                : <span style={{ color: 'var(--txt4)' }} title="No login account — email can't be set here">—</span>
+              : (email ?? '—')}
+          </dd>
+        </div>
+        <div className="flex justify-between items-start gap-3">
           <dt style={{ color: 'var(--txt3)' }}>Title</dt>
           <dd className="font-medium text-right">
             {editing
@@ -134,9 +154,17 @@ export function StaffAdminDetails({
           <dt style={{ color: 'var(--txt3)' }}>Payroll balance</dt>
           <dd className="font-medium text-right">
             {editing
-              ? <span className="inline-flex items-center gap-1">£<input type="number" step="0.01" value={balanceText}
-                  onChange={e => setBalanceText(e.target.value)} className="ui-input text-right" style={{ width: 100 }} /></span>
-              : formatMoney(payrollBalance)}
+              ? (
+                <span className="inline-flex flex-col items-end gap-1.5">
+                  <span className="inline-flex items-center gap-1">£<input type="number" step="0.01" value={balanceText} disabled={noBalance}
+                    onChange={e => setBalanceText(e.target.value)} className="ui-input text-right" style={{ width: 100, opacity: noBalance ? 0.5 : 1 }} /></span>
+                  <label className="flex items-center gap-1.5 text-xs cursor-pointer" style={{ color: 'var(--txt3)' }}>
+                    <input type="checkbox" checked={noBalance} onChange={e => setNoBalance(e.target.checked)} className="accent-[var(--sage)]" />
+                    Not applicable
+                  </label>
+                </span>
+              )
+              : payrollBalance === null ? <span style={{ color: 'var(--txt4)' }}>—</span> : formatMoney(payrollBalance)}
           </dd>
         </div>
         <div>
