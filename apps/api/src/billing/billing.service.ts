@@ -634,6 +634,54 @@ export class BillingService {
     return item!;
   }
 
+  /**
+   * Edit or remove a manually-added line item. Lesson-generated lines aren't
+   * touched here — they're documentation of a calendar-driven charge, not
+   * something to hand-edit — so both guard on lessonId being null the same way
+   * the UI only offers these actions on manual rows.
+   */
+  private async assertEditableManualLineItem(orgId: string, invoiceId: string, lineItemId: string) {
+    const inv = await this.db.db.query.invoices.findFirst({
+      where: and(eq(invoices.id, invoiceId), eq(invoices.organizationId, orgId)),
+      columns: { status: true },
+    });
+    if (!inv) throw new NotFoundException('Invoice not found');
+    if (inv.status === 'paid' || inv.status === 'void') {
+      throw new BadRequestException(`This invoice is ${inv.status} and can no longer be edited.`);
+    }
+    const item = await this.db.db.query.invoiceLineItems.findFirst({
+      where: and(eq(invoiceLineItems.id, lineItemId), eq(invoiceLineItems.invoiceId, invoiceId)),
+    });
+    if (!item) throw new NotFoundException('Line item not found');
+    if (item.lessonId) throw new BadRequestException('Lesson-generated line items can’t be edited here.');
+    return { inv, item };
+  }
+
+  private async recomputeInvoiceTotal(orgId: string, invoiceId: string) {
+    const items = await this.db.db.query.invoiceLineItems.findMany({
+      where: eq(invoiceLineItems.invoiceId, invoiceId),
+    });
+    const total = items.reduce((s, i) => s + i.amount, 0);
+    await this.db.db.update(invoices).set({ total, updatedAt: new Date() }).where(eq(invoices.id, invoiceId));
+    const inv = await this.db.db.query.invoices.findFirst({
+      where: eq(invoices.id, invoiceId), columns: { status: true },
+    });
+    if (inv?.status === 'sent') await this.syncManualInvoiceCharge(orgId, invoiceId);
+  }
+
+  async updateLineItem(orgId: string, invoiceId: string, lineItemId: string, description: string, amount: number) {
+    await this.assertEditableManualLineItem(orgId, invoiceId, lineItemId);
+    await this.db.db.update(invoiceLineItems).set({ description, amount })
+      .where(eq(invoiceLineItems.id, lineItemId));
+    await this.recomputeInvoiceTotal(orgId, invoiceId);
+  }
+
+  async removeLineItem(orgId: string, invoiceId: string, lineItemId: string) {
+    await this.assertEditableManualLineItem(orgId, invoiceId, lineItemId);
+    await this.db.db.delete(invoiceLineItems).where(eq(invoiceLineItems.id, lineItemId));
+    await this.recomputeInvoiceTotal(orgId, invoiceId);
+  }
+
   // ─── Paid at the lesson ──────────────────────────────────────────────────────
   /**
    * Record that a family paid for a single lesson on the spot (cash/card at the
