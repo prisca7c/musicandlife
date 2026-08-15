@@ -15,7 +15,7 @@ import { AddStudentModal } from '@/components/add-student-modal';
 import { AssignStudentsModal } from '@/components/assign-students-modal';
 import { SectionTabs } from '@/components/section-tabs';
 import { PRIVATE_INSTRUMENTS, GROUP_INSTRUMENTS, lessonRate } from '@music-life/types';
-import { ChevronDown, ChevronLeft, ChevronRight, UserPlus, Users, Check, X, Repeat, PoundSterling, Shuffle } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, UserPlus, Users, Check, X, Repeat, PoundSterling, Shuffle, Clock } from 'lucide-react';
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string; notes: string | null;
@@ -134,7 +134,9 @@ function minutesFromDayStart(iso: string): number {
 // ordered chronologically (then alphabetically by student for exact ties) —
 // same ordering `sorted` below already produces, so a cluster's array order
 // *is* its stack order.
-const STACK_ROW_H = 58; // px per row once a slot is stacked — enough for time + student + instrument + teacher to all stay legible
+const STACK_ROW_H = 34;  // px per row once a slot is stacked — sized for the compact 2-line block
+const STACK_GAP    = 1;  // gap between rows sharing the same/overlapping time — they're one moment, keep them tight
+const CLUSTER_GAP  = 5;  // gap between separate time clusters — visually distinct from the same-time gap above
 
 type LessonLayout = Lesson & { stackIndex: number; stackSize: number; clusterTop: number; clusterHeight: number };
 
@@ -183,8 +185,8 @@ function computeLayout(dayLessons: Lesson[]): LessonLayout[] {
     const clusterTop = Math.max(naturalTop, cursorBottom);
     const clusterHeight = cluster.length > 1
       ? cluster.length * STACK_ROW_H
-      : Math.max((cluster[0]!.duration / 60) * PX_PER_HOUR, 24);
-    cursorBottom = clusterTop + clusterHeight + 2; // small gap before the next cluster
+      : Math.max((cluster[0]!.duration / 60) * PX_PER_HOUR, STACK_ROW_H);
+    cursorBottom = clusterTop + clusterHeight + CLUSTER_GAP;
     cluster.forEach((l, i) => {
       result.push({ ...l, stackIndex: i, stackSize: cluster.length, clusterTop, clusterHeight });
     });
@@ -231,15 +233,14 @@ function teacherColor(teacherId?: string | null) {
   return TEACHER_PALETTE[hash % TEACHER_PALETTE.length]!;
 }
 
-// ─── Status landmarks — a small icon badge showing what happened, independent
-// of colour (which is now the teacher's). No entry = upcoming/normal, no badge.
-const STATUS_LANDMARK: Record<string, { Icon: typeof Check; color: string; title: string }> = {
-  completed:           { Icon: Check,  color: '#22543D', title: 'Present' },
-  cancelled_makeup:    { Icon: Repeat, color: '#5B3F9E', title: 'Cancelled ≥24h — makeup credit issued' },
-  cancelled_no_makeup: { Icon: X,      color: '#9B2C2C', title: 'Cancelled <24h — charged, no credit' },
-  cancelled_no_pay:    { Icon: X,      color: '#7B341E', title: 'Excused — no charge, no credit' },
-  cancelled_teacher:   { Icon: X,      color: '#744210', title: 'Teacher cancelled — no charge' },
-};
+// ─── Attendance landmark — one icon standing in for "what happened", shown in
+// the block's left rail. Detail (which cancellation reason, etc.) lives one
+// click away in the lesson modal; the calendar grid only needs the headline.
+function attendanceIcon(status: string): { Icon: typeof Check; color: string; title: string } {
+  if (status === 'completed') return { Icon: Check, color: '#22543D', title: 'Present' };
+  if (status.startsWith('cancelled')) return { Icon: X, color: '#9B2C2C', title: 'Absent / cancelled' };
+  return { Icon: Clock, color: '#718096', title: 'Attendance not yet taken' };
+}
 const PAID_COLOR = '#22543D';
 const UNPAID_COLOR = '#9B2C2C';
 
@@ -252,15 +253,14 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
   // first one, since a block genuinely can't show both "which slot" and
   // "exactly when" at once once several lessons share the same moment.
   const top    = stacked ? lesson.clusterTop + lesson.stackIndex * STACK_ROW_H : lesson.clusterTop;
-  const height = stacked ? STACK_ROW_H - 2 : lesson.clusterHeight - 2;
+  const height = stacked ? STACK_ROW_H - STACK_GAP : lesson.clusterHeight - STACK_GAP;
   const width  = 'calc(100% - 3px)';
 
   const instr    = lesson.enrollment?.instrument;
   const isGrp    = lesson.enrollment?.lessonType === 'group';
   const tColor   = teacherColor(lesson.teacher?.id);
   const iColor   = instrColor(instr);
-  const xtall    = height >= 72;
-  const landmark = STATUS_LANDMARK[lesson.status];
+  const present  = attendanceIcon(lesson.status);
   // A substitute: someone other than the student's normal enrolled teacher is
   // covering this one occurrence.
   const isSub = !!lesson.enrollment?.teacherId && !!lesson.teacher && lesson.enrollment.teacherId !== lesson.teacher.id;
@@ -269,6 +269,9 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
   // read as "there's a lesson here" at a glance. Dim it and strike the name,
   // matching how the month view already marks cancellations.
   const cancelled = lesson.status.startsWith('cancelled');
+  // Group lessons are more usefully identified by their group name than by
+  // repeating "group" — fall back to the instrument if no group name is set.
+  const secondaryLabel = isGrp && lesson.enrollment?.groupName ? lesson.enrollment.groupName : instr;
 
   return (
     <button
@@ -279,56 +282,44 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
         borderColor: hexToRgba(tColor, cancelled ? 0.3 : 0.55),
         opacity: cancelled ? 0.65 : 1,
       }}
-      className="absolute rounded-lg border cursor-pointer text-left px-1.5 py-1 overflow-hidden transition-all hover:brightness-95 hover:shadow-md group z-10"
+      className="absolute rounded-lg border cursor-pointer text-left overflow-hidden transition-all hover:brightness-95 hover:shadow-md group z-10 flex items-stretch gap-0.5 px-1"
     >
-      {/* Time range + status/payment landmarks */}
-      <div className="flex items-center justify-between gap-1 mb-0.5">
-        <p className="text-[9px] font-bold leading-none tabular-nums" style={{ color: tColor, opacity: 0.75 }}>
-          {fmtTime(lesson.startsAt)}–{fmtTimeEnd(lesson.startsAt, lesson.duration)}
-        </p>
-        <span className="flex items-center gap-0.5 shrink-0">
-          {isSub && <Shuffle size={9} style={{ color: tColor }} aria-label="Substitute teacher" />}
-          {lesson.paymentStatus === 'paid' && <PoundSterling size={9} style={{ color: PAID_COLOR }} aria-label="Paid" />}
-          {lesson.paymentStatus === 'unpaid' && <PoundSterling size={9} style={{ color: UNPAID_COLOR }} aria-label="Unpaid" />}
-          {landmark && <landmark.Icon size={10} style={{ color: landmark.color }} aria-label={landmark.title} />}
+      {/* Left rail: attendance status */}
+      <span className="flex items-center justify-center shrink-0 w-3" title={present.title}>
+        <present.Icon size={10} style={{ color: present.color }} aria-label={present.title} />
+      </span>
+
+      {/* Middle: two compact lines — time + name, then instrument/group + teacher */}
+      <span className="flex-1 min-w-0 flex flex-col justify-center gap-0.5 py-0.5">
+        <span className="flex items-baseline gap-1 min-w-0">
+          <span className="text-[8px] font-bold leading-none tabular-nums shrink-0" style={{ color: tColor, opacity: 0.7 }}>
+            {fmtTime(lesson.startsAt)}
+          </span>
+          <span className="text-[11px] font-bold leading-tight truncate" style={{ color: tColor, textDecoration: cancelled ? 'line-through' : undefined }}>
+            {lesson.student?.firstName} {lesson.student?.lastName}
+          </span>
         </span>
-      </div>
+        <span className="flex items-center gap-1 min-w-0">
+          {instr && <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={9} /></span>}
+          {secondaryLabel && (
+            <span className="text-[9px] font-semibold capitalize truncate" style={{ color: iColor }}>
+              {secondaryLabel}
+            </span>
+          )}
+          {isSub && <Shuffle size={8} className="shrink-0" style={{ color: tColor }} aria-label="Substitute teacher" />}
+          {lesson.teacher && (
+            <span className="text-[9px] leading-tight truncate" style={{ color: tColor, opacity: 0.7 }}>
+              · {lesson.teacher.firstName} {lesson.teacher.lastName}
+            </span>
+          )}
+        </span>
+      </span>
 
-      {/* Student name */}
-      <p className="text-[11px] font-bold leading-tight truncate" style={{ color: tColor, textDecoration: cancelled ? 'line-through' : undefined }}>
-        {lesson.student?.firstName} {lesson.student?.lastName}
-      </p>
-
-      {/* Instrument + type badge — always shown below the name */}
-      {instr && (
-        <p className="flex items-center gap-1 mt-0.5">
-          <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={10} /></span>
-          <span className="text-[9px] font-semibold capitalize truncate" style={{ color: iColor }}>
-            {instr}
-          </span>
-          <span className={`text-[8px] font-bold px-1 py-px rounded-full leading-none shrink-0
-            ${isGrp ? 'bg-blue-100 text-blue-700' : 'bg-[var(--sage-lt)] text-[var(--sage)]'}`}>
-            {isGrp ? 'G' : 'P'}
-          </span>
-        </p>
-      )}
-
-      {/* Group name */}
-      {xtall && isGrp && lesson.enrollment?.groupName && (
-        <p className="text-[9px] italic leading-tight truncate" style={{ color: tColor, opacity: 0.65 }}>
-          {lesson.enrollment.groupName}
-        </p>
-      )}
-
-      {/* Teacher name — always shown, not gated on block height */}
-      {lesson.teacher && (
-        <p className="flex items-center gap-1 mt-px">
-          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: tColor }} />
-          <span className="text-[9px] leading-tight truncate" style={{ color: tColor, opacity: 0.7 }}>
-            {lesson.teacher.firstName} {lesson.teacher.lastName}{isSub ? ' (sub)' : ''}
-          </span>
-        </p>
-      )}
+      {/* Right rail: payment status */}
+      <span className="flex items-center justify-center shrink-0 w-3">
+        {lesson.paymentStatus === 'paid' && <PoundSterling size={10} style={{ color: PAID_COLOR }} aria-label="Paid" />}
+        {lesson.paymentStatus === 'unpaid' && <PoundSterling size={10} style={{ color: UNPAID_COLOR }} aria-label="Unpaid" />}
+      </span>
     </button>
   );
 }
@@ -1857,7 +1848,7 @@ export default function CalendarPage() {
                       const instr = l.enrollment?.instrument;
                       const iColor = instrColor(instr);
                       const cancelled = l.status.startsWith('cancelled');
-                      const landmark = STATUS_LANDMARK[l.status];
+                      const landmark = attendanceIcon(l.status);
                       return (
                         <div
                           key={l.id}
