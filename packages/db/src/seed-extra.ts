@@ -107,7 +107,10 @@ async function main() {
 
   // ── 3. Rate change requests ───────────────────────────────────────────────────
   console.log('Creating rate change requests…');
-  const rateSample = shuffle([...allTeachers]).slice(0, Math.min(4, allTeachers.length));
+  // Staff with no hourly rate are paid outside payroll — nothing to request a
+  // rate change on.
+  const ratedTeachers = allTeachers.filter((t): t is typeof t & { hourlyRate: number } => t.hourlyRate !== null);
+  const rateSample = shuffle([...ratedTeachers]).slice(0, Math.min(4, ratedTeachers.length));
   for (const t of rateSample) {
     const requested = t.hourlyRate + pick([300, 500, -200]);
     await db.insert(rateChangeRequests).values({
@@ -125,7 +128,7 @@ async function main() {
   const periodStart = new Date(now.getTime() - 30 * 86400000);
   const periodEnd = now;
   let payrollRunCount = 0, payrollItemCount = 0;
-  for (const t of allTeachers) {
+  for (const t of ratedTeachers) {
     const teacherLessons = completedLessons.filter(l => l.teacherId === t.id
       && l.startsAt >= periodStart && l.startsAt <= periodEnd);
     if (teacherLessons.length === 0) continue;
