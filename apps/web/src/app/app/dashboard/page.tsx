@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
@@ -198,8 +198,10 @@ function AdminDashboard() {
   // compare each lesson's studio day too — a lesson stored as 23:30Z belongs to
   // the next studio day under BST, so a UTC-prefix startsWith would misfile it.
   const today = studioDayString(new Date());
-  const todayLessons = lessons
-    .filter(l => studioDayString(l.startsAt) === today && l.status === 'scheduled')
+  // The whole week, not just today — so attendance for the full week can be
+  // taken from the dashboard without a trip to Calendar/Attendance.
+  const weekLessons = lessons
+    .filter(l => l.status === 'scheduled')
     .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
 
   const now = new Date();
@@ -302,24 +304,25 @@ function AdminDashboard() {
           )}
         </div>
 
-        {/* Today's lessons */}
+        {/* This week's lessons — grouped by day so attendance for the whole
+            week can be taken here, not just today's. */}
         <div className="lg:col-span-3 bg-white rounded-2xl border border-[var(--bd)] overflow-hidden flex flex-col">
           <div className="px-5 py-3.5 border-b border-[var(--bd)] flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
               <Calendar size={16} style={{ color: 'var(--sage)' }} />
-              <h2 className="font-bold text-[var(--txt)] text-sm">Today&apos;s lessons</h2>
-              {todayLessons.length > 0 && (
+              <h2 className="font-bold text-[var(--txt)] text-sm">This week&apos;s lessons</h2>
+              {weekLessons.length > 0 && (
                 <span className="text-[11px] font-bold bg-[var(--sage-lt)] text-[var(--sage)] rounded-full px-2 py-0.5">
-                  {todayLessons.length}
+                  {weekLessons.length}
                 </span>
               )}
             </div>
             <Link href="/app/calendar" className="text-xs text-[var(--sage)] hover:underline font-medium">Calendar →</Link>
           </div>
 
-          {todayLessons.length === 0 ? (
+          {weekLessons.length === 0 ? (
             <div className="flex-1 flex items-center justify-center py-10 text-[var(--txt4)] text-sm">
-              No lessons scheduled for today.
+              No lessons scheduled this week.
             </div>
           ) : (
             <div className="overflow-auto flex-1">
@@ -332,35 +335,55 @@ function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--bd)]">
-                  {todayLessons.map(l => {
-                    const instr = l.enrollment?.instrument;
-                    const isGroup = l.enrollment?.lessonType === 'group';
-                    return (
-                      <tr key={l.id} className="hover:bg-[var(--surf)]">
-                        <td className="px-4 py-2.5 font-bold text-[var(--sage)] whitespace-nowrap tabular-nums">
-                          {fmtTime(l.startsAt)}
-                        </td>
-                        <td className="px-4 py-2.5 font-medium">{l.student?.firstName} {l.student?.lastName}</td>
-                        <td className="px-4 py-2.5">
-                          {instr ? (
-                            <span className="flex items-center gap-1.5">
-                              <span className="capitalize text-[13px]" style={{ color: instrColour(instr) }}>{instr}</span>
-                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isGroup ? 'bg-blue-50 text-blue-600' : 'bg-[var(--sage-lt)] text-[var(--sage)]'}`}>
-                                {isGroup ? 'Group' : 'Private'}
+                  {(() => {
+                    const rows: ReactNode[] = [];
+                    let lastDay = '';
+                    for (const l of weekLessons) {
+                      const dayStr = studioDayString(l.startsAt);
+                      if (dayStr !== lastDay) {
+                        lastDay = dayStr;
+                        const label = dayStr === today
+                          ? 'Today'
+                          : new Date(l.startsAt).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+                        rows.push(
+                          <tr key={`day-${dayStr}`}>
+                            <td colSpan={6} className="px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide bg-[var(--surf)]"
+                              style={{ color: dayStr === today ? 'var(--sage)' : 'var(--txt4)' }}>
+                              {label}
+                            </td>
+                          </tr>,
+                        );
+                      }
+                      const instr = l.enrollment?.instrument;
+                      const isGroup = l.enrollment?.lessonType === 'group';
+                      rows.push(
+                        <tr key={l.id} className="hover:bg-[var(--surf)]">
+                          <td className="px-4 py-2.5 font-bold text-[var(--sage)] whitespace-nowrap tabular-nums">
+                            {fmtTime(l.startsAt)}
+                          </td>
+                          <td className="px-4 py-2.5 font-medium">{l.student?.firstName} {l.student?.lastName}</td>
+                          <td className="px-4 py-2.5">
+                            {instr ? (
+                              <span className="flex items-center gap-1.5">
+                                <span className="capitalize text-[13px]" style={{ color: instrColour(instr) }}>{instr}</span>
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isGroup ? 'bg-blue-50 text-blue-600' : 'bg-[var(--sage-lt)] text-[var(--sage)]'}`}>
+                                  {isGroup ? 'Group' : 'Private'}
+                                </span>
                               </span>
-                            </span>
-                          ) : <span className="text-[var(--txt4)]">—</span>}
-                        </td>
-                        <td className="px-4 py-2.5 text-[var(--txt3)]">
-                          {l.teacher ? `${l.teacher.firstName} ${l.teacher.lastName}` : '—'}
-                        </td>
-                        <td className="px-4 py-2.5 text-[var(--txt4)] tabular-nums">{l.duration}</td>
-                        <td className="px-4 py-2.5 text-right">
-                          <QuickAttendanceMenu lessonId={l.id} onMarked={() => onLessonMarked(l.id)} />
-                        </td>
-                      </tr>
-                    );
-                  })}
+                            ) : <span className="text-[var(--txt4)]">—</span>}
+                          </td>
+                          <td className="px-4 py-2.5 text-[var(--txt3)]">
+                            {l.teacher ? `${l.teacher.firstName} ${l.teacher.lastName}` : '—'}
+                          </td>
+                          <td className="px-4 py-2.5 text-[var(--txt4)] tabular-nums">{l.duration}</td>
+                          <td className="px-4 py-2.5 text-right">
+                            <QuickAttendanceMenu lessonId={l.id} onMarked={() => onLessonMarked(l.id)} />
+                          </td>
+                        </tr>,
+                      );
+                    }
+                    return rows;
+                  })()}
                 </tbody>
               </table>
             </div>
