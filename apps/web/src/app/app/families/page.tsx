@@ -11,6 +11,15 @@ import { Modal } from '@/components/modal';
 import { InvoicingSettingsFields, readInvoicingSettingsForm } from '@/components/invoicing-settings-fields';
 import { UsersRound, Search, Settings2 } from 'lucide-react';
 
+type SortKey = 'name' | 'balance' | 'students';
+const SORTERS: Record<SortKey, (a: Family, b: Family) => number> = {
+  // The API already returns families ordered by contact name (first name) —
+  // this is the default, so no re-sort needed for it.
+  name: () => 0,
+  balance: (a, b) => a.balanceCached - b.balanceCached,
+  students: (a, b) => b.students.length - a.students.length,
+};
+
 interface Family {
   id: string; name: string; contactName: string | null; email: string | null;
   balanceCached: number; invoiceMode: string;
@@ -128,11 +137,13 @@ export default function FamiliesPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showBulkSettings, setShowBulkSettings] = useState(false);
+  const [sort, setSort] = useState<SortKey>('name');
 
   // The API path is the cache key — revisiting this page renders instantly from
   // cache, then revalidates. Changing the search re-keys and refetches.
   const key = search ? `/families?search=${encodeURIComponent(search)}` : '/families';
-  const { data: families = [], mutate } = useApi<Family[]>(key);
+  const { data: fetched = [], mutate } = useApi<Family[]>(key);
+  const families = sort === 'name' ? fetched : [...fetched].sort(SORTERS[sort]);
   const load = () => mutate();
 
   function toggleSelected(id: string) {
@@ -176,17 +187,24 @@ export default function FamiliesPage() {
         }
       />
 
-      <div className="mb-5 relative">
-        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-          style={{ color: 'var(--txt4)' }}>
-          <Search size={15} />
-        </span>
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search by name or email…"
-          className="ui-search pl-9"
-        />
+      <div className="mb-5 flex items-center gap-2">
+        <div className="relative flex-1">
+          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ color: 'var(--txt4)' }}>
+            <Search size={15} />
+          </span>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name or email…"
+            className="ui-search pl-9"
+          />
+        </div>
+        <select value={sort} onChange={e => setSort(e.target.value as SortKey)} className="ui-input w-auto shrink-0">
+          <option value="name">Sort: Name (A–Z)</option>
+          <option value="balance">Sort: Balance (lowest first)</option>
+          <option value="students">Sort: Most students</option>
+        </select>
       </div>
 
       <div className="data-table-wrap">
