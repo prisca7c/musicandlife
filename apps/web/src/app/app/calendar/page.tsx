@@ -243,6 +243,20 @@ function attendanceIcon(status: string): { Icon: typeof Check; color: string; ti
 }
 const PAID_COLOR = '#22543D';
 const UNPAID_COLOR = '#9B2C2C';
+const PENDING_COLOR = '#718096';
+
+// ─── Payment landmark — mirrors attendanceIcon: green once paid, red once
+// unpaid, grey until the lesson has actually happened (nothing to collect yet).
+function paymentIcon(lesson: Pick<Lesson, 'paymentStatus' | 'status'>): { color: string; title: string } | null {
+  if (lesson.paymentStatus === 'paid') return { color: PAID_COLOR, title: 'Paid' };
+  if (lesson.paymentStatus === 'unpaid') {
+    if (lesson.status !== 'completed' && !lesson.status.startsWith('cancelled')) {
+      return { color: PENDING_COLOR, title: "Lesson hasn't happened yet" };
+    }
+    return { color: UNPAID_COLOR, title: 'Unpaid' };
+  }
+  return null;
+}
 
 // ─── Lesson block ─────────────────────────────────────────────────────────────
 function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () => void }) {
@@ -261,6 +275,7 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
   const tColor   = teacherColor(lesson.teacher?.id);
   const iColor   = instrColor(instr);
   const present  = attendanceIcon(lesson.status);
+  const paid     = paymentIcon(lesson);
   // A substitute: someone other than the student's normal enrolled teacher is
   // covering this one occurrence.
   const isSub = !!lesson.enrollment?.teacherId && !!lesson.teacher && lesson.enrollment.teacherId !== lesson.teacher.id;
@@ -284,9 +299,16 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
       }}
       className="absolute rounded-lg border cursor-pointer text-left overflow-hidden transition-all hover:brightness-95 hover:shadow-md group z-10 flex items-stretch gap-0.5 px-1"
     >
-      {/* Left rail: attendance status */}
-      <span className="flex items-center justify-center shrink-0 w-3" title={present.title}>
-        <present.Icon size={10} style={{ color: present.color }} aria-label={present.title} />
+      {/* Left rail: attendance status, paid status stacked underneath */}
+      <span className="flex flex-col items-center justify-center shrink-0 w-3 gap-0.5">
+        <span title={present.title}>
+          <present.Icon size={10} style={{ color: present.color }} aria-label={present.title} />
+        </span>
+        {paid && (
+          <span title={paid.title}>
+            <PoundSterling size={9} style={{ color: paid.color }} aria-label={paid.title} />
+          </span>
+        )}
       </span>
 
       {/* Middle: two compact lines — time + name, then instrument/group + teacher */}
@@ -313,12 +335,6 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
             </span>
           )}
         </span>
-      </span>
-
-      {/* Right rail: payment status */}
-      <span className="flex items-center justify-center shrink-0 w-3">
-        {lesson.paymentStatus === 'paid' && <PoundSterling size={10} style={{ color: PAID_COLOR }} aria-label="Paid" />}
-        {lesson.paymentStatus === 'unpaid' && <PoundSterling size={10} style={{ color: UNPAID_COLOR }} aria-label="Unpaid" />}
       </span>
     </button>
   );
@@ -1479,13 +1495,15 @@ export default function CalendarPage() {
             <ChevronLeft size={16} />
           </button>
 
-          {/* Today button + view switcher */}
+          {/* Today button + view switcher: label reflects the active view
+              (Day/Week/Month), not a static "Today", and the chevron opens
+              the same pill's dropdown to change it. */}
           <div ref={viewMenuRef} className="relative flex">
-            <button onClick={goToday} className="ui-btn-ghost text-sm px-3 py-1.5 rounded-r-none border-r-0">
-              Today
+            <button onClick={goToday} className="ui-btn-ghost text-sm px-3 py-1.5 rounded-r-none border-r-0" title="Jump to today">
+              {view === 'day' ? 'Today' : view === 'week' ? 'Week' : 'Month'}
             </button>
             <button onClick={() => setViewMenuOpen(o => !o)}
-              className="ui-btn-ghost text-sm px-1.5 py-1.5 rounded-l-none">
+              className="ui-btn-ghost text-sm px-1.5 py-1.5 rounded-l-none" title="Change view" aria-label="Change view">
               <ChevronDown size={13} />
             </button>
             {viewMenuOpen && (
@@ -1595,7 +1613,7 @@ export default function CalendarPage() {
 
       {/* ── Week view ── */}
       {view === 'week' && (
-        <div className="flex-1 min-h-0 overflow-auto bg-white border-t border-[var(--bd)] select-none">
+        <div className="flex-1 min-h-0 overflow-auto bg-white border-t border-r border-[var(--bd)] select-none">
           {/* Sticky header row */}
           <div className="sticky top-0 z-20 bg-white border-b border-[var(--bd)] grid"
             style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
@@ -1654,8 +1672,10 @@ export default function CalendarPage() {
                     </div>
                   ))}
 
-                  {/* Availability bands — shaded hours a teacher is free to teach */}
-                  {weekAvailabilityBands(di).map((b, bi) => (
+                  {/* Availability bands — shaded hours a teacher is free to teach.
+                      Admin only sees these for today (the "today section"); a
+                      teacher sees their own windows on any day. */}
+                  {(role === 'teacher' || isToday) && weekAvailabilityBands(di).map((b, bi) => (
                     <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
                       style={{ top: b.top, height: b.height, background: hexToRgba('#3D7A55', 0.09), borderLeft: '2px solid rgba(61,122,85,0.35)' }} />
                   ))}
@@ -1702,7 +1722,7 @@ export default function CalendarPage() {
 
       {/* ── Day view: all teachers' schedules for the selected day ── */}
       {view === 'day' && (
-        <div className="flex-1 min-h-0 overflow-auto bg-white border-t border-[var(--bd)] select-none">
+        <div className="flex-1 min-h-0 overflow-auto bg-white border-t border-r border-[var(--bd)] select-none">
           {teacherCols.length === 0 ? (
             <p className="p-8 text-center text-sm" style={{ color: 'var(--txt4)' }}>No teaching staff found.</p>
           ) : (
@@ -1750,8 +1770,10 @@ export default function CalendarPage() {
                         <div key={`h${h}`} className="absolute inset-x-0 border-t border-dashed"
                           style={{ top: (h - DAY_START) * PX_PER_HOUR + PX_PER_HOUR / 2, borderColor: '#E2E8F0' }} />
                       ))}
-                      {/* Availability bands — this teacher's free-to-teach hours, in their colour */}
-                      {teacherAvailabilityBands(col.id).map((b, bi) => (
+                      {/* Availability bands — this teacher's free-to-teach hours, in their
+                          colour. Admin only sees these for today; a teacher always sees
+                          their own. */}
+                      {(role === 'teacher' || isAnchorToday) && teacherAvailabilityBands(col.id).map((b, bi) => (
                         <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
                           style={{ top: b.top, height: b.height, background: hexToRgba(teacherColor(col.id), 0.1), borderLeft: `2px solid ${hexToRgba(teacherColor(col.id), 0.4)}` }}>
                           <span className="absolute left-1.5 top-1 text-[8px] font-bold uppercase tracking-wide pointer-events-none"
@@ -1794,7 +1816,7 @@ export default function CalendarPage() {
 
       {/* ── Month view: a traditional 6-week grid, chips per lesson ── */}
       {view === 'month' && (
-        <div className="flex-1 min-h-0 overflow-auto bg-white border-t border-[var(--bd)]">
+        <div className="flex-1 min-h-0 overflow-auto bg-white border-t border-r border-[var(--bd)]">
           {/* Weekday header */}
           <div className="sticky top-0 z-10 grid bg-[var(--surf)] border-b border-[var(--bd)]"
             style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
@@ -1816,8 +1838,6 @@ export default function CalendarPage() {
               const dayList = lessons
                 .filter(l => studioDayString(l.startsAt) === dayStr)
                 .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
-              const shown = dayList.slice(0, 3);
-              const extra = dayList.length - shown.length;
               return (
                 <button
                   key={i}
@@ -1838,53 +1858,55 @@ export default function CalendarPage() {
                       <span className="text-[9px] font-bold" style={{ color: 'var(--txt4)' }}>{dayList.length}</span>
                     )}
                   </div>
-                  {/* Chips styled like the week view's lesson blocks (same colour
-                      logic, same time/student/instrument/teacher content) so the
-                      month grid reads as "the week view, just smaller" rather
-                      than a different, sparser design. */}
+                  {/* Chips match the week view's lesson blocks exactly: left rail
+                      (attendance + paid stacked), two-line content. Every lesson
+                      renders — no "+N more" truncation — so the cell just grows. */}
                   <div className="space-y-1">
-                    {shown.map(l => {
+                    {dayList.map(l => {
                       const c = teacherColor(l.teacher?.id);
                       const instr = l.enrollment?.instrument;
                       const iColor = instrColor(instr);
                       const cancelled = l.status.startsWith('cancelled');
-                      const landmark = attendanceIcon(l.status);
+                      const present = attendanceIcon(l.status);
+                      const paid = paymentIcon(l);
+                      const secondaryLabel = l.enrollment?.lessonType === 'group' && l.enrollment?.groupName ? l.enrollment.groupName : instr;
                       return (
                         <div
                           key={l.id}
                           onClick={(e) => { e.stopPropagation(); setSelectedLesson(l); }}
-                          className="rounded-md px-1 py-0.5 text-[9px] leading-tight cursor-pointer hover:brightness-95"
+                          className="rounded-md border cursor-pointer overflow-hidden hover:brightness-95 flex items-stretch gap-0.5 px-1 py-0.5"
                           style={{
                             background: hexToRgba(c, cancelled ? 0.06 : 0.14),
-                            border: `1px solid ${hexToRgba(c, cancelled ? 0.3 : 0.5)}`,
+                            borderColor: hexToRgba(c, cancelled ? 0.3 : 0.55),
                             opacity: cancelled ? 0.65 : 1,
                           }}
                         >
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="tabular-nums font-bold shrink-0" style={{ color: c, opacity: 0.75 }}>{fmtTime(l.startsAt)}</span>
-                            <span className="flex items-center gap-0.5 shrink-0">
-                              {l.paymentStatus === 'paid' && <PoundSterling size={7} style={{ color: PAID_COLOR }} />}
-                              {l.paymentStatus === 'unpaid' && <PoundSterling size={7} style={{ color: UNPAID_COLOR }} />}
-                              {landmark && <landmark.Icon size={7} style={{ color: landmark.color }} />}
+                          <span className="flex flex-col items-center justify-center shrink-0 w-3 gap-0.5" title={present.title}>
+                            <present.Icon size={9} style={{ color: present.color }} />
+                            {paid && <span title={paid.title}><PoundSterling size={8} style={{ color: paid.color }} /></span>}
+                          </span>
+                          <span className="flex-1 min-w-0 flex flex-col gap-0.5">
+                            <span className="flex items-baseline gap-1 min-w-0">
+                              <span className="text-[8px] font-bold leading-none tabular-nums shrink-0" style={{ color: c, opacity: 0.7 }}>{fmtTime(l.startsAt)}</span>
+                              <span className="text-[10px] font-bold leading-tight truncate" style={{ color: c, textDecoration: cancelled ? 'line-through' : undefined }}>
+                                {l.student?.firstName} {l.student?.lastName}
+                              </span>
                             </span>
-                          </div>
-                          <p className="font-bold truncate" style={{ color: c, textDecoration: cancelled ? 'line-through' : undefined }}>
-                            {l.student?.firstName} {l.student?.lastName}
-                          </p>
-                          {instr && (
-                            <p className="truncate font-semibold capitalize" style={{ color: iColor }}>{instr}</p>
-                          )}
-                          {l.teacher && (
-                            <p className="truncate" style={{ color: c, opacity: 0.7 }}>
-                              {l.teacher.firstName} {l.teacher.lastName}
-                            </p>
-                          )}
+                            <span className="flex items-center gap-1 min-w-0">
+                              {instr && <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={8} /></span>}
+                              {secondaryLabel && (
+                                <span className="text-[8px] font-semibold capitalize truncate" style={{ color: iColor }}>{secondaryLabel}</span>
+                              )}
+                              {l.teacher && (
+                                <span className="text-[8px] leading-tight truncate" style={{ color: c, opacity: 0.7 }}>
+                                  · {l.teacher.firstName} {l.teacher.lastName}
+                                </span>
+                              )}
+                            </span>
+                          </span>
                         </div>
                       );
                     })}
-                    {extra > 0 && (
-                      <div className="text-[10px] font-semibold pl-1" style={{ color: 'var(--sage)' }}>+{extra} more</div>
-                    )}
                   </div>
                 </button>
               );
