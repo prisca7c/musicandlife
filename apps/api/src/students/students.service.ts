@@ -88,7 +88,7 @@ export class StudentsService {
       const all = await this.db.db.query.students.findMany({
         where: whereClause,
         with: withRelations,
-        orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
+        orderBy: (s, { asc }) => [asc(s.firstName), asc(s.lastName)],
       });
       return this.withNextLessonAndCredits(all);
     }
@@ -97,7 +97,7 @@ export class StudentsService {
       this.db.db.query.students.findMany({
         where: whereClause,
         with: withRelations,
-        orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
+        orderBy: (s, { asc }) => [asc(s.firstName), asc(s.lastName)],
         limit: page.limit,
         offset: page.offset,
       }),
