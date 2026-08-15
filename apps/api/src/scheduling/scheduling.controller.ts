@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { SchedulingService } from './scheduling.service';
 import { CreateLessonDto } from './dto/create-lesson.dto';
 import { UpdateLessonDto } from './dto/update-lesson.dto';
@@ -83,6 +83,22 @@ export class SchedulingController {
     @Body() body: RescheduleLessonDto,
   ) {
     return this.scheduling.directReschedule(user.orgId, id, body.startsAt, { role: user.role, userId: user.userId });
+  }
+
+  @Post('lessons/:id/clone')
+  @Roles('teacher')
+  cloneLesson(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Body() body: RescheduleLessonDto,
+  ) {
+    return this.scheduling.cloneLesson(user.orgId, id, body.startsAt, { role: user.role, userId: user.userId });
+  }
+
+  @Delete('lessons/:id')
+  @Roles('teacher')
+  deleteLesson(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.scheduling.deleteLesson(user.orgId, id, { role: user.role, userId: user.userId });
   }
 
   // ─── Availability-driven booking ──────────────────────────────────────────
