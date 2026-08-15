@@ -65,6 +65,18 @@ html, body {
 .ui-input::placeholder { color: var(--txt4); }
 .ui-input:disabled { background: var(--surf); color: var(--txt4); cursor: not-allowed; }
 
+/* A <select> using .ui-input is always a sort/filter dropdown — appearance:none
+   above strips the native arrow with nothing to replace it, so every one of
+   these read as a plain box with no hint it opens a menu. Bake a chevron in
+   once here rather than adding it at each call site. */
+select.ui-input {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23718096' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.625rem center;
+  background-size: 14px;
+  padding-right: 2.25rem;
+}
+
 /* ── Design System: Labels ──────────────────────────────────────────────────── */
 .ui-label {
   display: block;
@@ -146,6 +158,15 @@ html, body {
   border: 1.5px solid var(--bd2);
   border-radius: 10px;
   padding: 0.5625rem 0.875rem;
+  /* Every caller pairs this with a magnifying-glass icon absolutely positioned
+     over the left edge (see students/families/messaging pages) — reserve room
+     for it here, in the class itself, rather than relying on a `pl-*` utility
+     class at the call site. Both are single-class selectors; whichever rule
+     lands later in the built stylesheet wins regardless of the .pl-9 on the
+     element, and @tailwind utilities is injected above this file's own rules,
+     so a `pl-9` on the input was silently losing to this shorthand and the
+     placeholder/typed text rendered underneath the icon. */
+  padding-left: 2.25rem;
   font-size: 0.875rem;
   color: var(--txt);
   outline: none;
