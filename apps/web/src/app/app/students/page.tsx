@@ -9,26 +9,42 @@ import { LoadState } from '@/components/load-state';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
+import { fmtDate } from '@/lib/datetime';
 import { UserPlus, Search } from 'lucide-react';
 import { AddStudentModal } from '@/components/add-student-modal';
 
-interface Student { id: string; firstName: string; lastName: string; status: string; family: { id: string; name: string } | null; enrollments?: { instrument: string; status: string }[]; }
+interface Student {
+  id: string; firstName: string; lastName: string; status: string;
+  family: { id: string; name: string; contactName: string | null } | null;
+  enrollments?: { instrument: string; status: string; teacher: { id: string; firstName: string; lastName: string } | null }[];
+  nextLessonAt: string | null;
+  creditsAvailable: number;
+}
 
-// Distinct instruments across a student's non-withdrawn enrollments. Instruments
-// are stored with inconsistent casing ("Piano" vs "piano" vs "suzuki violin"),
+// Instruments/teachers are stored with inconsistent casing ("Piano" vs "piano"),
 // so we title-case for display — matching how the PDFs render them — and dedupe
-// case-insensitively so the same instrument can't show twice.
+// case-insensitively so the same instrument/teacher can't show twice.
 function titleCase(s: string): string {
   return s.replace(/\b\w/g, c => c.toUpperCase());
 }
+function activeEnrollments(s: Student) {
+  return (s.enrollments ?? []).filter(e => e.status !== 'withdrawn');
+}
 function instrumentsOf(s: Student): string {
-  const active = (s.enrollments ?? []).filter(e => e.status !== 'withdrawn' && e.instrument);
   const byKey = new Map<string, string>();
-  for (const e of active) {
+  for (const e of activeEnrollments(s)) {
+    if (!e.instrument) continue;
     const key = e.instrument.trim().toLowerCase();
     if (key && !byKey.has(key)) byKey.set(key, titleCase(e.instrument.trim()));
   }
   return [...byKey.values()].join(', ') || '—';
+}
+function teachersOf(s: Student): string {
+  const byId = new Map<string, string>();
+  for (const e of activeEnrollments(s)) {
+    if (e.teacher) byId.set(e.teacher.id, `${e.teacher.firstName} ${e.teacher.lastName}`);
+  }
+  return [...byId.values()].join(', ') || '—';
 }
 
 const PAGE_SIZE = 50;
@@ -104,13 +120,15 @@ export default function StudentsPage() {
             <tr>
               <th>Name</th>
               <th>Family</th>
-              <th>Status</th>
               <th>Instruments</th>
+              <th>Teachers</th>
+              <th>Next lesson</th>
+              <th>Credits</th>
             </tr>
           </thead>
           <tbody>
             {students.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 {/* A failed load used to render as "No students yet." — an
                     empty studio, rather than a request that didn't come back. */}
                 {error || isLoading
@@ -122,20 +140,16 @@ export default function StudentsPage() {
             {students.map(s => (
               <tr key={s.id}>
                 <td>
-                  <Link href={`/app/students/${s.id}`}
-                    className="font-semibold hover:underline"
-                    style={{ color: 'var(--sage-dk)' }}>
-                    {s.firstName} {s.lastName}
-                  </Link>
-                </td>
-                <td style={{ color: 'var(--txt3)' }}>
-                  {s.family
-                    ? <Link href={`/app/families/${s.family.id}`} className="hover:underline" style={{ color: 'var(--txt2)' }}>{s.family.name}</Link>
-                    : '—'}
-                </td>
-                <td>
+                  {/* Status lives on the detail page now — this list is a quick
+                      scan across many students, not a place to manage state. A
+                      trial student is still flagged inline since promoting one
+                      is a common, one-click action worth keeping visible. */}
                   <span className="inline-flex items-center gap-2">
-                    <Badge variant={s.status}>{s.status}</Badge>
+                    <Link href={`/app/students/${s.id}`}
+                      className="font-semibold hover:underline"
+                      style={{ color: 'var(--sage-dk)' }}>
+                      {s.firstName} {s.lastName}
+                    </Link>
                     {s.status === 'trial' && (
                       <button
                         onClick={() => convertToActive(s.id)}
@@ -144,12 +158,27 @@ export default function StudentsPage() {
                         style={{ borderColor: 'var(--sage-md)', color: 'var(--sage-dk)' }}
                         title="Promote this trial student to a full active student"
                       >
-                        {converting === s.id ? 'Converting…' : 'Convert to active'}
+                        {converting === s.id ? 'Converting…' : 'Trial'}
                       </button>
+                    )}
+                    {s.status !== 'trial' && s.status !== 'active' && (
+                      <Badge variant={s.status}>{s.status}</Badge>
                     )}
                   </span>
                 </td>
+                <td style={{ color: 'var(--txt3)' }}>
+                  {s.family
+                    ? <Link href={`/app/families/${s.family.id}`} className="hover:underline" style={{ color: 'var(--txt2)' }}>{s.family.contactName || s.family.name}</Link>
+                    : '—'}
+                </td>
                 <td style={{ color: 'var(--txt3)' }}>{instrumentsOf(s)}</td>
+                <td style={{ color: 'var(--txt3)' }}>{teachersOf(s)}</td>
+                <td style={{ color: 'var(--txt3)' }}>
+                  {s.nextLessonAt ? fmtDate(s.nextLessonAt, { day: 'numeric', month: 'short' }) : '—'}
+                </td>
+                <td className="font-medium" style={{ color: s.creditsAvailable > 0 ? 'var(--sage-dk)' : 'var(--txt3)' }}>
+                  {s.creditsAvailable}
+                </td>
               </tr>
             ))}
           </tbody>
