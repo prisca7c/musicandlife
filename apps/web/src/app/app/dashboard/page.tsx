@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
+import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { useMe } from '@/lib/use-me';
 import { fmtTime, studioDayString } from '@/lib/datetime';
@@ -13,8 +14,80 @@ import { useRouter } from 'next/navigation';
 import {
   Calendar, PoundSterling,
   ChevronRight, UserCheck,
-  Clock, Megaphone, Inbox,
+  Clock, Megaphone, Inbox, ChevronDown, Check,
 } from 'lucide-react';
+
+type AttendanceStatus = 'present' | 'absent_makeup' | 'absent_no_makeup' | 'absent_no_pay' | 'cancelled_teacher';
+
+// Same set of outcomes as the full Attendance page — labelled by what happens
+// to the money, since that's what marking a lesson actually does.
+const QUICK_ACTIONS: { status: AttendanceStatus; label: string }[] = [
+  { status: 'present',           label: 'Present' },
+  { status: 'absent_makeup',     label: 'Cancelled ≥24h — no charge, rebook' },
+  { status: 'absent_no_makeup',  label: 'Cancelled <24h — charged' },
+  { status: 'absent_no_pay',     label: 'Absent — no charge' },
+  { status: 'cancelled_teacher', label: 'Teacher cancelled' },
+];
+
+// A small "take attendance right here" menu on each dashboard lesson row, so
+// marking a lesson doesn't require a trip to the full Attendance page for the
+// common case of just marking it present.
+function QuickAttendanceMenu({ lessonId, onMarked }: { lessonId: string; onMarked: (status: AttendanceStatus) => void }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, []);
+
+  async function mark(status: AttendanceStatus) {
+    setSaving(true); setOpen(false); setError('');
+    try {
+      await apiFetch(`/lessons/${lessonId}/attendance`, { method: 'POST', token: tok(), body: JSON.stringify({ status }) });
+      onMarked(status);
+    } catch (e) {
+      // Leave the row as-is — the full Attendance page shows the real state.
+      setError(e instanceof Error ? e.message : 'Could not mark attendance');
+    }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        onClick={() => setOpen(o => !o)}
+        disabled={saving}
+        title={error || undefined}
+        className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-md border hover:bg-[var(--sage-lt)] disabled:opacity-50"
+        style={error
+          ? { borderColor: 'var(--coral)', color: 'var(--coral)' }
+          : { borderColor: 'var(--sage-md)', color: 'var(--sage-dk)' }}
+      >
+        {saving ? 'Saving…' : error ? 'Couldn’t mark' : 'Attendance'} <ChevronDown size={12} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-56 rounded-xl border bg-white shadow-lg overflow-hidden z-30"
+          style={{ borderColor: 'var(--bd)' }}>
+          {QUICK_ACTIONS.map(a => (
+            <button key={a.status} onClick={() => mark(a.status)}
+              className="w-full text-left px-3.5 py-2 text-xs font-medium hover:bg-[var(--sage-lt)] transition-colors flex items-center gap-1.5"
+              style={{ color: 'var(--txt2)' }}>
+              {a.status === 'present' && <Check size={12} style={{ color: 'var(--sage)' }} />}
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface NewsPost { id: string; title: string; body: string; publishedAt: string; }
 
@@ -111,7 +184,13 @@ function AdminDashboard() {
   // Teachers get their own availability grid; non-teachers get an empty list.
   const { data: myAvailability = [] } = useApi<AvailWindow[]>('/staff/me/availability');
   const { data: kpis } = useApi<KpiData>('/reports/dashboard');
-  const { data: lessons = [] } = useApi<Lesson[]>(`/lessons?weekStart=${weekStart}`);
+  const { data: lessons = [], mutate: mutateLessons } = useApi<Lesson[]>(`/lessons?weekStart=${weekStart}`);
+  // Marking attendance moves a lesson off "scheduled" — drop it from the local
+  // cache immediately rather than waiting on a refetch, so the row disappears
+  // from "Today's lessons" (which only shows still-scheduled lessons) right away.
+  function onLessonMarked(lessonId: string) {
+    mutateLessons(prev => prev?.filter(l => l.id !== lessonId), { revalidate: false });
+  }
   const { data: pendingRequests = [] } = useApi<LessonRequest[]>('/lesson-requests?status=pending');
   const { firstName } = useMe();
 
@@ -247,7 +326,7 @@ function AdminDashboard() {
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-[var(--surf)] border-b border-[var(--bd)]">
                   <tr>
-                    {['Time', 'Student', 'Instrument', 'Teacher', 'Min'].map(h => (
+                    {['Time', 'Student', 'Instrument', 'Teacher', 'Min', ''].map(h => (
                       <th key={h} className="text-left px-4 py-2.5 text-[11px] font-bold text-[var(--txt3)] uppercase tracking-wide whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -276,6 +355,9 @@ function AdminDashboard() {
                           {l.teacher ? `${l.teacher.firstName} ${l.teacher.lastName}` : '—'}
                         </td>
                         <td className="px-4 py-2.5 text-[var(--txt4)] tabular-nums">{l.duration}</td>
+                        <td className="px-4 py-2.5 text-right">
+                          <QuickAttendanceMenu lessonId={l.id} onMarked={() => onLessonMarked(l.id)} />
+                        </td>
                       </tr>
                     );
                   })}
