@@ -342,7 +342,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   const [lessonType, setLessonType] = useState<'private' | 'group'>('private');
   const [instrument, setInstrument] = useState('');
   const [groupName, setGroupName] = useState('');
-  const [duration, setDuration] = useState('60');
+  const [duration, setDuration] = useState('30');
   const [date, setDate] = useState(defaultDate ?? '');
   const [notes, setNotes] = useState('');
   // Availability-driven time selection.
@@ -373,7 +373,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
 
   useEffect(() => {
     if (!open) return;
-    setStudentId(''); setTeacherId(''); setDuration('60');
+    setStudentId(''); setTeacherId(''); setDuration('30');
     setLessonType('private'); setInstrument(''); setGroupName('');
     setDate(defaultDate ?? ''); setNotes('');
     setSlots([]); setNoWindows(false); setPicks([]); setManualTime(defaultTime ?? '');
@@ -637,8 +637,16 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
           </div>
         )}
         <div>
-          <label className="ui-label">Duration</label>
-          <SearchableSelect options={durationOptions} value={duration} onChange={setDuration} disabled={lessonType === 'group'} />
+          <label className="ui-label">Duration (min)</label>
+          {lessonType === 'group' ? (
+            <SearchableSelect options={durationOptions} value={duration} onChange={setDuration} disabled />
+          ) : (
+            <input
+              type="number" min="5" max="240" step="5"
+              value={duration} onChange={e => setDuration(e.target.value)}
+              className="ui-input"
+            />
+          )}
         </div>
 
         <div>
