@@ -136,7 +136,7 @@ function minutesFromDayStart(iso: string): number {
 // *is* its stack order.
 const STACK_ROW_H = 58; // px per row once a slot is stacked — enough for time + student + instrument + teacher to all stay legible
 
-type LessonLayout = Lesson & { stackIndex: number; stackSize: number; clusterStart: string };
+type LessonLayout = Lesson & { stackIndex: number; stackSize: number; clusterTop: number; clusterHeight: number };
 
 function computeLayout(dayLessons: Lesson[]): LessonLayout[] {
   const sorted = [...dayLessons].sort((a, b) => {
@@ -167,11 +167,26 @@ function computeLayout(dayLessons: Lesson[]): LessonLayout[] {
   }
   if (current.length > 0) clusters.push(current);
 
+  // A stacked cluster's rendered height (stackSize * STACK_ROW_H) is an
+  // artificial "however many rows it takes to read", not the real elapsed
+  // time the cluster spans — so on a busy day a big cluster can render taller
+  // than the clock gap before the next cluster starts, and the two visually
+  // collide even though neither is time-overlapping. Walk clusters in order
+  // and push each one's top down past the previous cluster's actual rendered
+  // bottom (never earlier than its own real start time) so rendered boxes
+  // never overlap, at the cost of losing exact clock alignment on days packed
+  // tightly enough to need it.
+  let cursorBottom = -Infinity;
   const result: LessonLayout[] = [];
   for (const cluster of clusters) {
-    const clusterStart = cluster[0]!.startsAt; // cluster is already chronological
+    const naturalTop = (minutesFromDayStart(cluster[0]!.startsAt) / 60) * PX_PER_HOUR;
+    const clusterTop = Math.max(naturalTop, cursorBottom);
+    const clusterHeight = cluster.length > 1
+      ? cluster.length * STACK_ROW_H
+      : Math.max((cluster[0]!.duration / 60) * PX_PER_HOUR, 24);
+    cursorBottom = clusterTop + clusterHeight + 2; // small gap before the next cluster
     cluster.forEach((l, i) => {
-      result.push({ ...l, stackIndex: i, stackSize: cluster.length, clusterStart });
+      result.push({ ...l, stackIndex: i, stackSize: cluster.length, clusterTop, clusterHeight });
     });
   }
   return result;
@@ -231,13 +246,13 @@ const UNPAID_COLOR = '#9B2C2C';
 // ─── Lesson block ─────────────────────────────────────────────────────────────
 function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () => void }) {
   const stacked = lesson.stackSize > 1;
-  // All clusters use the earliest member's time to position the whole stack —
-  // stacked rows are ordered, not clock-accurate past the first one, since a
-  // block genuinely can't show both "which slot" and "exactly when" at once
-  // once several lessons share the same moment.
-  const clusterTop = (minutesFromDayStart(lesson.clusterStart) / 60) * PX_PER_HOUR;
-  const top    = stacked ? clusterTop + lesson.stackIndex * STACK_ROW_H : clusterTop;
-  const height = stacked ? STACK_ROW_H - 2 : Math.max((lesson.duration / 60) * PX_PER_HOUR - 2, 22);
+  // clusterTop/clusterHeight are precomputed by computeLayout, which pushes
+  // clusters down past any earlier cluster's real rendered bottom so boxes
+  // never overlap — stacked rows are ordered, not clock-accurate past the
+  // first one, since a block genuinely can't show both "which slot" and
+  // "exactly when" at once once several lessons share the same moment.
+  const top    = stacked ? lesson.clusterTop + lesson.stackIndex * STACK_ROW_H : lesson.clusterTop;
+  const height = stacked ? STACK_ROW_H - 2 : lesson.clusterHeight - 2;
   const width  = 'calc(100% - 3px)';
 
   const instr    = lesson.enrollment?.instrument;
