@@ -12,6 +12,8 @@ import { Badge } from '@/components/badge';
 import { fmtDate } from '@/lib/datetime';
 import { UserPlus, Search } from 'lucide-react';
 import { AddStudentModal } from '@/components/add-student-modal';
+import { useRole } from '@/lib/use-role';
+import IntakePage from '@/app/app/intake/page';
 
 interface Student {
   id: string; firstName: string; lastName: string; status: string;
@@ -59,7 +61,10 @@ const SORTERS: Record<SortKey, (a: Student, b: Student) => number> = {
 
 const PAGE_SIZE = 50;
 
-export default function StudentsPage() {
+// The roster itself — split out so the default export below can put it behind
+// a "Students" tab alongside "New students" (sign-ups/enquiries/import, moved
+// here from its own sidebar entry so both live under one "Students" section).
+function StudentRoster() {
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -239,6 +244,33 @@ export default function StudentsPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// New students (sign-ups/enquiries/import) is admin-only, matching /app/intake's
+// own access rule — a teacher just gets the roster with no tab bar at all.
+export default function StudentsPage() {
+  const role = useRole();
+  const [tab, setTab] = useState<'roster' | 'new'>('roster');
+
+  if (role !== 'admin') return <StudentRoster />;
+
+  return (
+    <div>
+      <div className="flex gap-1 mb-5 border-b" style={{ borderColor: 'var(--bd)' }}>
+        {(['roster', 'new'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className="px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors"
+            style={{
+              borderColor: tab === t ? 'var(--sage)' : 'transparent',
+              color: tab === t ? 'var(--sage)' : 'var(--txt3)',
+            }}>
+            {t === 'roster' ? 'Students' : 'New students'}
+          </button>
+        ))}
+      </div>
+      {tab === 'roster' ? <StudentRoster /> : <IntakePage />}
     </div>
   );
 }
