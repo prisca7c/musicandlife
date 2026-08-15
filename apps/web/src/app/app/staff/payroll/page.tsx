@@ -11,7 +11,14 @@ import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { SearchableSelect } from '@/components/searchable-select';
+import { SectionTabs } from '@/components/section-tabs';
 import { Paperclip } from 'lucide-react';
+
+const SECTION_ITEMS = [
+  { label: 'Billing', href: '/app/billing' },
+  { label: 'Payments', href: '/app/billing/reconciliation' },
+  { label: 'Payroll', href: '/app/staff/payroll' },
+];
 
 interface PayrollRun {
   id: string; status: string; periodStart: string; periodEnd: string;
@@ -342,6 +349,7 @@ export default function PayrollPage() {
       <CreateRunModal open={showRun} onClose={() => setShowRun(false)} onCreated={load} />
       <RunAllModal open={showRunAll} onClose={() => setShowRunAll(false)} onCreated={load} />
       <AddExpenseModal open={showExpense} onClose={() => setShowExpense(false)} onCreated={load} />
+      <SectionTabs items={SECTION_ITEMS} />
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">

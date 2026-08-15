@@ -13,6 +13,7 @@ import { InstrumentIcon } from '@/components/instrument-icons';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { AddStudentModal } from '@/components/add-student-modal';
 import { AssignStudentsModal } from '@/components/assign-students-modal';
+import { SectionTabs } from '@/components/section-tabs';
 import { PRIVATE_INSTRUMENTS, GROUP_INSTRUMENTS, lessonRate } from '@music-life/types';
 import { ChevronDown, ChevronLeft, ChevronRight, UserPlus, Users, Check, X, Repeat, PoundSterling, Shuffle } from 'lucide-react';
 
@@ -1456,8 +1457,17 @@ export default function CalendarPage() {
       <AddStudentModal open={showAddStudent} onClose={() => setShowAddStudent(false)} onCreated={load} />
       <AssignStudentsModal open={showAssign} onClose={() => setShowAssign(false)} teachers={staff} onChanged={load} />
 
+      {/* Attendance and Requests no longer have their own sidebar entries — reached from here instead */}
+      <div className="shrink-0 px-4 md:px-7 pt-4 md:pt-3">
+        <SectionTabs items={[
+          { label: 'Calendar', href: '/app/calendar' },
+          { label: 'Attendance', href: '/app/attendance' },
+          { label: 'Requests', href: '/app/lesson-requests' },
+        ]} />
+      </div>
+
       {/* Toolbar */}
-      <div className="flex items-center justify-between mb-4 shrink-0 flex-wrap gap-2 px-4 md:px-7 pt-4 md:pt-7">
+      <div className="flex items-center justify-between mb-4 shrink-0 flex-wrap gap-2 px-4 md:px-7 pt-1">
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={() => stepPeriod(-1)} className="ui-btn-ghost px-2.5 py-1.5">
             <ChevronLeft size={16} />

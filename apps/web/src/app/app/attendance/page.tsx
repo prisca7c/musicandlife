@@ -11,12 +11,21 @@ import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
 import { LoadState } from '@/components/load-state';
 import { AutomatedHint } from '@/components/automated-hint';
+import { SectionTabs } from '@/components/section-tabs';
 import { Check, X, AlertTriangle, Calendar, RefreshCw, Search, PoundSterling } from 'lucide-react';
 
 // Roles allowed to take money at the front desk. Teachers mark attendance too,
 // but they don't handle payments — so the "paid at the lesson" control is theirs
 // to see, not press.
 const CAN_TAKE_PAYMENT = ['admin'];
+
+// Attendance and Requests no longer have their own sidebar entries — they
+// live "under" Calendar, reached via this tab strip instead.
+const SECTION_ITEMS = [
+  { label: 'Calendar', href: '/app/calendar' },
+  { label: 'Attendance', href: '/app/attendance' },
+  { label: 'Requests', href: '/app/lesson-requests' },
+];
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string;
@@ -320,6 +329,7 @@ export default function AttendancePage() {
 
   return (
     <div>
+      <SectionTabs items={SECTION_ITEMS} />
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">
