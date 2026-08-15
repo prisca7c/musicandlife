@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { eq, and, ne, gte, ilike, or, inArray, sql, type SQL } from 'drizzle-orm';
-import { students, teacherAssignments, enrollments, families, staffMembers, lessons, users, memberships, passwordResetTokens } from '@music-life/db';
+import { students, teacherAssignments, enrollments, families, staffMembers, lessons, users, memberships, passwordResetTokens, lessonCredits } from '@music-life/db';
 import { randomBytes, createHash } from 'crypto';
 import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
@@ -72,20 +72,25 @@ export class StudentsService {
       whereClause = and(eq(students.organizationId, orgId), searchClause);
     }
 
-    // Instruments shown in the list come from the student's non-withdrawn
-    // enrollments (deduped client-side). `status` lets us drop withdrawn ones.
+    // Instruments + teachers shown in the list come from the student's
+    // non-withdrawn enrollments (deduped client-side). `status` lets us drop
+    // withdrawn ones.
     const withRelations = {
-      family: { columns: { id: true, name: true } },
-      enrollments: { columns: { instrument: true, status: true } },
+      family: { columns: { id: true, name: true, contactName: true } },
+      enrollments: {
+        columns: { instrument: true, status: true },
+        with: { teacher: { columns: { id: true, firstName: true, lastName: true } } },
+      },
     } as const;
 
     // Back-compat: no pagination params → return the full array as before.
     if (!page) {
-      return this.db.db.query.students.findMany({
+      const all = await this.db.db.query.students.findMany({
         where: whereClause,
         with: withRelations,
         orderBy: (s, { asc }) => [asc(s.lastName), asc(s.firstName)],
       });
+      return this.withNextLessonAndCredits(all);
     }
 
     const [rows, countRows] = await Promise.all([
@@ -98,13 +103,44 @@ export class StudentsService {
       }),
       this.db.db.select({ c: sql<number>`count(*)::int` }).from(students).where(whereClause),
     ]);
-    const result: Paginated<(typeof rows)[number]> = {
-      data: rows,
+    const data = await this.withNextLessonAndCredits(rows);
+    const result: Paginated<(typeof data)[number]> = {
+      data,
       total: countRows[0]?.c ?? 0,
       limit: page.limit,
       offset: page.offset,
     };
     return result;
+  }
+
+  // Batches the two extra list-page columns (next lesson, available credit
+  // count) across every student on the current page in two queries total,
+  // rather than one round-trip per row.
+  private async withNextLessonAndCredits<T extends { id: string }>(rows: T[]) {
+    if (rows.length === 0) return rows as (T & { nextLessonAt: string | null; creditsAvailable: number })[];
+    const ids = rows.map((r) => r.id);
+    const now = new Date();
+
+    const [nextLessons, credits] = await Promise.all([
+      this.db.db
+        .select({ studentId: lessons.studentId, startsAt: sql<string>`min(${lessons.startsAt})` })
+        .from(lessons)
+        .where(and(inArray(lessons.studentId, ids), eq(lessons.status, 'scheduled'), gte(lessons.startsAt, now)))
+        .groupBy(lessons.studentId),
+      this.db.db
+        .select({ studentId: lessonCredits.studentId, n: sql<number>`count(*)::int` })
+        .from(lessonCredits)
+        .where(and(inArray(lessonCredits.studentId, ids), eq(lessonCredits.status, 'available')))
+        .groupBy(lessonCredits.studentId),
+    ]);
+    const nextById = new Map(nextLessons.map((l) => [l.studentId, l.startsAt]));
+    const creditsById = new Map(credits.map((c) => [c.studentId, c.n]));
+
+    return rows.map((r) => ({
+      ...r,
+      nextLessonAt: nextById.get(r.id) ?? null,
+      creditsAvailable: creditsById.get(r.id) ?? 0,
+    }));
   }
 
   async findOne(orgId: string, id: string, teacherScope?: { userId: string }) {
