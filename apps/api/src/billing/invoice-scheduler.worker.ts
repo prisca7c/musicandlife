@@ -48,6 +48,58 @@ export function resolveBillingPeriod(billingMode: 'prepaid' | 'postpaid', invoic
   return { periodStart: start.toISOString().split('T')[0]!, periodEnd: end.toISOString().split('T')[0]! };
 }
 
+type CustomUnit = 'day' | 'week' | 'month' | 'year';
+
+// Format a Date's LOCAL calendar day as YYYY-MM-DD. Deliberately not
+// `.toISOString().split('T')[0]` — for a machine whose local zone is ahead of
+// UTC (e.g. BST), that renders the *previous* day, the same trap this
+// worker's orgToday() comment already documents for the cron's own clock.
+// These date objects are constructed as local-midnight calendar dates (via
+// addInterval/nextCustomInvoiceDate), so their local Y/M/D is the ground truth.
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function addInterval(d: Date, value: number, unit: CustomUnit): Date {
+  const next = new Date(d);
+  if (unit === 'day') next.setDate(next.getDate() + value);
+  else if (unit === 'week') next.setDate(next.getDate() + value * 7);
+  else if (unit === 'month') next.setMonth(next.getMonth() + value);
+  else next.setFullYear(next.getFullYear() + value);
+  return next;
+}
+
+// Steps forward from `anchor` by whole `value`-`unit` intervals until reaching
+// the first occurrence on or after `from` — the custom-cadence equivalent of
+// nextInvoiceDate's "this or next monthly occurrence".
+export function nextCustomInvoiceDate(anchor: Date, value: number, unit: CustomUnit, from: Date): Date {
+  const step = Math.max(1, value);
+  let candidate = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate());
+  const today = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  if (candidate > today) return candidate;
+  // Bounded loop: even a 1-day interval over a multi-year-old anchor is at
+  // most a few thousand iterations, negligible for a once-a-day cron.
+  while (candidate < today) candidate = addInterval(candidate, step, unit);
+  return candidate;
+}
+
+// The period a custom-cadence invoice covers: one interval ending at (postpaid)
+// or starting from (prepaid) the invoice date.
+export function resolveCustomBillingPeriod(
+  billingMode: 'prepaid' | 'postpaid', invoiceDate: Date, value: number, unit: CustomUnit,
+): { periodStart: string; periodEnd: string } {
+  const step = Math.max(1, value);
+  if (billingMode === 'postpaid') {
+    const start = addInterval(invoiceDate, -step, unit);
+    const end = new Date(invoiceDate);
+    end.setDate(end.getDate() - 1);
+    return { periodStart: ymd(start), periodEnd: ymd(end) };
+  }
+  const end = addInterval(invoiceDate, step, unit);
+  end.setDate(end.getDate() - 1);
+  return { periodStart: ymd(invoiceDate), periodEnd: ymd(end) };
+}
+
 function daysBetween(a: Date, b: Date): number {
   const msPerDay = 86400000;
   const startOfA = new Date(a.getFullYear(), a.getMonth(), a.getDate());
@@ -86,13 +138,28 @@ export class InvoiceSchedulerWorker {
     for (const family of autoInvoiceFamilies) {
       const tz = await getOrgTimezone(this.db.db, family.organizationId);
       const today = orgToday(now, tz);
-      const anchorDay = family.billingStartDate ? new Date(family.billingStartDate).getDate() : 1;
-      const invoiceDate = nextInvoiceDate(anchorDay, family.invoiceDateOffsetDays, today);
+
+      // Custom cadence steps from the billing start date by the family's own
+      // interval; monthly_statement/per_lesson both fire on a fixed monthly
+      // anchor day regardless of content mode — that split predates this
+      // feature and is unrelated to it.
+      const isCustom = family.invoiceMode === 'custom' && family.customIntervalValue && family.customIntervalUnit;
+      let invoiceDate: Date;
+      if (isCustom) {
+        const anchor = family.billingStartDate ? new Date(family.billingStartDate) : today;
+        invoiceDate = nextCustomInvoiceDate(anchor, family.customIntervalValue!, family.customIntervalUnit as 'day' | 'week' | 'month' | 'year', today);
+        invoiceDate.setDate(invoiceDate.getDate() + family.invoiceDateOffsetDays);
+      } else {
+        const anchorDay = family.billingStartDate ? new Date(family.billingStartDate).getDate() : 1;
+        invoiceDate = nextInvoiceDate(anchorDay, family.invoiceDateOffsetDays, today);
+      }
       const daysUntil = daysBetween(invoiceDate, today);
 
       if (daysUntil === 0) {
         try {
-          const { periodStart, periodEnd } = resolveBillingPeriod(family.billingMode, invoiceDate);
+          const { periodStart, periodEnd } = isCustom
+            ? resolveCustomBillingPeriod(family.billingMode, invoiceDate, family.customIntervalValue!, family.customIntervalUnit as 'day' | 'week' | 'month' | 'year')
+            : resolveBillingPeriod(family.billingMode, invoiceDate);
 
           // Idempotency: never auto-generate a second invoice for a period this
           // family has already been billed for. The daily cron normally hits
@@ -120,7 +187,10 @@ export class InvoiceSchedulerWorker {
 
           const inv = await this.billing.createInvoice(family.organizationId, {
             familyId: family.id,
-            mode: family.invoiceMode,
+            // 'custom' is a scheduling cadence, not a distinct invoice content
+            // type — it bills like a monthly_statement (an itemised statement
+            // over the period), just on a different-length period.
+            mode: family.invoiceMode === 'per_lesson' ? 'per_lesson' : 'monthly_statement',
             periodStart,
             periodEnd,
           });

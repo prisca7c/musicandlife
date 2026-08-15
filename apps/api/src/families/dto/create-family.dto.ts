@@ -34,8 +34,19 @@ export class CreateFamilyDto {
   autoInvoice?: boolean;
 
   @IsOptional()
-  @IsIn(['monthly_statement', 'per_lesson'])
-  invoiceMode?: 'monthly_statement' | 'per_lesson';
+  @IsIn(['monthly_statement', 'per_lesson', 'custom'])
+  invoiceMode?: 'monthly_statement' | 'per_lesson' | 'custom';
+
+  // Only meaningful when invoiceMode = 'custom' — how often to invoice.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  customIntervalValue?: number;
+
+  @IsOptional()
+  @IsIn(['day', 'week', 'month', 'year'])
+  customIntervalUnit?: 'day' | 'week' | 'month' | 'year';
 
   // ─── Auto-invoicing settings ──────────────────────────────────────────────
   @IsOptional()

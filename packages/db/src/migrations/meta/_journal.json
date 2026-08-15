@@ -239,6 +239,13 @@
       "when": 1786759176165,
       "tag": "0033_quick_northstar",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786759668845,
+      "tag": "0034_careful_sway",
+      "breakpoints": true
     }
   ]
 }
