@@ -67,7 +67,7 @@ export function StaffAdminDetails({
   async function save() {
     const balancePence = noBalance ? null : Math.round(parseFloat(balanceText || '0') * 100);
     if (balancePence !== null && !Number.isFinite(balancePence)) { setError('Enter a valid payroll balance.'); return; }
-    if (hasAccount && emailV.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailV.trim())) {
+    if (emailV.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailV.trim())) {
       setError('Enter a valid email.'); return;
     }
     setSaving(true); setError('');
@@ -76,7 +76,7 @@ export function StaffAdminDetails({
         method: 'PATCH', token: tok(),
         body: JSON.stringify({
           firstName: firstNameV, lastName: lastNameV, title: titleV || undefined,
-          ...(hasAccount ? { email: emailV.trim() || undefined } : {}),
+          email: emailV.trim() || undefined,
           phone: phoneV || undefined, address: addressV || undefined, notes: notesV || undefined,
           groupTags: tags, payrollBalance: balancePence,
         }),
@@ -120,9 +120,8 @@ export function StaffAdminDetails({
           <dt style={{ color: 'var(--txt3)' }}>Email</dt>
           <dd className="font-medium text-right">
             {editing
-              ? hasAccount
-                ? <input type="email" value={emailV} onChange={e => setEmailV(e.target.value)} className="ui-input" style={{ width: 180 }} />
-                : <span style={{ color: 'var(--txt4)' }} title="No login account — email can't be set here">—</span>
+              ? <input type="email" value={emailV} onChange={e => setEmailV(e.target.value)} className="ui-input" style={{ width: 180 }}
+                  placeholder={hasAccount ? undefined : 'Sets up their login'} />
               : (email ?? '—')}
           </dd>
         </div>

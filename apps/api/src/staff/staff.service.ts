@@ -161,8 +161,7 @@ export class StaffService {
 
     // Email lives on the linked `users` row (it's the login identifier), not on
     // staffMembers — update it there, separately from the rest of the contact
-    // fields. Only meaningful for staff who already have a login; a staff row
-    // with no linked account has no email to change here.
+    // fields.
     if (email && existing.user) {
       const normalized = email.trim().toLowerCase();
       if (normalized !== existing.user.email) {
@@ -172,6 +171,34 @@ export class StaffService {
         }
         await this.db.db.update(users).set({ email: normalized }).where(eq(users.id, existing.user.id));
       }
+    } else if (email && !existing.user) {
+      // A staff row with no linked login account previously had no way to gain
+      // an email — the field was permanently locked to "—" in the UI. Mirror
+      // create()'s auto-account logic: wire up (or create) a user account and
+      // link it, the same as if the email had been set at creation time.
+      const normalized = email.trim().toLowerCase();
+      const clash = await this.db.db.query.users.findFirst({ where: eq(users.email, normalized) });
+      let userId: string;
+      if (clash) {
+        const existingMembership = await this.db.db.query.memberships.findFirst({
+          where: and(eq(memberships.userId, clash.id), eq(memberships.organizationId, orgId)),
+        });
+        if (!existingMembership) {
+          await this.db.db.insert(memberships).values({ userId: clash.id, organizationId: orgId, baseRole: 'teacher' });
+        }
+        userId = clash.id;
+      } else {
+        const [newUser] = await this.db.db
+          .insert(users)
+          .values({ email: normalized, passwordHash: 'INVITE_PENDING', emailVerifiedAt: new Date() })
+          .returning();
+        await this.db.db.insert(memberships).values({ userId: newUser!.id, organizationId: orgId, baseRole: 'teacher' });
+        userId = newUser!.id;
+        this.sendInviteEmail(userId, newUser!.email, existing.firstName).catch((err) =>
+          this.logger.warn(`Invite email failed for ${newUser!.email}: ${err}`),
+        );
+      }
+      await this.db.db.update(staffMembers).set({ userId }).where(eq(staffMembers.id, id));
     }
 
     // Deactivating a teacher must also clear their diary — same failure mode #172
