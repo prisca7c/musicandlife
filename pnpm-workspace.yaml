@@ -5,10 +5,10 @@ overrides:
   # Transitive dependencies with published security advisories — each is pulled
   # in by a package we don't control, so the fix is an override rather than a
   # bump in one of our own package.json files.
-  sharp: '>=0.35.0'                      # Next.js image optimisation
-  brace-expansion: '>=5.0.7'             # via minimatch/glob; only 5.x is in the tree
-  fast-uri: '>=3.1.4 <4'                 # via ajv (NestJS request validation)
-  body-parser: '>=1.20.6 <2'             # via express (Nest's HTTP adapter)
+  sharp: '>=0.35.0' # Next.js image optimisation
+  brace-expansion: '>=5.0.7' # via minimatch/glob; only 5.x is in the tree
+  fast-uri: '>=3.1.4 <4' # via ajv (NestJS request validation)
+  body-parser: '>=1.20.6 <2' # via express (Nest's HTTP adapter)
   uuid: '>=11.1.1 <12'
   multer: '>=2.2.0'
   qs: '>=6.15.2'
@@ -30,3 +30,4 @@ allowBuilds:
   sharp: true
   '@serialport/bindings-cpp': true
   unrs-resolver: true
+  '@sentry/cli': true
