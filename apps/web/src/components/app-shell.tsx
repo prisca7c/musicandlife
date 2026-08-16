@@ -44,6 +44,8 @@ const NAV: NavItem[] = [
   { label: 'My pay',       href: '/app/my-pay',            icon: <PoundSterling size={16} /> },
   { label: 'Billing',      href: '/app/billing',           icon: <CreditCard size={16} /> },
   { label: 'Payments',     href: '/app/billing/reconciliation', icon: <Landmark size={16} /> },
+  // No sidebar entry of its own — reached as a tab on the Students page
+  // instead (same pattern as Attendance/Payments above). Route stays live.
   { label: 'New students', href: '/app/intake',            icon: <ClipboardCheck size={16} /> },
   { label: 'Messages',     href: '/app/messaging',         icon: <MessageSquare size={16} /> },
   { label: 'Resources',    href: '/app/resources',         icon: <FileText size={16} /> },
@@ -63,7 +65,7 @@ const NAV: NavItem[] = [
 const GROUPS = [
   { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History','Lesson notes','Add to calendar'] },
   { label: 'Studio',   items: ['Calendar','My availability','Notes','Messages'] },
-  { label: 'People',   items: ['Students','New students','Families','Staff','My pay'] },
+  { label: 'People',   items: ['Students','Families','Staff','My pay'] },
   { label: 'Finance',  items: ['Billing'] },
   { label: 'Content',  items: ['Resources','Library subscribers','Repertoire','Studio News','Email everyone'] },
   { label: 'Admin',    items: ['Reports','Settings'] },
