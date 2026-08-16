@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { BillingService } from './billing.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
@@ -61,6 +61,27 @@ export class BillingController {
     @Body() body: AddLineItemDto,
   ) {
     return this.billing.addLineItem(user.orgId, id, body.description, body.amount, body.lessonId);
+  }
+
+  @Patch('invoices/:id/line-items/:lineItemId')
+  @Roles('admin')
+  updateLineItem(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Param('lineItemId') lineItemId: string,
+    @Body() body: AddLineItemDto,
+  ) {
+    return this.billing.updateLineItem(user.orgId, id, lineItemId, body.description, body.amount);
+  }
+
+  @Delete('invoices/:id/line-items/:lineItemId')
+  @Roles('admin')
+  removeLineItem(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Param('lineItemId') lineItemId: string,
+  ) {
+    return this.billing.removeLineItem(user.orgId, id, lineItemId);
   }
 
   @Get('families/:id/ledger')

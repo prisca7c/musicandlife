@@ -11,7 +11,7 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { BackButton } from '@/components/back-button';
-import { Calendar, Pencil } from 'lucide-react';
+import { Calendar, Pencil, Trash2 } from 'lucide-react';
 import type { InvoicePDFData, OrgPDFData } from '@/components/invoice-pdf';
 import { invoiceStatusLabel, invoiceStatusColor } from '@/lib/invoice-status';
 
@@ -53,8 +53,11 @@ async function toBase64(url: string): Promise<string> {
   });
 }
 
-function AddLineItemModal({ open, onClose, invoiceId, onAdded }: {
+// Doubles as the edit modal — pass `editing` to PATCH an existing manual item
+// instead of POSTing a new one, pre-filled with its current values.
+function AddLineItemModal({ open, onClose, invoiceId, onAdded, editing }: {
   open: boolean; onClose: () => void; invoiceId: string; onAdded: () => void;
+  editing?: { id: string; description: string; amount: number } | null;
 }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -63,36 +66,42 @@ function AddLineItemModal({ open, onClose, invoiceId, onAdded }: {
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSaving(true); setError('');
     const f = new FormData(e.currentTarget);
+    const body = JSON.stringify({
+      description: f.get('description'), amount: Math.round(parseFloat(f.get('amount') as string) * 100),
+    });
     try {
-      await apiFetch(`/invoices/${invoiceId}/line-items`, { method: 'POST', token: tok(), body: JSON.stringify({
-        description: f.get('description'), amount: Math.round(parseFloat(f.get('amount') as string) * 100),
-      })});
+      if (editing) {
+        await apiFetch(`/invoices/${invoiceId}/line-items/${editing.id}`, { method: 'PATCH', token: tok(), body });
+      } else {
+        await apiFetch(`/invoices/${invoiceId}/line-items`, { method: 'POST', token: tok(), body });
+      }
       onAdded(); onClose();
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
     finally { setSaving(false); }
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Add line item">
+    <Modal open={open} onClose={onClose} title={editing ? 'Edit line item' : 'Add line item'}>
       {error && (
         <div className="mb-4 text-sm rounded-xl px-4 py-3"
           style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
           {error}
         </div>
       )}
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4" key={editing?.id ?? 'new'}>
         <div>
           <label className="ui-label">Description <span style={{ color: 'var(--coral)' }}>*</span></label>
-          <input name="description" required className="ui-input" />
+          <input name="description" required className="ui-input" defaultValue={editing?.description} />
         </div>
         <div>
           <label className="ui-label">Amount (£) <span style={{ color: 'var(--coral)' }}>*</span></label>
           <input name="amount" type="number" step="0.01" required className="ui-input"
+            defaultValue={editing ? (editing.amount / 100).toFixed(2) : undefined}
             placeholder="Use negative values for discounts, e.g. -5.00" />
         </div>
         <div className="flex gap-3 pt-1">
           <button type="submit" disabled={saving} className="ui-btn-primary">
-            {saving ? 'Adding…' : 'Add item'}
+            {saving ? 'Saving…' : editing ? 'Save changes' : 'Add item'}
           </button>
           <button type="button" onClick={onClose} className="ui-btn-ghost">Cancel</button>
         </div>
@@ -105,6 +114,8 @@ export default function InvoiceDetailPage() {
   const params                                 = useParams<{ id: string }>();
   const [logoSrc, setLogoSrc]                  = useState('');
   const [showAddItem, setShowAddItem]          = useState(false);
+  const [editingItem, setEditingItem]          = useState<{ id: string; description: string; amount: number } | null>(null);
+  const [deletingId, setDeletingId]            = useState<string | null>(null);
   const [actioning, setActioning]              = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
@@ -135,7 +146,20 @@ export default function InvoiceDetailPage() {
     finally { setActioning(false); }
   }
 
+  async function deleteLineItem(id: string, description: string) {
+    if (!confirm(`Remove "${description}" from this invoice? This updates the total immediately.`)) return;
+    setDeletingId(id);
+    try { await apiFetch(`/invoices/${params.id}/line-items/${id}`, { method: 'DELETE', token: tok() }); load(); }
+    catch (e) { console.error(e); }
+    finally { setDeletingId(null); }
+  }
+
   if (!invoice) return <div className="p-8 text-center text-sm" style={{ color: 'var(--txt4)' }}>Loading…</div>;
+
+  // Matches the backend guard: only paid/void invoices are frozen. A sent
+  // invoice can still have its manual items corrected (e.g. before payment
+  // clears), same as it could already gain new ones.
+  const editable = invoice.status === 'draft' || invoice.status === 'sent';
 
   // Build the data shape expected by the PDF template
   const pdfInvoice: InvoicePDFData = {
@@ -165,6 +189,13 @@ export default function InvoiceDetailPage() {
   return (
     <div className="max-w-3xl">
       <AddLineItemModal open={showAddItem} onClose={() => setShowAddItem(false)} invoiceId={invoice.id} onAdded={load} />
+      <AddLineItemModal
+        open={!!editingItem}
+        onClose={() => setEditingItem(null)}
+        invoiceId={invoice.id}
+        onAdded={load}
+        editing={editingItem}
+      />
 
       <div className="mb-5">
         <BackButton label="Billing" fallbackHref="/app/billing" />
@@ -251,7 +282,7 @@ export default function InvoiceDetailPage() {
         <div className="px-5 py-3.5 border-b flex items-center justify-between"
           style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
           <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Line items</h2>
-          {invoice.status === 'draft' && (
+          {editable && (
             <button onClick={() => setShowAddItem(true)} className="ui-btn-primary text-xs px-3 py-1.5">
               + Add item
             </button>
@@ -268,6 +299,7 @@ export default function InvoiceDetailPage() {
               <th></th>
               <th>Description</th>
               <th style={{ textAlign: 'right' }}>Amount</th>
+              {editable && <th></th>}
             </tr>
           </thead>
           <tbody>
@@ -277,10 +309,11 @@ export default function InvoiceDetailPage() {
                 <td className="font-semibold" style={{ textAlign: 'right', color: 'var(--txt3)' }}>
                   {formatMoney(invoice.balanceForward)}
                 </td>
+                {editable && <td></td>}
               </tr>
             )}
             {invoice.lineItems.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={editable ? 9 : 8} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No line items yet.
               </td></tr>
             )}
@@ -304,12 +337,33 @@ export default function InvoiceDetailPage() {
                 <td className="font-semibold" style={{ textAlign: 'right' }}>
                   {formatMoney(item.amount)}
                 </td>
+                {editable && (
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {/* Only manual items (no lessonId) can be hand-edited — a
+                        lesson-generated line is documentation of a calendar
+                        charge, not something to override here. */}
+                    {!item.lessonId && (
+                      <span className="inline-flex items-center gap-2">
+                        <button onClick={() => setEditingItem({ id: item.id, description: item.description, amount: item.amount })}
+                          title="Edit" className="hover:opacity-70" style={{ color: 'var(--txt3)' }}>
+                          <Pencil size={13} />
+                        </button>
+                        <button onClick={() => deleteLineItem(item.id, item.description)}
+                          disabled={deletingId === item.id}
+                          title="Remove" className="hover:opacity-70 disabled:opacity-40" style={{ color: 'var(--coral)' }}>
+                          <Trash2 size={13} />
+                        </button>
+                      </span>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
             {invoice.lineItems.length > 0 && (
               <tr style={{ background: 'var(--surf)', fontWeight: 700 }}>
                 <td colSpan={7}>Total</td>
                 <td style={{ textAlign: 'right' }}>{formatMoney(invoice.total)}</td>
+                {editable && <td></td>}
               </tr>
             )}
           </tbody>
