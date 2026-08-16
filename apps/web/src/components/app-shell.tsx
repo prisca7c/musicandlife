@@ -26,6 +26,7 @@ interface NavItem { label: string; href: string; icon: React.ReactNode; }
 const NAV: NavItem[] = [
   { label: 'Dashboard',    href: '/app/dashboard',         icon: <LayoutDashboard size={16} /> },
   { label: 'My lessons',   href: '/app/family/dashboard',  icon: <LayoutDashboard size={16} /> },
+  { label: 'My calendar',  href: '/app/family/schedule',   icon: <Calendar size={16} /> },
   { label: 'Book lesson',  href: '/app/family/book',       icon: <Clock size={16} /> },
   { label: 'History',      href: '/app/family/history',    icon: <History size={16} /> },
   { label: 'Lesson notes', href: '/app/family/notes',      icon: <BookOpen size={16} /> },
@@ -63,7 +64,7 @@ const NAV: NavItem[] = [
 // of getting their own sidebar entries. Their NAV entries stay so the routes
 // remain directly reachable (bookmarks, links from elsewhere).
 const GROUPS = [
-  { label: 'Overview', items: ['Dashboard','My lessons','Book lesson','History','Lesson notes','Add to calendar'] },
+  { label: 'Overview', items: ['Dashboard','My lessons','My calendar','Book lesson','History','Lesson notes','Add to calendar'] },
   { label: 'Studio',   items: ['Calendar','My availability','Notes','Messages'] },
   { label: 'People',   items: ['Students','Families','Staff','My pay'] },
   { label: 'Finance',  items: ['Billing'] },
