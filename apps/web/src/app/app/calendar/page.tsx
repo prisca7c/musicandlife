@@ -15,7 +15,7 @@ import { AddStudentModal } from '@/components/add-student-modal';
 import { AssignStudentsModal } from '@/components/assign-students-modal';
 import { SectionTabs } from '@/components/section-tabs';
 import { PRIVATE_INSTRUMENTS, GROUP_INSTRUMENTS, lessonRate } from '@music-life/types';
-import { ChevronDown, ChevronLeft, ChevronRight, UserPlus, Users, Check, X, Repeat, PoundSterling, Shuffle, Clock } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, UserPlus, Users, Check, X, Repeat, PoundSterling, Shuffle, Clock, Pencil, Copy, Trash2 } from 'lucide-react';
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string; notes: string | null;
@@ -974,15 +974,24 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
   const [actionError, setActionError] = useState('');
   const [showSub, setShowSub] = useState(false);
   const [subTeacherId, setSubTeacherId] = useState('');
+  const [showClone, setShowClone] = useState(false);
+  const [cloneDate, setCloneDate] = useState('');
+  const [cloneTime, setCloneTime] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   useEffect(() => {
-    setShowReschedule(false); setActionError(''); setShowSub(false); setSubTeacherId('');
+    setShowReschedule(false); setActionError(''); setShowSub(false); setSubTeacherId(''); setShowClone(false);
     if (lesson) {
       // Prefill date + time in the studio zone so they match what's shown elsewhere
       // and round-trip correctly (the backend interprets the naive value as studio-local).
       setNewDate(studioDayString(lesson.startsAt));
       setNewTime(fmtTime(lesson.startsAt));
+      // Clone defaults to the same weekday/time, one week on.
+      const nextWeek = new Date(lesson.startsAt);
+      nextWeek.setDate(nextWeek.getDate() + 7);
+      setCloneDate(studioDayString(nextWeek));
+      setCloneTime(fmtTime(lesson.startsAt));
     }
   }, [lesson?.id]);
 
@@ -1046,6 +1055,31 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
     } finally { setSaving(false); }
   }
 
+  async function cloneLessonToDate() {
+    if (!cloneDate || !cloneTime) return;
+    setSaving(true); setActionError('');
+    try {
+      await apiFetch(`/lessons/${lesson!.id}/clone`, {
+        method: 'POST', token: tok(), body: JSON.stringify({ startsAt: `${cloneDate}T${cloneTime}:00` }),
+      });
+      onUpdated(); onClose();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not clone lesson');
+    } finally { setSaving(false); }
+  }
+
+  async function deleteLessonHard() {
+    const who = lesson!.student ? `${lesson!.student.firstName} ${lesson!.student.lastName}'s` : 'this';
+    if (!confirm(`Permanently delete ${who} lesson on ${fmtDate(lesson!.startsAt)} at ${fmtTime(lesson!.startsAt)}? This removes it entirely — unlike Cancel, there's no record left and no undo.`)) return;
+    setDeleting(true); setActionError('');
+    try {
+      await apiFetch(`/lessons/${lesson!.id}`, { method: 'DELETE', token: tok() });
+      onUpdated(); onClose();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not delete lesson');
+    } finally { setDeleting(false); }
+  }
+
   const instr = lesson.enrollment?.instrument;
   const isGrp = lesson.enrollment?.lessonType === 'group';
   const actions = isGrp ? GROUP_ATTENDANCE : PRIVATE_ATTENDANCE;
@@ -1057,6 +1091,33 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
   return (
     <Modal open={open} onClose={onClose} title="Lesson details">
       <div className="space-y-4">
+        {/* Quick actions — icon-only, tooltip on hover. Clone/Edit/Delete all
+            work regardless of whether the lesson is in the past, today, or
+            upcoming; Delete refuses server-side once anything (attendance, a
+            bill) actually depends on the row. */}
+        {!readOnly && (
+          <div className="flex items-center gap-1 -mt-1 -mb-1">
+            <button onClick={() => { setShowClone(false); setShowReschedule(v => !v); }} disabled={saving || deleting}
+              title="Edit date & time" aria-label="Edit date & time"
+              className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--surf)] disabled:opacity-40"
+              style={{ color: showReschedule ? 'var(--sage)' : 'var(--txt3)' }}>
+              <Pencil size={15} />
+            </button>
+            <button onClick={() => { setShowReschedule(false); setShowClone(v => !v); }} disabled={saving || deleting}
+              title="Clone to another date" aria-label="Clone to another date"
+              className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--surf)] disabled:opacity-40"
+              style={{ color: showClone ? 'var(--sage)' : 'var(--txt3)' }}>
+              <Copy size={15} />
+            </button>
+            <button onClick={deleteLessonHard} disabled={saving || deleting}
+              title="Delete permanently" aria-label="Delete permanently"
+              className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--coral-lt)] disabled:opacity-40"
+              style={{ color: 'var(--coral)' }}>
+              <Trash2 size={15} />
+            </button>
+          </div>
+        )}
+
         {/* Detail block */}
         <div className="rounded-xl p-4 space-y-2.5 text-sm"
           style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
@@ -1184,38 +1245,55 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
           </div>
         )}
 
-        {!readOnly && lesson.status === 'scheduled' && (
-          <div>
-            {showReschedule ? (
-              <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
-                <p className="text-sm font-semibold flex items-center gap-1.5" style={{ color: 'var(--txt2)' }}>
-                  Reschedule to
-                  <InfoTooltip text="We'll check the new time is free and inside the teacher's working hours — so you can't accidentally double-book a teacher, or pick a time they're unavailable." />
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} className="ui-input" />
-                  <input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} className="ui-input" />
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={rescheduleLesson} disabled={saving} className="ui-btn-primary text-sm">
-                    {saving ? 'Saving…' : 'Confirm reschedule'}
-                  </button>
-                  <button onClick={() => setShowReschedule(false)} className="ui-btn-ghost text-sm">Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <button onClick={() => setShowReschedule(true)} disabled={saving}
-                  className="ui-btn-ghost text-sm flex-1 disabled:opacity-50">
-                  Reschedule
-                </button>
-                <button onClick={cancelLesson} disabled={saving}
-                  className="text-sm flex-1 rounded-[9px] px-3 py-2 font-semibold transition-colors disabled:opacity-50"
-                  style={{ border: '1.5px solid var(--coral)', color: 'var(--coral)', background: '#fff' }}>
-                  Cancel lesson
-                </button>
-              </div>
-            )}
+        {!readOnly && showReschedule && (
+          <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
+            <p className="text-sm font-semibold flex items-center gap-1.5" style={{ color: 'var(--txt2)' }}>
+              Reschedule to
+              <InfoTooltip text="We'll check the new time is free and inside the teacher's working hours — so you can't accidentally double-book a teacher, or pick a time they're unavailable." />
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} className="ui-input" />
+              <input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} className="ui-input" />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={rescheduleLesson} disabled={saving} className="ui-btn-primary text-sm">
+                {saving ? 'Saving…' : 'Confirm reschedule'}
+              </button>
+              <button onClick={() => setShowReschedule(false)} className="ui-btn-ghost text-sm">Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {!readOnly && showClone && (
+          <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
+            <p className="text-sm font-semibold" style={{ color: 'var(--txt2)' }}>Clone to</p>
+            <div className="grid grid-cols-2 gap-3">
+              <input type="date" value={cloneDate} onChange={e => setCloneDate(e.target.value)} className="ui-input" />
+              <input type="time" value={cloneTime} onChange={e => setCloneTime(e.target.value)} className="ui-input" />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={cloneLessonToDate} disabled={saving} className="ui-btn-primary text-sm">
+                {saving ? 'Cloning…' : 'Create clone'}
+              </button>
+              <button onClick={() => setShowClone(false)} className="ui-btn-ghost text-sm">Cancel</button>
+            </div>
+            <p className="text-[11px]" style={{ color: 'var(--txt4)' }}>
+              Creates a new lesson with the same student, teacher and duration — this one is untouched.
+            </p>
+          </div>
+        )}
+
+        {!readOnly && !showReschedule && !showClone && lesson.status === 'scheduled' && (
+          <div className="flex gap-2">
+            <button onClick={() => setShowReschedule(true)} disabled={saving}
+              className="ui-btn-ghost text-sm flex-1 disabled:opacity-50">
+              Reschedule
+            </button>
+            <button onClick={cancelLesson} disabled={saving}
+              className="text-sm flex-1 rounded-[9px] px-3 py-2 font-semibold transition-colors disabled:opacity-50"
+              style={{ border: '1.5px solid var(--coral)', color: 'var(--coral)', background: '#fff' }}>
+              Cancel lesson
+            </button>
           </div>
         )}
 

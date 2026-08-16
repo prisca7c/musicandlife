@@ -607,6 +607,46 @@ export class SchedulingService {
     });
   }
 
+  /** Duplicate a lesson onto a new date/time — same student/teacher/enrollment/duration, a fresh 'scheduled' row. */
+  async cloneLesson(orgId: string, id: string, newStartsAt: string, actor?: Actor) {
+    const source = await this.getLesson(orgId, id);
+    await this.assertOwnsLesson(orgId, source.teacherId, actor);
+    return this.createLesson(orgId, {
+      studentId: source.studentId,
+      startsAt: newStartsAt,
+      duration: source.duration,
+      teacherId: source.teacherId ?? undefined,
+      enrollmentId: source.enrollmentId ?? undefined,
+      termId: source.termId ?? undefined,
+      isTrialLesson: source.isTrialLesson,
+    });
+  }
+
+  /**
+   * Permanently remove a lesson — distinct from cancelLesson, which keeps the
+   * row as an audit trail. Only safe once nothing depends on it: no attendance
+   * recorded (that's a real charge/credit event, reverse it from Attendance
+   * instead) and no invoice line item referencing it (that's billing history).
+   * Scheduled/makeup lessons and soft-cancelled ones with no attendance are
+   * the only rows that can reach this state.
+   */
+  async deleteLesson(orgId: string, id: string, actor?: Actor) {
+    const lesson = await this.getLesson(orgId, id);
+    await this.assertOwnsLesson(orgId, lesson.teacherId, actor);
+    if (lesson.attendance) {
+      throw new BadRequestException('This lesson has attendance recorded and can’t be deleted — reverse it from Attendance first.');
+    }
+    const billed = await this.db.db.query.invoiceLineItems.findFirst({
+      where: eq(invoiceLineItems.lessonId, id),
+      columns: { id: true },
+    });
+    if (billed) {
+      throw new BadRequestException('This lesson is on an invoice and can’t be deleted — cancel it instead.');
+    }
+    await this.db.db.delete(lessons).where(eq(lessons.id, id));
+    return { id };
+  }
+
   async directReschedule(orgId: string, id: string, newStartsAt: string, actor?: Actor) {
     const lesson = await this.getLesson(orgId, id);
     await this.assertOwnsLesson(orgId, lesson.teacherId, actor);
