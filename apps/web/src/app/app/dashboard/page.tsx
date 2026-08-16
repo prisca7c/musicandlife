@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 import Link from 'next/link';
+import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { useMe } from '@/lib/use-me';
 import { fmtTime, studioDayString } from '@/lib/datetime';
@@ -13,8 +14,80 @@ import { useRouter } from 'next/navigation';
 import {
   Calendar, PoundSterling,
   ChevronRight, UserCheck,
-  Clock, Megaphone, Inbox,
+  Clock, Megaphone, Inbox, ChevronDown, Check,
 } from 'lucide-react';
+
+type AttendanceStatus = 'present' | 'absent_makeup' | 'absent_no_makeup' | 'absent_no_pay' | 'cancelled_teacher';
+
+// Same set of outcomes as the full Attendance page — labelled by what happens
+// to the money, since that's what marking a lesson actually does.
+const QUICK_ACTIONS: { status: AttendanceStatus; label: string }[] = [
+  { status: 'present',           label: 'Present' },
+  { status: 'absent_makeup',     label: 'Cancelled ≥24h — no charge, rebook' },
+  { status: 'absent_no_makeup',  label: 'Cancelled <24h — charged' },
+  { status: 'absent_no_pay',     label: 'Absent — no charge' },
+  { status: 'cancelled_teacher', label: 'Teacher cancelled' },
+];
+
+// A small "take attendance right here" menu on each dashboard lesson row, so
+// marking a lesson doesn't require a trip to the full Attendance page for the
+// common case of just marking it present.
+function QuickAttendanceMenu({ lessonId, onMarked }: { lessonId: string; onMarked: (status: AttendanceStatus) => void }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, []);
+
+  async function mark(status: AttendanceStatus) {
+    setSaving(true); setOpen(false); setError('');
+    try {
+      await apiFetch(`/lessons/${lessonId}/attendance`, { method: 'POST', token: tok(), body: JSON.stringify({ status }) });
+      onMarked(status);
+    } catch (e) {
+      // Leave the row as-is — the full Attendance page shows the real state.
+      setError(e instanceof Error ? e.message : 'Could not mark attendance');
+    }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div ref={ref} className="relative inline-block">
+      <button
+        onClick={() => setOpen(o => !o)}
+        disabled={saving}
+        title={error || undefined}
+        className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-md border hover:bg-[var(--sage-lt)] disabled:opacity-50"
+        style={error
+          ? { borderColor: 'var(--coral)', color: 'var(--coral)' }
+          : { borderColor: 'var(--sage-md)', color: 'var(--sage-dk)' }}
+      >
+        {saving ? 'Saving…' : error ? 'Couldn’t mark' : 'Attendance'} <ChevronDown size={12} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-56 rounded-xl border bg-white shadow-lg overflow-hidden z-30"
+          style={{ borderColor: 'var(--bd)' }}>
+          {QUICK_ACTIONS.map(a => (
+            <button key={a.status} onClick={() => mark(a.status)}
+              className="w-full text-left px-3.5 py-2 text-xs font-medium hover:bg-[var(--sage-lt)] transition-colors flex items-center gap-1.5"
+              style={{ color: 'var(--txt2)' }}>
+              {a.status === 'present' && <Check size={12} style={{ color: 'var(--sage)' }} />}
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface NewsPost { id: string; title: string; body: string; publishedAt: string; }
 
@@ -111,7 +184,13 @@ function AdminDashboard() {
   // Teachers get their own availability grid; non-teachers get an empty list.
   const { data: myAvailability = [] } = useApi<AvailWindow[]>('/staff/me/availability');
   const { data: kpis } = useApi<KpiData>('/reports/dashboard');
-  const { data: lessons = [] } = useApi<Lesson[]>(`/lessons?weekStart=${weekStart}`);
+  const { data: lessons = [], mutate: mutateLessons } = useApi<Lesson[]>(`/lessons?weekStart=${weekStart}`);
+  // Marking attendance moves a lesson off "scheduled" — drop it from the local
+  // cache immediately rather than waiting on a refetch, so the row disappears
+  // from "Today's lessons" (which only shows still-scheduled lessons) right away.
+  function onLessonMarked(lessonId: string) {
+    mutateLessons(prev => prev?.filter(l => l.id !== lessonId), { revalidate: false });
+  }
   const { data: pendingRequests = [] } = useApi<LessonRequest[]>('/lesson-requests?status=pending');
   const { firstName } = useMe();
 
@@ -119,8 +198,10 @@ function AdminDashboard() {
   // compare each lesson's studio day too — a lesson stored as 23:30Z belongs to
   // the next studio day under BST, so a UTC-prefix startsWith would misfile it.
   const today = studioDayString(new Date());
-  const todayLessons = lessons
-    .filter(l => studioDayString(l.startsAt) === today && l.status === 'scheduled')
+  // The whole week, not just today — so attendance for the full week can be
+  // taken from the dashboard without a trip to Calendar/Attendance.
+  const weekLessons = lessons
+    .filter(l => l.status === 'scheduled')
     .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
 
   const now = new Date();
@@ -223,62 +304,86 @@ function AdminDashboard() {
           )}
         </div>
 
-        {/* Today's lessons */}
+        {/* This week's lessons — grouped by day so attendance for the whole
+            week can be taken here, not just today's. */}
         <div className="lg:col-span-3 bg-white rounded-2xl border border-[var(--bd)] overflow-hidden flex flex-col">
           <div className="px-5 py-3.5 border-b border-[var(--bd)] flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
               <Calendar size={16} style={{ color: 'var(--sage)' }} />
-              <h2 className="font-bold text-[var(--txt)] text-sm">Today&apos;s lessons</h2>
-              {todayLessons.length > 0 && (
+              <h2 className="font-bold text-[var(--txt)] text-sm">This week&apos;s lessons</h2>
+              {weekLessons.length > 0 && (
                 <span className="text-[11px] font-bold bg-[var(--sage-lt)] text-[var(--sage)] rounded-full px-2 py-0.5">
-                  {todayLessons.length}
+                  {weekLessons.length}
                 </span>
               )}
             </div>
             <Link href="/app/calendar" className="text-xs text-[var(--sage)] hover:underline font-medium">Calendar →</Link>
           </div>
 
-          {todayLessons.length === 0 ? (
+          {weekLessons.length === 0 ? (
             <div className="flex-1 flex items-center justify-center py-10 text-[var(--txt4)] text-sm">
-              No lessons scheduled for today.
+              No lessons scheduled this week.
             </div>
           ) : (
             <div className="overflow-auto flex-1">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-[var(--surf)] border-b border-[var(--bd)]">
                   <tr>
-                    {['Time', 'Student', 'Instrument', 'Teacher', 'Min'].map(h => (
+                    {['Time', 'Student', 'Instrument', 'Teacher', 'Min', ''].map(h => (
                       <th key={h} className="text-left px-4 py-2.5 text-[11px] font-bold text-[var(--txt3)] uppercase tracking-wide whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--bd)]">
-                  {todayLessons.map(l => {
-                    const instr = l.enrollment?.instrument;
-                    const isGroup = l.enrollment?.lessonType === 'group';
-                    return (
-                      <tr key={l.id} className="hover:bg-[var(--surf)]">
-                        <td className="px-4 py-2.5 font-bold text-[var(--sage)] whitespace-nowrap tabular-nums">
-                          {fmtTime(l.startsAt)}
-                        </td>
-                        <td className="px-4 py-2.5 font-medium">{l.student?.firstName} {l.student?.lastName}</td>
-                        <td className="px-4 py-2.5">
-                          {instr ? (
-                            <span className="flex items-center gap-1.5">
-                              <span className="capitalize text-[13px]" style={{ color: instrColour(instr) }}>{instr}</span>
-                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isGroup ? 'bg-blue-50 text-blue-600' : 'bg-[var(--sage-lt)] text-[var(--sage)]'}`}>
-                                {isGroup ? 'Group' : 'Private'}
+                  {(() => {
+                    const rows: ReactNode[] = [];
+                    let lastDay = '';
+                    for (const l of weekLessons) {
+                      const dayStr = studioDayString(l.startsAt);
+                      if (dayStr !== lastDay) {
+                        lastDay = dayStr;
+                        const label = dayStr === today
+                          ? 'Today'
+                          : new Date(l.startsAt).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
+                        rows.push(
+                          <tr key={`day-${dayStr}`}>
+                            <td colSpan={6} className="px-4 py-1.5 text-[11px] font-bold uppercase tracking-wide bg-[var(--surf)]"
+                              style={{ color: dayStr === today ? 'var(--sage)' : 'var(--txt4)' }}>
+                              {label}
+                            </td>
+                          </tr>,
+                        );
+                      }
+                      const instr = l.enrollment?.instrument;
+                      const isGroup = l.enrollment?.lessonType === 'group';
+                      rows.push(
+                        <tr key={l.id} className="hover:bg-[var(--surf)]">
+                          <td className="px-4 py-2.5 font-bold text-[var(--sage)] whitespace-nowrap tabular-nums">
+                            {fmtTime(l.startsAt)}
+                          </td>
+                          <td className="px-4 py-2.5 font-medium">{l.student?.firstName} {l.student?.lastName}</td>
+                          <td className="px-4 py-2.5">
+                            {instr ? (
+                              <span className="flex items-center gap-1.5">
+                                <span className="capitalize text-[13px]" style={{ color: instrColour(instr) }}>{instr}</span>
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${isGroup ? 'bg-blue-50 text-blue-600' : 'bg-[var(--sage-lt)] text-[var(--sage)]'}`}>
+                                  {isGroup ? 'Group' : 'Private'}
+                                </span>
                               </span>
-                            </span>
-                          ) : <span className="text-[var(--txt4)]">—</span>}
-                        </td>
-                        <td className="px-4 py-2.5 text-[var(--txt3)]">
-                          {l.teacher ? `${l.teacher.firstName} ${l.teacher.lastName}` : '—'}
-                        </td>
-                        <td className="px-4 py-2.5 text-[var(--txt4)] tabular-nums">{l.duration}</td>
-                      </tr>
-                    );
-                  })}
+                            ) : <span className="text-[var(--txt4)]">—</span>}
+                          </td>
+                          <td className="px-4 py-2.5 text-[var(--txt3)]">
+                            {l.teacher ? `${l.teacher.firstName} ${l.teacher.lastName}` : '—'}
+                          </td>
+                          <td className="px-4 py-2.5 text-[var(--txt4)] tabular-nums">{l.duration}</td>
+                          <td className="px-4 py-2.5 text-right">
+                            <QuickAttendanceMenu lessonId={l.id} onMarked={() => onLessonMarked(l.id)} />
+                          </td>
+                        </tr>,
+                      );
+                    }
+                    return rows;
+                  })()}
                 </tbody>
               </table>
             </div>

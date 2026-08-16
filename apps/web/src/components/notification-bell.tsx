@@ -63,7 +63,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto rounded-2xl border bg-white shadow-lg z-50"
+        <div className="absolute right-0 mt-2 w-64 max-h-80 overflow-y-auto rounded-2xl border bg-white shadow-lg z-50"
           style={{ borderColor: 'var(--bd)' }}>
           <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--bd)' }}>
             <p className="text-sm font-bold">Notifications</p>
