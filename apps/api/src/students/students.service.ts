@@ -4,6 +4,7 @@ import { students, teacherAssignments, enrollments, families, staffMembers, less
 import { randomBytes, createHash } from 'crypto';
 import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
+import { brandedEmail } from '../email/branding';
 import type { CreateStudentDto } from './dto/create-student.dto';
 import type { UpdateStudentDto } from './dto/update-student.dto';
 import type { BaseRole } from '@music-life/types';
@@ -220,10 +221,21 @@ export class StudentsService {
     await this.db.db.insert(passwordResetTokens).values({ userId, tokenHash, expiresAt });
 
     const link = `${process.env.WEB_URL}/reset-password?token=${rawToken}`;
+    const safeName = firstName.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!));
     await this.email.send({
       to: emailAddr,
       subject: "You've been added to Music & Life OS",
-      html: `<p>Hi ${firstName},</p><p>You've been added as a student at Music &amp; Life. Set your password to access your portal:</p><p><a href="${link}">Set password</a></p><p>This link expires in 7 days.</p>`,
+      // Was a bare, unstyled <p> string — every other outbound email in the
+      // app goes through the shared branded shell (logo, colours, centred
+      // card); this one didn't, so it rendered as plain left-aligned black
+      // text with no branding at all.
+      html: brandedEmail({
+        previewText: "You've been added as a student — set your password to get started.",
+        heading: 'Welcome to Music & Life!',
+        bodyHtml: `<p style="margin:0 0 12px">Hi ${safeName},</p><p style="margin:0">You&rsquo;ve been added as a student at Music &amp; Life. Set your password to access your portal.</p>`,
+        cta: { label: 'Set your password', url: link },
+        footnote: 'This link expires in 7 days.',
+      }),
     });
     this.logger.log(`Invite sent to ${emailAddr}`);
   }
