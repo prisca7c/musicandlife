@@ -9,7 +9,7 @@ import { LoadState } from '@/components/load-state';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { fmtDate } from '@/lib/datetime';
-import { UserPlus, Search } from 'lucide-react';
+import { UserPlus, Search, Mail, Phone } from 'lucide-react';
 import { AddStudentModal } from '@/components/add-student-modal';
 import { useRole } from '@/lib/use-role';
 import IntakePage from '@/app/app/intake/page';
@@ -194,8 +194,16 @@ function StudentRoster({ status }: { status: 'active' | 'trial' }) {
                       </Link>
                       {(s.family.email || s.family.phone || s.family.address) && (
                         <div className="text-[11px] leading-tight mt-0.5" style={{ color: 'var(--txt4)' }}>
-                          {s.family.email && <div className="truncate max-w-[180px]">{s.family.email}</div>}
-                          {s.family.phone && <div>{s.family.phone}</div>}
+                          {s.family.email && (
+                            <div className="flex items-center gap-1 truncate max-w-[180px]">
+                              <Mail size={10} className="shrink-0" />{s.family.email}
+                            </div>
+                          )}
+                          {s.family.phone && (
+                            <div className="flex items-center gap-1">
+                              <Phone size={10} className="shrink-0" />{s.family.phone}
+                            </div>
+                          )}
                           {s.family.address && <div className="truncate max-w-[180px]">{s.family.address}</div>}
                         </div>
                       )}

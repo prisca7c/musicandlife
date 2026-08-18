@@ -9,7 +9,7 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { ALL_INSTRUMENTS } from '@music-life/types';
-import { UserPlus } from 'lucide-react';
+import { UserPlus, Mail, Phone } from 'lucide-react';
 
 interface StaffMember {
   id: string; firstName: string; lastName: string; title: string | null;
@@ -249,8 +249,16 @@ export default function StaffPage() {
                   {s.title && <div className="text-xs mt-0.5" style={{ color: 'var(--txt4)' }}>{s.title}</div>}
                 </td>
                 <td className="text-xs leading-tight" style={{ color: 'var(--txt3)' }}>
-                  {s.user?.email && <div className="truncate max-w-[180px]">{s.user.email}</div>}
-                  {s.phone && <div>{s.phone}</div>}
+                  {s.user?.email && (
+                    <div className="flex items-center gap-1 truncate max-w-[180px]">
+                      <Mail size={11} className="shrink-0" style={{ color: 'var(--txt4)' }} />{s.user.email}
+                    </div>
+                  )}
+                  {s.phone && (
+                    <div className="flex items-center gap-1">
+                      <Phone size={11} className="shrink-0" style={{ color: 'var(--txt4)' }} />{s.phone}
+                    </div>
+                  )}
                   {s.address && <div className="truncate max-w-[180px]">{s.address}</div>}
                   {!s.user?.email && !s.phone && !s.address && '—'}
                 </td>

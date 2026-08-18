@@ -13,6 +13,7 @@ import { Modal } from '@/components/modal';
 import { PRIVATE_INSTRUMENTS, GROUP_INSTRUMENTS, WEEKDAYS, lessonRate } from '@music-life/types';
 import { SearchableSelect } from '@/components/searchable-select';
 import { BackButton } from '@/components/back-button';
+import { Mail, Phone } from 'lucide-react';
 import { useRole } from '@/lib/use-role';
 
 interface StudentDetail {
@@ -594,7 +595,9 @@ export default function StudentDetailPage() {
                 <dd className="font-medium">{student.dob ?? '—'}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt style={{ color: 'var(--txt3)' }}>Email</dt>
+                <dt className="flex items-center gap-1.5" style={{ color: 'var(--txt3)' }}>
+                  <Mail size={13} /> Email
+                </dt>
                 <dd className="font-medium">{student.email ?? '—'}</dd>
               </div>
             </dl>
@@ -612,13 +615,17 @@ export default function StudentDetailPage() {
                 </div>
                 {student.family.phone && (
                   <div className="flex justify-between gap-3">
-                    <dt style={{ color: 'var(--txt3)' }}>Phone</dt>
+                    <dt className="flex items-center gap-1.5" style={{ color: 'var(--txt3)' }}>
+                      <Phone size={13} /> Phone
+                    </dt>
                     <dd className="font-medium">{student.family.phone}</dd>
                   </div>
                 )}
                 {student.family.email && (
                   <div className="flex justify-between gap-3">
-                    <dt style={{ color: 'var(--txt3)' }}>Email</dt>
+                    <dt className="flex items-center gap-1.5" style={{ color: 'var(--txt3)' }}>
+                      <Mail size={13} /> Email
+                    </dt>
                     <dd className="font-medium">{student.family.email}</dd>
                   </div>
                 )}

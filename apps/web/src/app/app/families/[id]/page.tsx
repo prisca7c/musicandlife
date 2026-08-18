@@ -10,6 +10,7 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { BackButton } from '@/components/back-button';
+import { Mail, Phone } from 'lucide-react';
 import { InvoicingSettingsFields, readInvoicingSettingsForm } from '@/components/invoicing-settings-fields';
 import { invoiceStatusLabel, invoiceStatusColor } from '@/lib/invoice-status';
 
@@ -500,13 +501,17 @@ export default function FamilyDetailPage() {
             <dl className="space-y-3 text-sm">
               {family.email && (
                 <div className="flex justify-between gap-3">
-                  <dt style={{ color: 'var(--txt3)' }}>Email</dt>
+                  <dt className="flex items-center gap-1.5" style={{ color: 'var(--txt3)' }}>
+                    <Mail size={13} /> Email
+                  </dt>
                   <dd className="font-medium text-right">{family.email}</dd>
                 </div>
               )}
               {family.phone && (
                 <div className="flex justify-between gap-3">
-                  <dt style={{ color: 'var(--txt3)' }}>Phone</dt>
+                  <dt className="flex items-center gap-1.5" style={{ color: 'var(--txt3)' }}>
+                    <Phone size={13} /> Phone
+                  </dt>
                   <dd className="font-medium">{family.phone}</dd>
                 </div>
               )}
