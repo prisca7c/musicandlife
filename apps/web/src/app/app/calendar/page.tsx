@@ -14,7 +14,8 @@ import { InfoTooltip } from '@/components/info-tooltip';
 import { AddStudentModal } from '@/components/add-student-modal';
 import { AssignStudentsModal } from '@/components/assign-students-modal';
 import { SectionTabs } from '@/components/section-tabs';
-import { PRIVATE_INSTRUMENTS, GROUP_INSTRUMENTS, lessonRate } from '@music-life/types';
+import { lessonRate } from '@music-life/types';
+import { useInstruments } from '@/lib/use-instruments';
 import { ChevronDown, ChevronLeft, ChevronRight, UserPlus, Users, Check, X, Repeat, PoundSterling, Shuffle, Clock, Pencil, Copy, Trash2 } from 'lucide-react';
 
 interface Lesson {
@@ -462,6 +463,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   const [saving, setSaving] = useState(false);
   const [isTeacher, setIsTeacher] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  const orgInstruments = useInstruments();
   // Validation errors (e.g. "no time picked") render at the top of the modal,
   // but the form is long enough to scroll — someone down at "Repeat weekly"
   // clicking submit saw nothing happen because the banner appeared off-screen
@@ -527,7 +529,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
     }
   }
 
-  const instrumentOptions = lessonType === 'private' ? PRIVATE_INSTRUMENTS : GROUP_INSTRUMENTS;
+  const instrumentOptions = lessonType === 'private' ? orgInstruments.private : orgInstruments.group;
   const durationOptions = lessonType === 'private'
     ? [{ value: '30', label: '30 min' }, { value: '45', label: '45 min' }, { value: '60', label: '60 min' }]
     : [{ value: '60', label: '60 min' }];

@@ -9,7 +9,7 @@ import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { SearchableSelect } from '@/components/searchable-select';
-import { ALL_INSTRUMENTS } from '@music-life/types';
+import { useInstruments } from '@/lib/use-instruments';
 import { Plus, CircleCheck, CircleX, Upload } from 'lucide-react';
 
 interface Registration {
@@ -165,6 +165,7 @@ function AddLeadModal({ open, onClose, onCreated }: { open: boolean; onClose: ()
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  const orgInstruments = useInstruments();
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSaving(true); setError('');
@@ -201,7 +202,7 @@ function AddLeadModal({ open, onClose, onCreated }: { open: boolean; onClose: ()
           <label className="ui-label">Instrument interest</label>
           <SearchableSelect
             name="instrumentInterest"
-            options={ALL_INSTRUMENTS.map(i => ({ value: i, label: i.charAt(0).toUpperCase() + i.slice(1) }))}
+            options={orgInstruments.all.map(i => ({ value: i, label: i.charAt(0).toUpperCase() + i.slice(1) }))}
             emptyLabel="Not specified" placeholder="Not specified"
           />
         </div>

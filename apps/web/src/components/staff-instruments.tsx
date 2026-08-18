@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
-import { ALL_INSTRUMENTS } from '@music-life/types';
+import { useInstruments } from '@/lib/use-instruments';
 import { InstrumentIcon } from '@/components/instrument-icons';
 import { Check } from 'lucide-react';
 
@@ -25,6 +25,7 @@ export function StaffInstruments({ staffId, instruments }: { staffId: string; in
   const [savedAt, setSavedAt] = useState(false);
   const [error, setError] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  const orgInstruments = useInstruments();
 
   async function toggle(name: string) {
     const next = selected.includes(name) ? selected.filter(i => i !== name) : [...selected, name];
@@ -54,7 +55,11 @@ export function StaffInstruments({ staffId, instruments }: { staffId: string; in
       <p className="text-[11px] mb-3" style={{ color: 'var(--txt4)' }}>Tap an instrument to add or remove it from what this teacher teaches.</p>
 
       <div className="flex flex-wrap gap-2">
-        {ALL_INSTRUMENTS.map(name => {
+        {/* Union with whatever's already selected — a teacher can carry an
+            instrument that's since been retired/renamed in Settings, and it
+            must stay visible (and toggle-off-able) even though it's no longer
+            in the offered list. */}
+        {[...new Set([...orgInstruments.all, ...selected])].map(name => {
           const on = selected.includes(name);
           const c = instrColor(name);
           return (

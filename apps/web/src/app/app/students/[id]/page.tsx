@@ -10,7 +10,8 @@ import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
-import { PRIVATE_INSTRUMENTS, GROUP_INSTRUMENTS, WEEKDAYS, lessonRate } from '@music-life/types';
+import { WEEKDAYS, lessonRate } from '@music-life/types';
+import { useInstruments } from '@/lib/use-instruments';
 import { SearchableSelect } from '@/components/searchable-select';
 import { BackButton } from '@/components/back-button';
 import { Mail, Phone } from 'lucide-react';
@@ -144,6 +145,7 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
   // Cached picker options — only fetched once the modal is open.
   const { data: staff = [] } = useApi<StaffMember[]>(open ? '/staff' : null);
   const { data: terms = [] } = useApi<Term[]>(open ? '/terms' : null);
+  const orgInstruments = useInstruments();
 
   // Reset the form each time the modal opens.
   useEffect(() => {
@@ -160,7 +162,7 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terms]);
 
-  const instruments = lessonType === 'private' ? PRIVATE_INSTRUMENTS : GROUP_INSTRUMENTS;
+  const instruments = lessonType === 'private' ? orgInstruments.private : orgInstruments.group;
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSaving(true); setError('');
@@ -334,7 +336,8 @@ function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
   const [error, setError] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
   const { data: staff = [] } = useApi<StaffMember[]>(open ? '/staff' : null);
-  const instruments = lessonType === 'private' ? PRIVATE_INSTRUMENTS : GROUP_INSTRUMENTS;
+  const orgInstruments = useInstruments();
+  const instruments = lessonType === 'private' ? orgInstruments.private : orgInstruments.group;
 
   // Load the enrollment's current values whenever the modal opens on a row.
   useEffect(() => {

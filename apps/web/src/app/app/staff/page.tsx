@@ -8,7 +8,7 @@ import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
-import { ALL_INSTRUMENTS } from '@music-life/types';
+import { useInstruments } from '@/lib/use-instruments';
 import { UserPlus, Mail, Phone, Home } from 'lucide-react';
 
 interface StaffMember {
@@ -84,6 +84,7 @@ function AddStaffModal({ open, onClose, onCreated }: { open: boolean; onClose: (
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  const orgInstruments = useInstruments();
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSaving(true); setError('');
@@ -146,7 +147,7 @@ function AddStaffModal({ open, onClose, onCreated }: { open: boolean; onClose: (
         <div>
           <label className="ui-label mb-2">Instruments</label>
           <div className="grid grid-cols-3 gap-1.5">
-            {ALL_INSTRUMENTS.map(i => (
+            {orgInstruments.all.map(i => (
               <label key={i} className="flex items-center gap-2 text-sm cursor-pointer">
                 <input type="checkbox" name="instruments" value={i}
                   className="h-3.5 w-3.5 rounded"

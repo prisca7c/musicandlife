@@ -8,7 +8,7 @@ import { InfoTooltip } from '@/components/info-tooltip';
 import { LoadState } from '@/components/load-state';
 import { SearchableSelect } from '@/components/searchable-select';
 import { Modal } from '@/components/modal';
-import { ALL_INSTRUMENTS } from '@music-life/types';
+import { useInstruments } from '@/lib/use-instruments';
 import { Plus, Trash2 } from 'lucide-react';
 
 type Status = 'learning' | 'polishing' | 'performance_ready' | 'completed';
@@ -41,6 +41,7 @@ export default function ContentPage() {
   const [addError, setAddError] = useState('');
   const [saving, setSaving] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  const orgInstruments = useInstruments();
 
   const { data: studentData } = useApi<{ data: Student[] } | Student[]>('/students?limit=200&offset=0');
   const students: Student[] = Array.isArray(studentData) ? studentData : (studentData?.data ?? []);
@@ -206,7 +207,7 @@ export default function ContentPage() {
               <label className="ui-label">Instrument</label>
               <select name="instrument" className="ui-input">
                 <option value="">—</option>
-                {ALL_INSTRUMENTS.map(i => <option key={i} value={i}>{i}</option>)}
+                {orgInstruments.all.map(i => <option key={i} value={i}>{i}</option>)}
               </select>
             </div>
           </div>
