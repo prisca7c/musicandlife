@@ -128,7 +128,13 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
   const [termId, setTermId] = useState('');
   const [weekday, setWeekday] = useState('');
   const [enrollStatus, setEnrollStatus] = useState('active');
-  const autoRate = (lessonRate(lessonType, duration) / 100).toFixed(2);
+  // Auto-filled from the standard T&Cs rate, but editable — real pricing has
+  // exceptions the flat duration→rate table can't express (e.g. a group's
+  // whole-term flat fee sitting alongside separately-priced individual
+  // lessons), so this used to be locked read-only and force the standard
+  // rate on anyone who needed something else.
+  const [rateText, setRateText] = useState('');
+  const [rateEdited, setRateEdited] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ created: number; through: string } | null>(null);
@@ -143,7 +149,16 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
   useEffect(() => {
     if (!open) return;
     setInstrument(''); setTeacherId(''); setWeekday(''); setEnrollStatus('active'); setError(''); setResult(null);
+    setRateEdited(false);
   }, [open]);
+
+  // Keep the rate in sync with the standard T&Cs figure as type/duration
+  // change — unless the admin has already typed their own number, in which
+  // case leave it alone rather than clobbering a deliberate override.
+  useEffect(() => {
+    if (rateEdited) return;
+    setRateText((lessonRate(lessonType, duration) / 100).toFixed(2));
+  }, [lessonType, duration, rateEdited]);
 
   // Default to the active term once terms load (don't clobber a manual choice).
   useEffect(() => {
@@ -161,12 +176,14 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
     const f = new FormData(e.currentTarget);
     const startTime = (f.get('startTime') as string) || '';
     const hasSchedule = !!weekday && !!startTime;
+    const ratePence = Math.round(parseFloat(rateText) * 100);
+    if (!Number.isFinite(ratePence) || ratePence < 0) { setError('Enter a valid rate.'); setSaving(false); return; }
     try {
       const enrollment = await apiFetch<{ id: string }>(`/students/${studentId}/enrollments`, { method: 'POST', token: tok(), body: JSON.stringify({
         termId: termId || undefined, instrument, lessonType,
         duration,
         teacherId: teacherId || undefined,
-        rate: lessonRate(lessonType, duration),
+        rate: ratePence,
         scheduleRule: hasSchedule ? { weekday, startTime } : undefined,
         autoRenew: f.get('autoRenew') === 'on', status: enrollStatus,
       })});
@@ -262,10 +279,13 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
         <div>
           <label className="ui-label">Rate (£ per lesson)</label>
           <div className="flex items-center gap-2">
-            <input name="rate" type="number" min="0" step="0.01" value={autoRate}
-              onChange={() => {}} readOnly className="ui-input" />
-            <span className="text-xs whitespace-nowrap" style={{ color: 'var(--txt4)' }}>auto from T&amp;Cs</span>
+            <input name="rate" type="number" min="0" step="0.01" value={rateText}
+              onChange={e => { setRateText(e.target.value); setRateEdited(true); }} className="ui-input" />
+            {!rateEdited && <span className="text-xs whitespace-nowrap" style={{ color: 'var(--txt4)' }}>auto from T&amp;Cs</span>}
           </div>
+          <p className="text-[11px] mt-1" style={{ color: 'var(--txt4)' }}>
+            Filled from the standard T&amp;Cs rate — edit it for special cases (e.g. a group&apos;s flat term fee).
+          </p>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
