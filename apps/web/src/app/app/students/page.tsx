@@ -12,8 +12,10 @@ import { InfoTooltip } from '@/components/info-tooltip';
 import { fmtDate } from '@/lib/datetime';
 import { UserPlus, Search, Mail, Phone, Home } from 'lucide-react';
 import { AddStudentModal } from '@/components/add-student-modal';
+import { EditStudentModal } from '@/components/edit-student-modal';
 import { useRole } from '@/lib/use-role';
 import IntakePage from '@/app/app/intake/page';
+import { Pencil, Trash2 } from 'lucide-react';
 
 interface Student {
   id: string; firstName: string; lastName: string; status: string;
@@ -70,6 +72,11 @@ function StudentRoster({ status }: { status: 'active' | 'trial' }) {
   const [offset, setOffset] = useState(0);
   const [sort, setSort] = useState<SortKey>('name');
   const [converting, setConverting] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkWithdrawing, setBulkWithdrawing] = useState(false);
+  const role = useRole();
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   // The API path IS the cache key: revisiting this page (or paging back to a
@@ -99,17 +106,63 @@ function StudentRoster({ status }: { status: 'active' | 'trial' }) {
     finally { setConverting(null); }
   }
 
+  // Same teardown as the detail page's "Withdraw student" — ends every
+  // enrollment, clears schedule rules, cancels future scheduled lessons at no
+  // charge. Past lessons are untouched. Quick access from the list so staff
+  // don't have to open each profile just to withdraw someone.
+  async function withdrawOne(id: string, name: string) {
+    if (!confirm(`Withdraw ${name}? This ends every enrollment, stops all their weekly lessons, and cancels all future scheduled lessons at no charge. Past lessons are unaffected. This cannot be undone from here — re-enroll them to bring them back.`)) return;
+    setWithdrawingId(id);
+    try {
+      await apiFetch(`/students/${id}`, { method: 'DELETE', token: tok() });
+      mutate();
+      setSelected(prev => { const next = new Set(prev); next.delete(id); return next; });
+    } catch (e) { alert(e instanceof Error ? e.message : 'Could not withdraw this student'); }
+    finally { setWithdrawingId(null); }
+  }
+
+  async function withdrawSelected() {
+    const targets = students.filter(s => selected.has(s.id));
+    if (targets.length === 0) return;
+    if (!confirm(`Withdraw ${targets.length} student${targets.length !== 1 ? 's' : ''}? This ends every enrollment, stops weekly lessons, and cancels future scheduled lessons at no charge for each of them. This cannot be undone from here.`)) return;
+    setBulkWithdrawing(true);
+    for (const s of targets) {
+      try { await apiFetch(`/students/${s.id}`, { method: 'DELETE', token: tok() }); }
+      catch { /* one failure shouldn't stop the rest */ }
+    }
+    setBulkWithdrawing(false);
+    setSelected(new Set());
+    mutate();
+  }
+
+  function toggleSelected(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function toggleSelectAll() {
+    setSelected(prev => prev.size === students.length ? new Set() : new Set(students.map(s => s.id)));
+  }
+
   return (
     <div>
       <AddStudentModal open={showAdd} onClose={() => setShowAdd(false)} onCreated={() => mutate()} />
+      <EditStudentModal open={!!editingId} onClose={() => setEditingId(null)} studentId={editingId} onSaved={() => mutate()} />
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">{status === 'active' ? 'Active students' : 'Trial students'}</span>
         }
         subtitle={`${total} student${total !== 1 ? 's' : ''}`}
         action={
-          // Kept, but marked optional — students normally arrive via Sign-ups.
           <span className="inline-flex items-center gap-1.5">
+            {role === 'admin' && selected.size > 0 && (
+              <button onClick={withdrawSelected} disabled={bulkWithdrawing} className="ui-btn-ghost" style={{ color: 'var(--coral)' }}>
+                <Trash2 size={15} /> {bulkWithdrawing ? 'Withdrawing…' : `Withdraw (${selected.size})`}
+              </button>
+            )}
+            {/* Kept, but marked optional — students normally arrive via Sign-ups. */}
             <button onClick={() => setShowAdd(true)} className="ui-btn-primary">
               <UserPlus size={15} /> Add student
             </button>
@@ -143,17 +196,23 @@ function StudentRoster({ status }: { status: 'active' | 'trial' }) {
         <table className="data-table">
           <thead>
             <tr>
+              {role === 'admin' && (
+                <th>
+                  <input type="checkbox" checked={selected.size > 0 && selected.size === students.length} onChange={toggleSelectAll} />
+                </th>
+              )}
               <th>Name</th>
               <th>Family</th>
               <th>Instruments</th>
               <th>Teachers</th>
               <th>Next lesson</th>
               <th>Credits</th>
+              {role === 'admin' && <th></th>}
             </tr>
           </thead>
           <tbody>
             {students.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={role === 'admin' ? 8 : 6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 {/* A failed load used to render as "No students yet." — an
                     empty studio, rather than a request that didn't come back. */}
                 {error || isLoading
@@ -164,6 +223,11 @@ function StudentRoster({ status }: { status: 'active' | 'trial' }) {
             )}
             {students.map(s => (
               <tr key={s.id}>
+                {role === 'admin' && (
+                  <td>
+                    <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSelected(s.id)} />
+                  </td>
+                )}
                 <td>
                   {/* Status lives on the detail page now — this list is a quick
                       scan, not a place to manage state. A trial student gets a
@@ -223,6 +287,20 @@ function StudentRoster({ status }: { status: 'active' | 'trial' }) {
                 <td className="font-medium" style={{ color: s.creditsAvailable > 0 ? 'var(--sage-dk)' : 'var(--txt3)' }}>
                   {s.creditsAvailable}
                 </td>
+                {role === 'admin' && (
+                  <td>
+                    <div className="flex items-center gap-2.5">
+                      <button onClick={() => setEditingId(s.id)} title="Edit student" style={{ color: 'var(--sage-dk)' }}>
+                        <Pencil size={14} />
+                      </button>
+                      <button onClick={() => withdrawOne(s.id, `${s.firstName} ${s.lastName}`)}
+                        disabled={withdrawingId === s.id} title="Withdraw student" style={{ color: 'var(--coral)' }}
+                        className="disabled:opacity-50">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

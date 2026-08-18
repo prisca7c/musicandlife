@@ -186,6 +186,8 @@ function AddStaffModal({ open, onClose, onCreated }: { open: boolean; onClose: (
 export default function StaffPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [sort, setSort] = useState<SortKey>('name');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkSaving, setBulkSaving] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
   const role = getRoleFromToken(tok());
   const isAdmin = role === 'admin';
@@ -197,6 +199,36 @@ export default function StaffPage() {
   const staff = sort === 'name' ? fetched : [...fetched].sort(SORTERS[sort]);
   const load = () => mutate();
 
+  function toggleSelected(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function toggleSelectAll() {
+    setSelected(prev => prev.size === staff.length ? new Set() : new Set(staff.map(s => s.id)));
+  }
+
+  // Mirrors StaffStatusToggle's single-row PATCH, just applied to every
+  // selected id — deactivating stops future recurring billing and blocks new
+  // bookings for each, so it gets the same confirm; reactivating doesn't.
+  async function setSelectedStatus(next: 'active' | 'inactive') {
+    const targets = staff.filter(s => selected.has(s.id));
+    if (targets.length === 0) return;
+    if (next === 'inactive' && !confirm(
+      `Deactivate ${targets.length} staff member${targets.length !== 1 ? 's' : ''}? Their recurring lessons will stop being billed going forward and families won't be able to book new lessons with them. Existing scheduled lessons are not cancelled. You can reactivate them at any time.`
+    )) return;
+    setBulkSaving(true);
+    for (const s of targets) {
+      try { await apiFetch(`/staff/${s.id}`, { method: 'PATCH', token: tok(), body: JSON.stringify({ status: next }) }); }
+      catch { /* one failure shouldn't stop the rest */ }
+    }
+    setBulkSaving(false);
+    setSelected(new Set());
+    load();
+  }
+
   if (!isAdmin) return <ColleaguesDirectory />;
 
   return (
@@ -207,6 +239,16 @@ export default function StaffPage() {
         subtitle={`${staff.length} staff member${staff.length !== 1 ? 's' : ''}`}
         action={
           <div className="flex items-center gap-2">
+            {selected.size > 0 && (
+              <>
+                <button onClick={() => setSelectedStatus('inactive')} disabled={bulkSaving} className="ui-btn-ghost" style={{ color: 'var(--coral)' }}>
+                  {bulkSaving ? 'Saving…' : `Deactivate (${selected.size})`}
+                </button>
+                <button onClick={() => setSelectedStatus('active')} disabled={bulkSaving} className="ui-btn-ghost" style={{ color: 'var(--sage-dk)' }}>
+                  {bulkSaving ? 'Saving…' : `Reactivate (${selected.size})`}
+                </button>
+              </>
+            )}
             <select value={sort} onChange={e => setSort(e.target.value as SortKey)} className="ui-input shrink-0" style={{ width: 224 }}>
               <option value="name">Sort: Name (A–Z)</option>
               <option value="balance">Sort: Highest payroll balance</option>
@@ -223,6 +265,9 @@ export default function StaffPage() {
         <table className="data-table">
           <thead>
             <tr>
+              <th>
+                <input type="checkbox" checked={selected.size > 0 && selected.size === staff.length} onChange={toggleSelectAll} />
+              </th>
               <th>Name</th>
               <th>Contact</th>
               <th>Instruments</th>
@@ -235,12 +280,15 @@ export default function StaffPage() {
           </thead>
           <tbody>
             {staff.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={9} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No staff yet.
               </td></tr>
             )}
             {staff.map(s => (
               <tr key={s.id}>
+                <td>
+                  <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSelected(s.id)} />
+                </td>
                 <td>
                   <Link href={`/app/staff/${s.id}`}
                     className="font-semibold hover:underline"
