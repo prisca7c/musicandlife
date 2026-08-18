@@ -316,13 +316,16 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
 
 type EnrollmentRow = StudentDetail['enrollments'][number];
 
-// Edit an EXISTING enrollment's teacher, rate and lesson length. Registration
-// creates enrollments with a flat £45 and no teacher, and the row itself only
-// let you change status — so this is the one place to fix the rate, assign or
-// change the teacher, and set a group's price/duration after the fact.
+// Edit an EXISTING enrollment's instrument, type, teacher, rate and lesson
+// length. Registration creates enrollments with a flat £45, no teacher, and
+// whatever instrument the family typed on the public form — so this is the
+// one place to fix any of that (including a mis-picked instrument) after the
+// fact, not just the status dropdown on the row.
 function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
   open: boolean; onClose: () => void; enrollment: EnrollmentRow | null; onSaved: () => void;
 }) {
+  const [lessonType, setLessonType] = useState<'private' | 'group'>('private');
+  const [instrument, setInstrument] = useState('');
   const [teacherId, setTeacherId] = useState('');
   const [rateText, setRateText] = useState('');
   const [trialRateText, setTrialRateText] = useState('');
@@ -331,10 +334,13 @@ function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
   const [error, setError] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
   const { data: staff = [] } = useApi<StaffMember[]>(open ? '/staff' : null);
+  const instruments = lessonType === 'private' ? PRIVATE_INSTRUMENTS : GROUP_INSTRUMENTS;
 
   // Load the enrollment's current values whenever the modal opens on a row.
   useEffect(() => {
     if (!open || !enrollment) return;
+    setLessonType(enrollment.lessonType === 'group' ? 'group' : 'private');
+    setInstrument(enrollment.instrument);
     setTeacherId(enrollment.teacher?.id ?? '');
     setRateText((enrollment.rate / 100).toFixed(2));
     setTrialRateText(enrollment.trialRate != null ? (enrollment.trialRate / 100).toFixed(2) : '');
@@ -343,6 +349,7 @@ function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
   }, [open, enrollment]);
 
   async function save() {
+    if (!instrument.trim()) { setError('Choose an instrument.'); return; }
     const pence = Math.round(parseFloat(rateText) * 100);
     if (!Number.isFinite(pence) || pence < 0) { setError('Enter a valid rate.'); return; }
     if (!Number.isInteger(duration) || duration < 5 || duration > 240) { setError('Duration must be 5–240 minutes.'); return; }
@@ -358,7 +365,7 @@ function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
     try {
       await apiFetch(`/enrollments/${enrollment.id}`, {
         method: 'PATCH', token: tok(),
-        body: JSON.stringify({ teacherId: teacherId || null, rate: pence, trialRate, duration }),
+        body: JSON.stringify({ instrument, lessonType, teacherId: teacherId || null, rate: pence, trialRate, duration }),
       });
       onSaved(); onClose();
     } catch (err) { setError(err instanceof Error ? err.message : 'Could not save'); }
@@ -369,10 +376,31 @@ function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
     <Modal open={open} onClose={onClose} title={enrollment ? `Edit ${enrollment.instrument} enrollment` : 'Edit enrollment'}>
       {error && <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
       <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="ui-label">Lesson type</label>
+            <div className="flex gap-4 mt-2">
+              {(['private', 'group'] as const).map(t => (
+                <label key={t} className="flex items-center gap-2 cursor-pointer text-sm">
+                  <input type="radio" checked={lessonType === t} onChange={() => { setLessonType(t); setInstrument(''); }}
+                    style={{ accentColor: 'var(--sage)' }} />
+                  <span className="capitalize">{t}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="ui-label">Instrument <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <SearchableSelect
+              options={instruments.map(i => ({ value: i, label: i.charAt(0).toUpperCase() + i.slice(1) }))}
+              value={instrument} onChange={setInstrument} placeholder="Select…"
+            />
+          </div>
+        </div>
         <div>
           <label className="ui-label">Teacher</label>
           <SearchableSelect
-            options={eligibleTeachers(staff, enrollment?.instrument ?? '').map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+            options={eligibleTeachers(staff, instrument).map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
             value={teacherId} onChange={setTeacherId} emptyLabel="Unassigned" placeholder="Unassigned"
           />
         </div>
@@ -395,7 +423,7 @@ function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
         </div>
         <p className="text-xs" style={{ color: 'var(--txt4)' }}>
           The rate is what the family is charged for this enrollment; a lesson of a different length is prorated against the duration.
-          {enrollment?.lessonType === 'group' && ' For a group class, this is the set price and length.'}
+          {lessonType === 'group' && ' For a group class, this is the set price and length.'}
           {' '}A trial rate is a flat price charged for a lesson marked as a trial; leave it blank to charge trials the normal rate.
         </p>
         <div className="flex gap-3 pt-1">
