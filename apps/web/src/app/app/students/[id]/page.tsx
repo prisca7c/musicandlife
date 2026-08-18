@@ -46,6 +46,75 @@ interface LessonNote {
   id: string; body: string; visibility: 'internal' | 'family'; createdAt: string;
   author: { id: string; email: string } | null;
 }
+interface HistoryLesson {
+  id: string; startsAt: string; duration: number; status: string;
+  teacher: { id: string; firstName: string; lastName: string } | null;
+  enrollment: { instrument: string; lessonType: string } | null;
+  attendance: { status: string } | null;
+}
+
+// Enrollments only show the abstract recurring rule ("weekly Tue 16:00"), not
+// how many actual lesson rows it's generated — a parent asking "has she really
+// had 12 lessons?" had no way to check without opening the calendar and paging
+// week by week. This is the flat list, unbounded by date (same /lessons?studentId
+// endpoint the calendar's cross-week search now uses), newest first.
+function LessonHistory({ studentId }: { studentId: string }) {
+  const { data: lessons = [] } = useApi<HistoryLesson[]>(`/lessons?studentId=${studentId}`);
+  const [expanded, setExpanded] = useState(false);
+  const sorted = [...lessons].sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime());
+  const shown = expanded ? sorted : sorted.slice(0, 8);
+  const bookedCount = lessons.filter(l => l.status === 'scheduled' || l.status === 'completed').length;
+
+  return (
+    <div className="data-table-wrap overflow-hidden mt-6">
+      <div className="px-5 py-3.5 border-b flex items-center justify-between" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+        <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Lesson history</h2>
+        <span className="text-xs font-semibold" style={{ color: 'var(--txt3)' }}>
+          {bookedCount} lesson{bookedCount !== 1 ? 's' : ''} booked
+        </span>
+      </div>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Time</th>
+            <th>Instrument</th>
+            <th>Teacher</th>
+            <th>Status</th>
+            <th>Attendance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shown.length === 0 && (
+            <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              No lessons booked yet.
+            </td></tr>
+          )}
+          {shown.map(l => {
+            const d = new Date(l.startsAt);
+            return (
+              <tr key={l.id}>
+                <td className="font-medium">{d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                <td style={{ color: 'var(--txt3)' }}>{d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</td>
+                <td className="capitalize">{l.enrollment?.instrument ?? '—'}</td>
+                <td>{l.teacher ? `${l.teacher.firstName} ${l.teacher.lastName}` : '—'}</td>
+                <td><Badge variant={l.status}>{l.status.replace(/^cancelled_/, 'cancelled ')}</Badge></td>
+                <td style={{ color: 'var(--txt3)' }}>{l.attendance?.status ?? '—'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {sorted.length > 8 && (
+        <div className="px-5 py-3 border-t text-center" style={{ borderColor: 'var(--bd)' }}>
+          <button onClick={() => setExpanded(v => !v)} className="text-xs font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}>
+            {expanded ? 'Show less' : `Show all ${sorted.length} lessons`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Core profile fields (name/dob/email/notes) had no edit UI at all — PATCH
 // /students/:id already supported them, but nothing in the app called it for
@@ -859,6 +928,7 @@ export default function StudentDetailPage() {
               </tbody>
             </table>
           </div>
+          <LessonHistory studentId={id} />
         </div>
       </div>
     </div>

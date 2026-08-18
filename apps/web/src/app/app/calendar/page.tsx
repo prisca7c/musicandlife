@@ -1513,6 +1513,39 @@ export default function CalendarPage() {
   const availabilityEndpoint = !role ? null : role === 'teacher' ? '/staff/me/availability' : '/staff/availability/all';
   const { data: availability = [] } = useApi<Availability[]>(availabilityEndpoint);
 
+  // Full roster for the student filter — independent of whatever week/month is
+  // currently loaded, so a student with no lessons in the visible range can
+  // still be found (this is the whole point of the filter).
+  const showFilters = isManagement || teacherEveryone;
+  const { data: allStudents = [] } = useApi<Student[]>(showFilters ? '/students' : null);
+
+  // When a student filter is picked, fetch THEIR lessons unbounded by date so
+  // we can jump the calendar to wherever their lesson actually is, rather than
+  // only ever finding them if they happen to have a lesson in the week/month
+  // that's already on screen.
+  const { data: filterStudentLessons } = useApi<Lesson[]>(
+    filterStudentId ? `/lessons?studentId=${filterStudentId}` : null,
+  );
+  useEffect(() => {
+    if (!filterStudentId || !filterStudentLessons || filterStudentLessons.length === 0) return;
+    const todayMs = Date.now();
+    const upcoming = filterStudentLessons
+      .filter(l => l.status === 'scheduled' && new Date(l.startsAt).getTime() >= todayMs)
+      .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())[0];
+    const nearest = upcoming ?? [...filterStudentLessons].sort(
+      (a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime(),
+    )[0];
+    if (!nearest) return;
+    const nearestDate = new Date(nearest.startsAt);
+    // Only jump if the found lesson actually falls outside what's currently
+    // loaded — otherwise this would fight the user paging around normally.
+    const inView = view === 'month'
+      ? nearestDate >= monthGrid.gridStart && nearestDate <= monthGrid.gridEnd
+      : nearestDate >= weekStart && nearestDate < new Date(weekStart.getTime() + 7 * 86400000);
+    if (!inView) setAnchorDate(nearestDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterStudentId, filterStudentLessons]);
+
   // Apply the teacher/student filters once, up front — everything downstream
   // (day columns, week grid, month cells, counts) reads this narrowed set.
   const lessons = lessonsRaw.filter(l =>
@@ -1520,17 +1553,12 @@ export default function CalendarPage() {
     (!filterStudentId || (l.student?.id ?? '') === filterStudentId),
   );
 
-  // Student options for the filter, distinct by id, taken from whatever is
-  // loaded for the current range (a student with no lessons this week simply
-  // isn't offered — there'd be nothing to show).
-  const studentOptions = (() => {
-    const seen = new Map<string, string>();
-    for (const l of lessonsRaw) {
-      if (l.student) seen.set(l.student.id, `${l.student.firstName} ${l.student.lastName}`);
-    }
-    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  })();
-  const showFilters = isManagement || teacherEveryone;
+  // Student options for the filter — the full roster, not just whoever has a
+  // lesson in the currently loaded week/month, so a student can be found no
+  // matter which day their lesson actually falls on.
+  const studentOptions = allStudents
+    .map(s => ({ id: s.id, name: `${s.firstName} ${s.lastName}` }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   // Recompute the per-teacher colour map whenever the staff set changes.
   const staffIdsKey = staff.map(s => s.id).join(',');

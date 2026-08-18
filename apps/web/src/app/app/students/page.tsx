@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { AutomatedHint } from '@/components/automated-hint';
@@ -260,7 +261,20 @@ function StudentRoster({ status }: { status: 'active' | 'trial' }) {
 // just gets the active roster with no tab bar at all.
 export default function StudentsPage() {
   const role = useRole();
-  const [tab, setTab] = useState<'active' | 'trial' | 'pending'>('active');
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // Kept in the URL, not local state — a plain useState reset to 'active' on
+  // every mount, so browser back from a student profile always landed on
+  // Active regardless of which tab was open before. router.replace (not push)
+  // keeps a single history entry in sync with whatever tab is selected, so
+  // back-navigation restores it without stacking a new entry per tab click.
+  const tabParam = searchParams.get('tab');
+  const tab: 'active' | 'trial' | 'pending' =
+    tabParam === 'trial' || tabParam === 'pending' ? tabParam : 'active';
+  function setTab(t: 'active' | 'trial' | 'pending') {
+    router.replace(t === 'active' ? pathname : `${pathname}?tab=${t}`, { scroll: false });
+  }
 
   if (role !== 'admin') return <StudentRoster status="active" />;
 
