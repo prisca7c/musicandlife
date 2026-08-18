@@ -438,6 +438,107 @@ function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
   );
 }
 
+// Change an already-recurring enrollment's weekly day/time. "Apply to all
+// future lessons" cancels and rebooks everything from today; unchecking it
+// reveals a date picker instead, so the old day/time keeps running up to
+// that date and only lessons from it onward move to the new slot (e.g. stay
+// on Tuesdays until half-term, then switch to Thursdays).
+function RescheduleWeeklyModal({ open, onClose, enrollment, onSaved }: {
+  open: boolean; onClose: () => void; enrollment: EnrollmentRow | null; onSaved: () => void;
+}) {
+  const [weekday, setWeekday] = useState('monday');
+  const [startTime, setStartTime] = useState('16:00');
+  const [applyNow, setApplyNow] = useState(true);
+  const [effectiveFrom, setEffectiveFrom] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<{ created: number } | null>(null);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  useEffect(() => {
+    if (!open || !enrollment?.scheduleRule) return;
+    setWeekday(enrollment.scheduleRule.weekday);
+    setStartTime(enrollment.scheduleRule.startTime);
+    setApplyNow(true);
+    setEffectiveFrom('');
+    setError(''); setResult(null);
+  }, [open, enrollment]);
+
+  async function save() {
+    if (!enrollment) return;
+    if (!applyNow && !effectiveFrom) { setError('Pick a date, or tick "Apply to all future lessons".'); return; }
+    setSaving(true); setError('');
+    try {
+      const res = await apiFetch<{ created: number }>(`/enrollments/${enrollment.id}/reschedule-weekly`, {
+        method: 'PATCH', token: tok(), body: JSON.stringify({
+          weekday, startTime, effectiveFrom: applyNow ? undefined : effectiveFrom,
+        }),
+      });
+      setResult({ created: res.created });
+      onSaved();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Could not reschedule'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={enrollment ? `Reschedule ${enrollment.instrument}` : 'Reschedule'}>
+      {error && <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
+      {result ? (
+        <div className="space-y-4">
+          <div className="rounded-xl px-4 py-4 text-sm"
+            style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)', border: '1px solid var(--sage)' }}>
+            <p className="font-bold text-base mb-1">Rescheduled ✓</p>
+            <p>Now weekly on {weekday} at {startTime}. {result.created} upcoming lesson{result.created !== 1 ? 's' : ''} booked on the new slot.</p>
+          </div>
+          <button type="button" onClick={onClose} className="ui-btn-primary">Done</button>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="ui-label">Day</label>
+              <SearchableSelect
+                options={WEEKDAYS.map(d => ({ value: d, label: d.charAt(0).toUpperCase() + d.slice(1) }))}
+                value={weekday} onChange={setWeekday}
+              />
+            </div>
+            <div>
+              <label className="ui-label">Time</label>
+              <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className="ui-input" />
+            </div>
+          </div>
+          <div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={applyNow} onChange={e => setApplyNow(e.target.checked)}
+                style={{ accentColor: 'var(--sage)' }} />
+              Apply to all future lessons
+            </label>
+            {!applyNow && (
+              <div className="mt-2">
+                <label className="ui-label">Starting from</label>
+                <input type="date" value={effectiveFrom} min={new Date().toISOString().split('T')[0]}
+                  onChange={e => setEffectiveFrom(e.target.value)} className="ui-input" />
+                <p className="text-xs mt-1" style={{ color: 'var(--txt4)' }}>
+                  Lessons before this date keep the old day/time. From this date on, they move to the new one.
+                </p>
+              </div>
+            )}
+            {applyNow && (
+              <p className="text-xs mt-1" style={{ color: 'var(--txt4)' }}>
+                Cancels every future lesson on the old day/time (no charge) and rebooks them on the new one, starting now.
+              </p>
+            )}
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button onClick={save} disabled={saving} className="ui-btn-primary">{saving ? 'Saving…' : 'Reschedule'}</button>
+            <button onClick={onClose} className="ui-btn-ghost">Cancel</button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function LessonNotes({ studentId }: { studentId: string }) {
   const [showAdd, setShowAdd] = useState(false);
   const [familyNote, setFamilyNote] = useState('');
@@ -522,6 +623,7 @@ export default function StudentDetailPage() {
   const id = params.id;
   const [showEnroll, setShowEnroll] = useState(false);
   const [editEnrollment, setEditEnrollment] = useState<EnrollmentRow | null>(null);
+  const [rescheduleEnrollment, setRescheduleEnrollment] = useState<EnrollmentRow | null>(null);
   const [showEditStudent, setShowEditStudent] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const role = useRole();
@@ -582,6 +684,7 @@ export default function StudentDetailPage() {
     <div>
       <AddEnrollmentModal open={showEnroll} onClose={() => setShowEnroll(false)} studentId={id} onCreated={load} />
       <EditEnrollmentModal open={!!editEnrollment} onClose={() => setEditEnrollment(null)} enrollment={editEnrollment} onSaved={load} />
+      <RescheduleWeeklyModal open={!!rescheduleEnrollment} onClose={() => setRescheduleEnrollment(null)} enrollment={rescheduleEnrollment} onSaved={load} />
       <EditStudentModal open={showEditStudent} onClose={() => setShowEditStudent(false)} student={student} onSaved={load} />
 
       <div className="mb-5">
@@ -730,16 +833,24 @@ export default function StudentDetailPage() {
                         <select value={e.status} onChange={ev => changeEnrollmentStatus(e.id, ev.target.value)}
                           className="text-xs border rounded-lg px-2 py-1" style={{ borderColor: 'var(--bd2)' }}
                           title="Change enrollment status">
-                          <option value="active">Active</option>
+                          <option value="waiting">Waiting</option>
                           <option value="trial">Trial</option>
+                          <option value="active">Active</option>
                           <option value="paused">Paused</option>
                           <option value="withdrawn">Withdrawn</option>
                         </select>
                         {e.scheduleRule && (
-                          <button onClick={() => stopWeekly(e.id)}
-                            className="text-xs font-semibold hover:underline" style={{ color: 'var(--coral)' }}>
-                            Stop weekly
-                          </button>
+                          <>
+                            <button onClick={() => setRescheduleEnrollment(e)}
+                              className="text-xs font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}
+                              title="Change the weekly day/time">
+                              Reschedule
+                            </button>
+                            <button onClick={() => stopWeekly(e.id)}
+                              className="text-xs font-semibold hover:underline" style={{ color: 'var(--coral)' }}>
+                              Stop weekly
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>

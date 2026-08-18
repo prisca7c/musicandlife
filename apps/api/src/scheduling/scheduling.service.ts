@@ -1350,6 +1350,51 @@ export class SchedulingService {
     }
   }
 
+  /**
+   * Admin-driven day/time change for an enrollment's whole weekly series —
+   * same core move as moveRecurringSeries (cancel the old future occurrences,
+   * retarget the rule, regenerate), but reachable directly from the
+   * enrollment itself rather than only through a teacher reviewing a family's
+   * reschedule request. `effectiveFrom` lets the change apply only from a
+   * chosen date onward (lessons before it, on the old day/time, are left
+   * alone) instead of always cancelling every future lesson immediately —
+   * e.g. "stay on Tuesdays until half-term, then move to Thursdays".
+   */
+  async rescheduleWeekly(orgId: string, enrollmentId: string, dto: { weekday: string; startTime: string; effectiveFrom?: string }) {
+    const enrollment = await this.db.db.query.enrollments.findFirst({
+      where: and(eq(enrollments.id, enrollmentId), eq(enrollments.organizationId, orgId)),
+    });
+    if (!enrollment) throw new NotFoundException('Enrollment not found');
+    const rule = enrollment.scheduleRule as { weekday?: string; startTime?: string; endDate?: string } | null;
+    if (!rule?.weekday || !rule?.startTime) {
+      throw new BadRequestException('This enrollment has no weekly schedule to reschedule.');
+    }
+
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const cutoff = dto.effectiveFrom ? parseZonedDateTime(`${dto.effectiveFrom}T00:00`, tz) : new Date();
+
+    // Cancel only the occurrences this change actually replaces — everything
+    // from the cutoff onward, at no charge (they never happened as billed).
+    // Anything before the cutoff (already-materialized lessons on the old
+    // day/time) is left exactly as it was.
+    await this.db.db.update(lessons)
+      .set({ status: 'cancelled_teacher', cancelledAt: new Date(), updatedAt: new Date() })
+      .where(and(
+        eq(lessons.enrollmentId, enrollmentId),
+        eq(lessons.organizationId, orgId),
+        eq(lessons.status, 'scheduled'),
+        gte(lessons.startsAt, cutoff),
+      ));
+
+    const newRule = { weekday: dto.weekday, startTime: dto.startTime, endDate: rule.endDate };
+    await this.db.db.update(enrollments)
+      .set({ scheduleRule: newRule, updatedAt: new Date() })
+      .where(and(eq(enrollments.id, enrollmentId), eq(enrollments.organizationId, orgId)));
+
+    const result = await this.materializeEnrollment(orgId, enrollmentId, { fromDate: cutoff.toISOString() });
+    return { rescheduled: true, ...result };
+  }
+
   async getLessonRequests(orgId: string, actor: Actor, status?: string) {
     const teacherStaffId = actor.role === 'teacher' ? await this.resolveStaffId(orgId, actor.userId) : null;
 

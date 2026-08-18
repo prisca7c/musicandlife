@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Search, X } from 'lucide-react';
 
 export interface SelectOption { value: string; label: string; }
@@ -17,6 +18,16 @@ interface Props {
   disabled?: boolean;
 }
 
+// Above modals (z-50) and everything else — matches InfoTooltip/the dashboard
+// attendance menu, which hit the identical bug: a `position: absolute`
+// dropdown nested inside a modal's `overflow-y-auto` body gets silently
+// clipped the moment the trigger sits low enough that the panel would
+// extend past the modal's edge. Portaling to document.body with a
+// viewport-measured `fixed` position is the only way this can't happen,
+// regardless of which scrollable/overflow-hidden ancestor the trigger lives in.
+const MENU_Z_INDEX = 2147483647;
+const EDGE_MARGIN = 8;
+
 export function SearchableSelect({
   name, options, value: controlled, defaultValue = '',
   onChange, placeholder = 'Select…', emptyLabel, required, disabled,
@@ -24,7 +35,11 @@ export function SearchableSelect({
   const [internal, setInternal] = useState(defaultValue);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [mounted, setMounted] = useState(false);
+  const [pos, setPos] = useState({ left: 0, top: 0, width: 0 });
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const value = controlled !== undefined ? controlled : internal;
@@ -34,12 +49,40 @@ export function SearchableSelect({
     ? all.filter(o => o.label.toLowerCase().includes(search.toLowerCase()))
     : all;
 
+  useLayoutEffect(() => { setMounted(true); }, []);
+
+  const reposition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const menuHeight = menuRef.current?.offsetHeight ?? 288;
+    const below = rect.bottom + 4 + menuHeight <= window.innerHeight;
+    const top = below ? rect.bottom + 4 : Math.max(EDGE_MARGIN, rect.top - menuHeight - 4);
+    let left = rect.left;
+    left = Math.max(EDGE_MARGIN, Math.min(left, window.innerWidth - rect.width - EDGE_MARGIN));
+    setPos({ left, top, width: rect.width });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    reposition();
+    const raf = requestAnimationFrame(reposition);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
+  }, [open, reposition]);
+
   useEffect(() => {
     function onDown(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-        setSearch('');
-      }
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
+      setSearch('');
     }
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
@@ -65,6 +108,7 @@ export function SearchableSelect({
       {name && <input type="hidden" name={name} value={value} />}
 
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={() => !disabled && setOpen(o => !o)}
@@ -81,10 +125,11 @@ export function SearchableSelect({
         />
       </button>
 
-      {open && (
+      {open && mounted && createPortal(
         <div
-          className="absolute z-[200] left-0 right-0 mt-1 rounded-xl border border-[var(--bd)] shadow-xl overflow-hidden"
-          style={{ background: 'white', maxHeight: 288 }}
+          ref={menuRef}
+          className="fixed rounded-xl border border-[var(--bd)] shadow-xl overflow-hidden"
+          style={{ background: 'white', maxHeight: 288, zIndex: MENU_Z_INDEX, left: pos.left, top: pos.top, width: pos.width }}
         >
           {/* Search row */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--bd)]">
@@ -129,7 +174,8 @@ export function SearchableSelect({
               );
             })}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

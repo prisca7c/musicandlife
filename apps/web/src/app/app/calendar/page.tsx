@@ -458,6 +458,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   // the daily recurrence worker keeps topping up new weeks forever on its own,
   // so there was never a real reason to force picking a stop point up front.
   const [repeatWeeks, setRepeatWeeks] = useState('ongoing');
+  const [customEndDate, setCustomEndDate] = useState('');
   const [result, setResult] = useState<AddResult | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -480,7 +481,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
     setDate(defaultDate ?? ''); setNotes('');
     setSlots([]); setNoWindows(false); setPicks([]); setManualTime(defaultTime ?? '');
     setLetTeacherChoose(true);
-    setRepeat(false); setRepeatWeeks('ongoing'); setResult(null); setError('');
+    setRepeat(false); setRepeatWeeks('ongoing'); setCustomEndDate(''); setResult(null); setError('');
     const t = tok();
     const role = getRoleFromToken(t);
     const teacherSelf = role === 'teacher';
@@ -538,8 +539,15 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   async function ensureEnrollmentId(t?: string): Promise<string> {
     // Find or create a matching enrollment so the lesson carries instrument + type (+ group name).
     const detail = await apiFetch<StudentDetail>(`/students/${studentId}`, { token: t });
+    // Case/whitespace-insensitive, matching the server's own duplicate check
+    // (assertNoDuplicateEnrollment) — an exact string match here missed a real
+    // pre-existing enrollment whenever the two disagreed on casing (e.g. an
+    // imported "Piano" vs. this picker's canonical lowercase "piano"), which
+    // then tried to create a second one and got rejected as a duplicate by
+    // that same server check. Case-insensitive here keeps both sides in sync.
+    const instrumentNorm = instrument.trim().toLowerCase();
     const existing = detail.enrollments.find(
-      en => en.instrument === instrument && en.lessonType === lessonType && en.status !== 'withdrawn'
+      en => en.instrument.trim().toLowerCase() === instrumentNorm && en.lessonType === lessonType && en.status !== 'withdrawn'
         && (lessonType !== 'group' || (en.groupName ?? '') === groupName.trim()),
     );
     if (existing) {
@@ -572,6 +580,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
     if (!studentId) { setError('Please select a student'); return; }
     if (!instrument) { setError('Please select an instrument or group'); return; }
     if (!date) { setError('Please pick a date'); return; }
+    if (repeat && repeatWeeks === 'custom' && !customEndDate) { setError('Please pick an end date, or choose Ongoing instead.'); return; }
 
     // Resolve the chosen time(s). Unassigned lessons use the manual time; every
     // teacher-assigned lesson is picked from their availability slots.
@@ -600,7 +609,17 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
         // keep extending the series forever regardless of what was chosen here.
         const endDate = repeatWeeks === 'ongoing'
           ? undefined
+          : repeatWeeks === 'custom'
+          ? customEndDate
           : studioDayString(new Date(new Date(`${date}T12:00:00Z`).getTime() + (parseInt(repeatWeeks) || 12) * 7 * 86400000));
+        // How many weeks to materialise up front — for 'custom' that's however
+        // many weeks actually fall between the start date and the chosen end
+        // date (the daily worker tops up the rest going forward regardless,
+        // this only sizes the initial visible batch so a near end date doesn't
+        // over-generate and a far one doesn't under-generate).
+        const customWeeks = repeatWeeks === 'custom' && customEndDate
+          ? Math.max(1, Math.ceil((new Date(`${customEndDate}T12:00:00Z`).getTime() - new Date(`${date}T12:00:00Z`).getTime()) / (7 * 86400000)) + 1)
+          : undefined;
         await apiFetch(`/enrollments/${enrollmentId}`, {
           method: 'PATCH', token: t, body: JSON.stringify({ scheduleRule: { weekday, startTime: times[0], endDate } }),
         });
@@ -611,7 +630,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
             // 'ongoing': omit weeks entirely so the API's own default window
             // applies — the series doesn't stop there, the daily worker keeps
             // extending it for as long as the enrolment stays active.
-            weeks: repeatWeeks === 'ongoing' ? undefined : parseInt(repeatWeeks) || undefined,
+            weeks: repeatWeeks === 'ongoing' ? undefined : repeatWeeks === 'custom' ? customWeeks : parseInt(repeatWeeks) || undefined,
             startFrom: date,
           }),
         });
@@ -859,20 +878,28 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
           {repeat && (
             <div className="mt-3">
               <div className="flex items-center gap-2">
-                <span className="text-sm" style={{ color: 'var(--txt3)' }}>Book this slot</span>
+                <span className="text-sm shrink-0" style={{ color: 'var(--txt3)' }}>Book this slot</span>
                 <div className="w-44">
                   <SearchableSelect
                     options={[
                       { value: 'ongoing', label: 'Ongoing (no end date)' },
+                      { value: 'custom', label: 'Until a custom date' },
                       ...[4, 8, 12, 16, 24, 36, 52].map(w => ({ value: String(w), label: `${w} weeks, then stop` })),
                     ]}
                     value={repeatWeeks} onChange={setRepeatWeeks}
                   />
                 </div>
+                {repeatWeeks === 'custom' && (
+                  <input type="date" value={customEndDate} min={date}
+                    onChange={e => setCustomEndDate(e.target.value)}
+                    className="ui-input w-auto" style={{ width: 150 }} />
+                )}
               </div>
               <p className="text-[11px] mt-1.5" style={{ color: 'var(--txt4)' }}>
                 {repeatWeeks === 'ongoing'
                   ? 'Keeps booking every week automatically until someone cancels it.'
+                  : repeatWeeks === 'custom'
+                  ? (customEndDate ? `Books every week through ${customEndDate}, then stops on its own.` : 'Pick the last date this should book through.')
                   : `Books every week for ${repeatWeeks} weeks, then stops on its own.`}
               </p>
             </div>

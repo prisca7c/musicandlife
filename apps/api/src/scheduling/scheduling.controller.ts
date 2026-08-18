@@ -7,6 +7,7 @@ import { GenerateRecurringDto } from './dto/generate-recurring.dto';
 import { CreateRescheduleRequestDto, DecideRescheduleDto } from './dto/reschedule-request.dto';
 import { CreateLessonRequestDto, DecideLessonRequestDto, CounterProposeLessonRequestDto, MoveRecurringSeriesDto } from './dto/lesson-request.dto';
 import { RescheduleLessonDto } from './dto/reschedule-lesson.dto';
+import { RescheduleWeeklyDto } from './dto/reschedule-weekly.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -55,6 +56,15 @@ export class SchedulingController {
   @Roles('teacher')
   getLesson(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.scheduling.getLesson(user.orgId, id, { role: user.role, userId: user.userId });
+  }
+
+  // Change an enrollment's weekly day/time going forward. Cancels the
+  // occurrences it replaces (from now, or from an optional effectiveFrom
+  // date) and regenerates the series at the new slot.
+  @Patch('enrollments/:id/reschedule-weekly')
+  @Roles('admin')
+  rescheduleWeekly(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: RescheduleWeeklyDto) {
+    return this.scheduling.rescheduleWeekly(user.orgId, id, dto);
   }
 
   @Patch('lessons/:id')
