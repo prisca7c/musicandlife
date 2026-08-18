@@ -115,11 +115,6 @@ export class AuthService {
 
     if (!token) throw new UnauthorizedException('Invalid refresh token');
     if (token.revokedAt) throw new UnauthorizedException('Refresh token revoked');
-    if (token.usedAt) {
-      // Reuse detected — revoke whole session
-      await this.revokeSession(token.sessionId);
-      throw new UnauthorizedException('Refresh token reuse detected');
-    }
     if (new Date() > token.expiresAt) throw new UnauthorizedException('Refresh token expired');
 
     // Defence in depth: a live refresh token is only valid while its session is.
@@ -133,10 +128,29 @@ export class AuthService {
       throw new UnauthorizedException('Session no longer valid');
     }
 
-    await this.db.db
+    // Claiming "usedAt" is the atomic step, not a separate read-then-write —
+    // the earlier version read token.usedAt, then wrote it a moment later,
+    // leaving a window where two requests racing on the same still-valid
+    // refresh token (e.g. two tabs both idling past the access token's ~15min
+    // expiry and refreshing within milliseconds of each other) could both
+    // read usedAt as null and both slip through, or one could land in the
+    // window and get falsely flagged as a stolen/reused token — which
+    // revokes the WHOLE session and force-logs the user out of every tab.
+    // Confirmed live: firing two concurrent /auth/refresh calls with the same
+    // token reliably raced past the old check. A single conditional UPDATE
+    // makes "first to claim it wins" atomic at the database level — exactly
+    // one concurrent request can ever succeed.
+    const [claimed] = await this.db.db
       .update(refreshTokens)
       .set({ usedAt: new Date() })
-      .where(eq(refreshTokens.id, token.id));
+      .where(and(eq(refreshTokens.id, token.id), isNull(refreshTokens.usedAt)))
+      .returning();
+
+    if (!claimed) {
+      // Reuse detected — revoke whole session
+      await this.revokeSession(token.sessionId);
+      throw new UnauthorizedException('Refresh token reuse detected');
+    }
 
     const membership = this.pickPrimaryMembership(
       await this.db.db.query.memberships.findMany({
