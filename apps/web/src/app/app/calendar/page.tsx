@@ -35,7 +35,7 @@ interface StudentDetail { id: string; enrollments: Enrollment[]; }
 interface Availability { id: string; staffId: string; weekday: string; startTime: string; endTime: string; }
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
-const PX_PER_HOUR = 88;          // pixel height per 1 hour band
+const PX_PER_HOUR = 100;         // pixel height per 1 hour band
 const DAY_START   = 8;           // 08:00
 const DAY_END     = 21;          // 21:00
 const HOURS       = Array.from({ length: DAY_END - DAY_START }, (_, i) => i + DAY_START);
@@ -134,7 +134,7 @@ function minutesFromDayStart(iso: string): number {
 // ordered chronologically (then alphabetically by student for exact ties) —
 // same ordering `sorted` below already produces, so a cluster's array order
 // *is* its stack order.
-const STACK_ROW_H = 34;  // px per row once a slot is stacked — sized for the compact 2-line block
+const STACK_ROW_H = 40;  // px per row once a slot is stacked — sized for the compact 2-line block
 const STACK_GAP    = 1;  // gap between rows sharing the same/overlapping time — they're one moment, keep them tight
 const CLUSTER_GAP  = 5;  // gap between separate time clusters — visually distinct from the same-time gap above
 
@@ -261,7 +261,22 @@ const INSTR_HUE: Record<string, string> = {
 };
 function instrColor(name?: string | null) { return INSTR_HUE[(name ?? '').toLowerCase()] ?? '#4A5568'; }
 
-// ─── Teacher colours — deterministic hash so each teacher gets a distinct, stable colour ──
+// ─── Teacher colours — fixed, named per real teacher (studio's own colour
+// key), each tuned to sit in the middle of the range: saturated enough to
+// read at a glance, but not so bright it glares or so dark it looks black on
+// the block. Anyone not on this list (a new hire, the QA test account) falls
+// back to the old deterministic palette so they still get a stable, distinct
+// colour rather than breaking. ──────────────────────────────────────────────
+const NAMED_TEACHER_COLORS: Record<string, string> = {
+  dunni: '#8B5E3C',     // brown
+  orlando: '#6B46C1',   // purple
+  yanice: '#B83280',    // pink
+  franklin: '#4A5568',  // grey
+  lily: '#C53030',      // red
+  peter: '#2F855A',     // green
+  theodore: '#C05621',  // yellow/orange
+  christine: '#2B6CB0', // blue
+};
 const TEACHER_PALETTE = [
   '#2B6CB0', '#B7791F', '#553C9A', '#276749', '#C05621',
   '#97266D', '#2C7A7B', '#9B2C2C', '#1A4971', '#6B46C1',
@@ -278,10 +293,14 @@ function colorAtIndex(i: number) {
   return `hsl(${hue}, 55%, 38%)`;
 }
 let teacherColorMap: Record<string, string> = {};
-function setTeacherColorMap(staffList: { id: string }[]) {
+function setTeacherColorMap(staffList: { id: string; firstName: string }[]) {
   const sorted = [...staffList].sort((a, b) => a.id.localeCompare(b.id));
   const map: Record<string, string> = {};
-  sorted.forEach((s, i) => { map[s.id] = colorAtIndex(i); });
+  let fallbackIdx = 0;
+  sorted.forEach((s) => {
+    const named = NAMED_TEACHER_COLORS[s.firstName.trim().toLowerCase()];
+    map[s.id] = named ?? colorAtIndex(fallbackIdx++);
+  });
   teacherColorMap = map;
 }
 function teacherColor(teacherId?: string | null) {
