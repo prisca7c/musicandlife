@@ -56,10 +56,17 @@ export function SearchableSelect({
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
     const menuHeight = menuRef.current?.offsetHeight ?? 288;
+    // The menu renders at its own natural (content-driven) width — see the
+    // `width: max-content` below — not forced to the trigger's width. A
+    // compact trigger like "Ongoing (no end…" is much narrower than its
+    // longest option ("52 weeks, then stop"), and locking the menu to that
+    // width silently clipped option text. offsetWidth here is the ACTUAL
+    // rendered (natural) width, used only to keep the menu on-screen.
+    const menuWidth = menuRef.current?.offsetWidth ?? rect.width;
     const below = rect.bottom + 4 + menuHeight <= window.innerHeight;
     const top = below ? rect.bottom + 4 : Math.max(EDGE_MARGIN, rect.top - menuHeight - 4);
     let left = rect.left;
-    left = Math.max(EDGE_MARGIN, Math.min(left, window.innerWidth - rect.width - EDGE_MARGIN));
+    left = Math.max(EDGE_MARGIN, Math.min(left, window.innerWidth - menuWidth - EDGE_MARGIN));
     setPos({ left, top, width: rect.width });
   }, []);
 
@@ -129,7 +136,10 @@ export function SearchableSelect({
         <div
           ref={menuRef}
           className="fixed rounded-xl border border-[var(--bd)] shadow-xl overflow-hidden"
-          style={{ background: 'white', maxHeight: 288, zIndex: MENU_Z_INDEX, left: pos.left, top: pos.top, width: pos.width }}
+          style={{
+            background: 'white', maxHeight: 288, zIndex: MENU_Z_INDEX, left: pos.left, top: pos.top,
+            minWidth: pos.width, width: 'max-content', maxWidth: 'min(24rem, calc(100vw - 16px))',
+          }}
         >
           {/* Search row */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--bd)]">
@@ -162,7 +172,7 @@ export function SearchableSelect({
                   key={opt.value === '' ? '__empty__' : opt.value}
                   type="button"
                   onClick={() => pick(opt)}
-                  className="w-full text-left px-3 py-[7px] text-sm whitespace-nowrap transition-colors hover:bg-[var(--sage-lt)]"
+                  className="w-full text-left px-3 py-[7px] text-sm truncate transition-colors hover:bg-[var(--sage-lt)]"
                   style={{
                     background: active ? 'var(--sage-lt)' : undefined,
                     color: active ? 'var(--sage-dk)' : opt.value === '' ? 'var(--txt4)' : 'var(--txt)',

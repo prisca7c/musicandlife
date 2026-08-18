@@ -110,7 +110,9 @@ export default async function StaffDetailPage({ params }: { params: Promise<{ id
                     No assigned students.
                   </td></tr>
                 )}
-                {member.assignments.map((a) => (
+                {[...member.assignments].sort((a, b) =>
+                  `${a.student.firstName} ${a.student.lastName}`.localeCompare(`${b.student.firstName} ${b.student.lastName}`),
+                ).map((a) => (
                   <tr key={a.id}>
                     <td>
                       <Link href={`/app/students/${a.student.id}`}
