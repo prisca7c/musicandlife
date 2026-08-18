@@ -12,19 +12,20 @@ export interface InvoicingSettings {
   autoEmailInvoice: boolean;
   invoiceFooterNote: string | null;
   autoInvoice: boolean;
-  invoiceMode: 'monthly_statement' | 'per_lesson' | 'custom';
+  invoiceMode: 'monthly_statement' | 'per_lesson' | 'custom' | null;
   customIntervalValue: number | null;
   customIntervalUnit: 'day' | 'week' | 'month' | 'year' | null;
 }
 
 // Shared by the per-family settings modal and the families-list bulk-apply modal
 export function InvoicingSettingsFields({ defaults }: { defaults: Partial<InvoicingSettings> }) {
-  const [mode, setMode] = useState(defaults.invoiceMode ?? 'monthly_statement');
+  const [mode, setMode] = useState(defaults.invoiceMode ?? '');
   return (
     <>
       <div>
         <label className="ui-label">Invoice mode</label>
         <select name="invoiceMode" value={mode} onChange={e => setMode(e.target.value as typeof mode)} className="ui-input">
+          <option value="">Not set</option>
           <option value="monthly_statement">Monthly</option>
           <option value="per_lesson">Per lesson</option>
           <option value="custom">Custom</option>
@@ -95,7 +96,8 @@ export function InvoicingSettingsFields({ defaults }: { defaults: Partial<Invoic
 }
 
 export function readInvoicingSettingsForm(f: FormData) {
-  const invoiceMode = f.get('invoiceMode') as 'monthly_statement' | 'per_lesson' | 'custom';
+  const raw = f.get('invoiceMode') as string;
+  const invoiceMode = (raw || null) as 'monthly_statement' | 'per_lesson' | 'custom' | null;
   return {
     billingStartDate: (f.get('billingStartDate') as string) || undefined,
     billingMode: f.get('billingMode') as 'prepaid' | 'postpaid',

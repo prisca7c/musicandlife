@@ -10,14 +10,14 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { BackButton } from '@/components/back-button';
-import { Mail, Phone } from 'lucide-react';
+import { Mail, Phone, Home } from 'lucide-react';
 import { InvoicingSettingsFields, readInvoicingSettingsForm } from '@/components/invoicing-settings-fields';
 import { invoiceStatusLabel, invoiceStatusColor } from '@/lib/invoice-status';
 
 interface FamilyDetail {
   id: string; name: string; contactName: string | null; address: string | null;
   phone: string | null; email: string | null; autoInvoice: boolean;
-  invoiceMode: 'monthly_statement' | 'per_lesson' | 'custom'; balanceCached: number;
+  invoiceMode: 'monthly_statement' | 'per_lesson' | 'custom' | null; balanceCached: number;
   customIntervalValue: number | null; customIntervalUnit: 'day' | 'week' | 'month' | 'year' | null;
   billingStartDate: string | null; billingMode: 'prepaid' | 'postpaid';
   invoiceDateOffsetDays: number; dueDateOffsetDays: number;
@@ -288,7 +288,7 @@ function AddStudentModal({ open, onClose, familyId, familyName, onCreated }: {
 
 // Create invoice — family pre-filled
 function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, onCreated }: {
-  open: boolean; onClose: () => void; familyId: string; familyName: string; invoiceMode: string; onCreated: () => void;
+  open: boolean; onClose: () => void; familyId: string; familyName: string; invoiceMode: string | null; onCreated: () => void;
 }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -322,7 +322,7 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="ui-label">Mode</label>
-          <select name="mode" defaultValue={invoiceMode} className="ui-input">
+          <select name="mode" defaultValue={invoiceMode ?? 'monthly_statement'} className="ui-input">
             <option value="monthly_statement">Monthly statement</option>
             <option value="per_lesson">Per lesson</option>
           </select>
@@ -517,7 +517,9 @@ export default function FamilyDetailPage() {
               )}
               {family.address && (
                 <div>
-                  <dt className="mb-1" style={{ color: 'var(--txt3)' }}>Address</dt>
+                  <dt className="mb-1 flex items-center gap-1.5" style={{ color: 'var(--txt3)' }}>
+                    <Home size={13} /> Address
+                  </dt>
                   <dd className="font-medium leading-snug">{family.address}</dd>
                 </div>
               )}
@@ -533,10 +535,10 @@ export default function FamilyDetailPage() {
             <dl className="space-y-3 text-sm">
               <div className="flex justify-between gap-3">
                 <dt style={{ color: 'var(--txt3)' }}>Invoice mode</dt>
-                <dd className="font-medium capitalize">
+                <dd className="font-medium capitalize" style={!family.invoiceMode ? { color: 'var(--txt4)', fontStyle: 'italic' } : undefined}>
                   {family.invoiceMode === 'custom' && family.customIntervalValue && family.customIntervalUnit
                     ? `Every ${family.customIntervalValue} ${family.customIntervalUnit}${family.customIntervalValue !== 1 ? 's' : ''}`
-                    : family.invoiceMode.replace('_', ' ')}
+                    : family.invoiceMode ? family.invoiceMode.replace('_', ' ') : 'Not set'}
                 </dd>
               </div>
               <div className="flex justify-between gap-3">
