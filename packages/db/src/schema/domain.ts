@@ -52,11 +52,13 @@ export const families = pgTable(
     // until the family first asks for their feed.
     calendarToken: text('calendar_token'),
     autoInvoice: boolean('auto_invoice').notNull().default(false),
+    // Nullable: not every family bills monthly, and defaulting this to
+    // 'monthly_statement' for everyone made it look like a deliberate choice
+    // had been made when nobody had actually configured it. Null reads as
+    // "not set yet" — staff pick a mode per family manually.
     invoiceMode: text('invoice_mode', {
       enum: ['monthly_statement', 'per_lesson', 'custom'],
-    })
-      .notNull()
-      .default('monthly_statement'),
+    }),
     // Only meaningful when invoiceMode = 'custom': fire an invoice every
     // customIntervalValue customIntervalUnits (e.g. every 2 weeks), instead of
     // the fixed monthly cadence monthly_statement/per_lesson use.

@@ -9,7 +9,7 @@ import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Modal } from '@/components/modal';
 import { InvoicingSettingsFields, readInvoicingSettingsForm } from '@/components/invoicing-settings-fields';
-import { UsersRound, Search, Settings2, Send } from 'lucide-react';
+import { UsersRound, Search, Settings2, Send, Mail, Phone, Home } from 'lucide-react';
 
 const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
@@ -17,9 +17,12 @@ const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 // mode — the same two-step create-then-send flow the Billing page's "Create
 // invoice" modal uses, just collapsed into one click for the common case.
 async function sendInvoiceTo(family: Family): Promise<void> {
+  // A one-off send doesn't need the family's invoicing settings configured —
+  // fall back to monthly statement for this single invoice without touching
+  // the family's own (possibly still-unset) mode.
   const inv = await apiFetch<{ id: string }>('/invoices', {
     method: 'POST', token: tok(),
-    body: JSON.stringify({ familyId: family.id, mode: family.invoiceMode, itemizeLessons: true }),
+    body: JSON.stringify({ familyId: family.id, mode: family.invoiceMode ?? 'monthly_statement', itemizeLessons: true }),
   });
   await apiFetch(`/invoices/${inv.id}/send`, { method: 'POST', token: tok() });
 }
@@ -35,7 +38,8 @@ const SORTERS: Record<SortKey, (a: Family, b: Family) => number> = {
 
 interface Family {
   id: string; name: string; contactName: string | null; email: string | null;
-  balanceCached: number; invoiceMode: string;
+  phone: string | null; address: string | null;
+  balanceCached: number; invoiceMode: string | null;
   students: { id: string; status: string }[];
 }
 
@@ -51,7 +55,7 @@ function AddFamilyModal({ open, onClose, onCreated }: { open: boolean; onClose: 
       await apiFetch('/families', { method: 'POST', token: tok(), body: JSON.stringify({
         name: f.get('name'), contactName: f.get('contactName') || undefined,
         phone: f.get('phone') || undefined, email: f.get('email') || undefined,
-        address: f.get('address') || undefined, invoiceMode: f.get('invoiceMode'),
+        address: f.get('address') || undefined, invoiceMode: f.get('invoiceMode') || undefined,
       })});
       onCreated(); onClose();
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
@@ -89,7 +93,8 @@ function AddFamilyModal({ open, onClose, onCreated }: { open: boolean; onClose: 
         </div>
         <div>
           <label className="ui-label">Invoice mode</label>
-          <select name="invoiceMode" className="ui-input">
+          <select name="invoiceMode" defaultValue="" className="ui-input">
+            <option value="">Not set — decide later</option>
             <option value="monthly_statement">Monthly statement</option>
             <option value="per_lesson">Per lesson</option>
             <option value="custom">Custom (set the exact cadence after creating)</option>
@@ -280,6 +285,7 @@ export default function FamiliesPage() {
                 <input type="checkbox" checked={selected.size > 0 && selected.size === families.length} onChange={toggleSelectAll} />
               </th>
               <th>Family</th>
+              <th>Contact</th>
               <th>Students</th>
               <th>Balance</th>
               <th>Invoicing</th>
@@ -288,7 +294,7 @@ export default function FamiliesPage() {
           </thead>
           <tbody>
             {families.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No families yet.
               </td></tr>
             )}
@@ -307,6 +313,24 @@ export default function FamiliesPage() {
                     {f.contactName || f.name}
                   </Link>
                 </td>
+                <td className="text-xs leading-tight" style={{ color: 'var(--txt3)' }}>
+                  {f.email && (
+                    <div className="flex items-center gap-1 truncate max-w-[180px]">
+                      <Mail size={11} className="shrink-0" style={{ color: 'var(--txt4)' }} />{f.email}
+                    </div>
+                  )}
+                  {f.phone && (
+                    <div className="flex items-center gap-1">
+                      <Phone size={11} className="shrink-0" style={{ color: 'var(--txt4)' }} />{f.phone}
+                    </div>
+                  )}
+                  {f.address && (
+                    <div className="flex items-center gap-1 truncate max-w-[180px]">
+                      <Home size={11} className="shrink-0" style={{ color: 'var(--txt4)' }} />{f.address}
+                    </div>
+                  )}
+                  {!f.email && !f.phone && !f.address && '—'}
+                </td>
                 <td className="font-medium">{f.students.length}</td>
                 <td>
                   <span style={{ color: f.balanceCached < 0 ? 'var(--coral)' : 'var(--txt2)' }}
@@ -314,8 +338,8 @@ export default function FamiliesPage() {
                     {formatMoney(Math.abs(f.balanceCached))}{f.balanceCached < 0 ? ' owed' : ''}
                   </span>
                 </td>
-                <td className="text-xs capitalize" style={{ color: 'var(--txt3)' }}>
-                  {f.invoiceMode.replace('_', ' ')}
+                <td className="text-xs capitalize" style={{ color: f.invoiceMode ? 'var(--txt3)' : 'var(--txt4)' }}>
+                  {f.invoiceMode ? f.invoiceMode.replace('_', ' ') : <span className="italic">Not set</span>}
                 </td>
                 <td>
                   <SendInvoiceButton family={f} onSent={load} />
