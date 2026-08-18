@@ -284,7 +284,7 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
             {!rateEdited && <span className="text-xs whitespace-nowrap" style={{ color: 'var(--txt4)' }}>auto from T&amp;Cs</span>}
           </div>
           <p className="text-[11px] mt-1" style={{ color: 'var(--txt4)' }}>
-            Filled from the standard T&amp;Cs rate — edit it for special cases (e.g. a group's flat term fee).
+            Filled from the standard T&amp;Cs rate — edit it for special cases (e.g. a group&apos;s flat term fee).
           </p>
         </div>
         <div className="grid grid-cols-2 gap-3">
