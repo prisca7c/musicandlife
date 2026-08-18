@@ -206,7 +206,7 @@ export default function StaffPage() {
         subtitle={`${staff.length} staff member${staff.length !== 1 ? 's' : ''}`}
         action={
           <div className="flex items-center gap-2">
-            <select value={sort} onChange={e => setSort(e.target.value as SortKey)} className="ui-input w-auto">
+            <select value={sort} onChange={e => setSort(e.target.value as SortKey)} className="ui-input shrink-0" style={{ width: 224 }}>
               <option value="name">Sort: Name (A–Z)</option>
               <option value="balance">Sort: Highest payroll balance</option>
               <option value="assigned">Sort: Most assigned students</option>

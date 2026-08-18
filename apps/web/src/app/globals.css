@@ -44,6 +44,13 @@ html, body {
 ::-webkit-scrollbar-thumb { background: var(--bd2); border-radius: 3px; }
 
 /* ── Design System: Form Inputs ─────────────────────────────────────────────── */
+/* This rule is defined after @tailwind utilities above, so its width: 100%
+   beats any Tailwind width utility (w-56, w-auto, ...) added alongside
+   .ui-input on the same element — same specificity, later in the cascade.
+   A sort/filter <select> that needs to stay narrow must override with an
+   inline style={{ width }} instead of a className, or it silently renders at
+   100% of its flex container and blows out the row (seen on the Students/
+   Families/Staff sort dropdowns and the family reschedule time picker). */
 .ui-input {
   width: 100%;
   border: 1.5px solid var(--bd2);

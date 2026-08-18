@@ -62,7 +62,7 @@ export const PRIVATE_INSTRUMENTS = [
 export const GROUP_INSTRUMENTS = [
   'guitar',
   'ukulele',
-  'suzuki violin',
+  'susuki violin',
   'ensemble',
 ] as const;
 

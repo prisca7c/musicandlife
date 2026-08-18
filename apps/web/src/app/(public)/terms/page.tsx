@@ -50,7 +50,7 @@ export default function TermsPage() {
           </p>
 
           <p className="text-sm text-gray-700 mb-2">
-            <strong>Suzuki Violin Package:</strong> This package includes 5 bi-weekly one-hour group lessons each term.
+            <strong>Susuki Violin Package:</strong> This package includes 5 bi-weekly one-hour group lessons each term.
             Term £520 (after 5% discount: Autumn &amp; Summer term: £494, Spring term: £452.85).
           </p>
 
@@ -108,20 +108,20 @@ export default function TermsPage() {
               <h3 className="text-sm font-semibold text-gray-800 mb-1">Autumn Term 2025 — 12 lessons</h3>
               <p className="text-sm text-gray-700">Monday 15 September – Saturday 13 December</p>
               <p className="text-sm text-gray-500">Half-term break: 27 October – 1 November</p>
-              <p className="text-sm text-gray-500">Suzuki Violin Group dates: 4 Oct, 18 Oct, 8 Nov, 22 Nov, 6 Dec</p>
+              <p className="text-sm text-gray-500">Susuki Violin Group dates: 4 Oct, 18 Oct, 8 Nov, 22 Nov, 6 Dec</p>
             </div>
             <div>
               <h3 className="text-sm font-semibold text-gray-800 mb-1">Spring Term 2026 — 11 lessons</h3>
               <p className="text-sm text-gray-700">Monday 5 January – Saturday 28 March</p>
               <p className="text-sm text-gray-500">Half-term break: 16 February – 21 February</p>
-              <p className="text-sm text-gray-500">Suzuki Violin Group dates: 17 Jan, 31 Jan, 14 Feb, 7 Mar, 21 Mar</p>
+              <p className="text-sm text-gray-500">Susuki Violin Group dates: 17 Jan, 31 Jan, 14 Feb, 7 Mar, 21 Mar</p>
             </div>
             <div>
               <h3 className="text-sm font-semibold text-gray-800 mb-1">Summer Term 2026 — 12 lessons</h3>
               <p className="text-sm text-gray-700">Monday 13 April – Saturday 11 July</p>
               <p className="text-sm text-gray-500">Half-term break: 25 May – 30 May</p>
               <p className="text-sm text-gray-500">Please note: lessons scheduled for the bank holiday on Monday 4 May will be moved to Monday 13 July.</p>
-              <p className="text-sm text-gray-500">Suzuki Violin Group dates: 25 Apr, 9 May, 23 May, 13 Jun, 27 Jun</p>
+              <p className="text-sm text-gray-500">Susuki Violin Group dates: 25 Apr, 9 May, 23 May, 13 Jun, 27 Jun</p>
             </div>
           </div>
         </div>

@@ -130,7 +130,7 @@ function StudentRoster({ status }: { status: 'active' | 'trial' }) {
             className="ui-search pl-9"
           />
         </div>
-        <select value={sort} onChange={e => setSort(e.target.value as SortKey)} className="ui-input w-auto shrink-0">
+        <select value={sort} onChange={e => setSort(e.target.value as SortKey)} className="ui-input shrink-0" style={{ width: 224 }}>
           <option value="name">Sort: Name (A–Z)</option>
           <option value="family">Sort: Family</option>
           <option value="nextLesson">Sort: Next lesson</option>

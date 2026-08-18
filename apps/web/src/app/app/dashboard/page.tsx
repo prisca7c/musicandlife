@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useCallback, useLayoutEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
@@ -32,16 +33,57 @@ const QUICK_ACTIONS: { status: AttendanceStatus; label: string }[] = [
 // A small "take attendance right here" menu on each dashboard lesson row, so
 // marking a lesson doesn't require a trip to the full Attendance page for the
 // common case of just marking it present.
+// Above absolutely everything — matches InfoTooltip's own z-index so neither
+// ever loses to the other.
+const MENU_Z_INDEX = 2147483647;
+
 function QuickAttendanceMenu({ lessonId, onMarked }: { lessonId: string; onMarked: (status: AttendanceStatus) => void }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const ref = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+  const [pos, setPos] = useState({ left: 0, top: 0, width: 224 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  useLayoutEffect(() => { setMounted(true); }, []);
+
+  // Portaled to body (see InfoTooltip for why) — this menu lives inside a
+  // scrollable "this week's lessons" card, so an `absolute` dropdown got
+  // clipped by that card's overflow whenever the trigger sat near its bottom
+  // edge (the common case with only one or two lessons), forcing a scroll
+  // inside a tiny box just to see the options.
+  const reposition = useCallback(() => {
+    const btn = btnRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    const menuWidth = menuRef.current?.offsetWidth ?? 224;
+    const menuHeight = menuRef.current?.offsetHeight ?? 0;
+    let left = rect.right - menuWidth;
+    left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8));
+    const below = rect.bottom + 4 + menuHeight <= window.innerHeight;
+    const top = below ? rect.bottom + 4 : rect.top - menuHeight - 4;
+    setPos({ left, top, width: menuWidth });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    reposition();
+    const raf = requestAnimationFrame(reposition);
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
+  }, [open, reposition]);
 
   useEffect(() => {
     function onDown(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (btnRef.current?.contains(e.target as Node)) return;
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
     }
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
@@ -60,8 +102,9 @@ function QuickAttendanceMenu({ lessonId, onMarked }: { lessonId: string; onMarke
   }
 
   return (
-    <div ref={ref} className="relative inline-block">
+    <div className="relative inline-block">
       <button
+        ref={btnRef}
         onClick={() => setOpen(o => !o)}
         disabled={saving}
         title={error || undefined}
@@ -72,9 +115,9 @@ function QuickAttendanceMenu({ lessonId, onMarked }: { lessonId: string; onMarke
       >
         {saving ? 'Saving…' : error ? 'Couldn’t mark' : 'Attendance'} <ChevronDown size={12} />
       </button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 w-56 rounded-xl border bg-white shadow-lg overflow-hidden z-30"
-          style={{ borderColor: 'var(--bd)' }}>
+      {open && mounted && createPortal(
+        <div ref={menuRef} className="fixed w-56 rounded-xl border bg-white shadow-lg overflow-hidden"
+          style={{ borderColor: 'var(--bd)', zIndex: MENU_Z_INDEX, left: pos.left, top: pos.top }}>
           {QUICK_ACTIONS.map(a => (
             <button key={a.status} onClick={() => mark(a.status)}
               className="w-full text-left px-3.5 py-2 text-xs font-medium hover:bg-[var(--sage-lt)] transition-colors flex items-center gap-1.5"
@@ -83,7 +126,8 @@ function QuickAttendanceMenu({ lessonId, onMarked }: { lessonId: string; onMarke
               {a.label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -134,7 +178,7 @@ const INSTR_COLOURS: Record<string, string> = {
   piano:    '#3D7A55', violin:  '#2B6CB0', guitar:  '#B7791F',
   drums:    '#C05621', cello:   '#6B46C1', viola:   '#2C7A7B',
   'bass guitar': '#276749', vocal: '#97266D', ukulele: '#D69E2E',
-  'suzuki violin': '#2B6CB0', ensemble: '#718096',
+  'susuki violin': '#2B6CB0', ensemble: '#718096',
 };
 function instrColour(name: string) {
   return INSTR_COLOURS[name.toLowerCase()] ?? '#4A5568';

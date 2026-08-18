@@ -568,7 +568,7 @@ export default function FamilyDashboardPage() {
                       aria-label={`${ordinal} time`}
                       value={reschedTimes[i]}
                       onChange={(e) => setReschedTimes((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
-                      className="ui-input w-32 shrink-0"
+                      className="ui-input shrink-0" style={{ width: 128 }}
                     >
                       <option value="">Time…</option>
                       {RESCHED_TIME_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
