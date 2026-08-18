@@ -208,7 +208,7 @@ async function main() {
   const tom = await upsertTeacher(orgId, {
     email: 'qa3.teacher@lirico.test',
     firstName: 'Tom', lastName: 'Beck (TEST)',
-    instruments: ['violin', 'cello', 'suzuki violin'],
+    instruments: ['violin', 'cello', 'susuki violin'],
     hourlyRate: 4000,
     availability: [
       { weekday: 'tuesday', startTime: '14:00', endTime: '19:00' },
@@ -239,7 +239,7 @@ async function main() {
     rate: 5250, duration: 45, weekday: 'thursday', startTime: '17:00',
   });
   await upsertEnrollment(orgId, kenji.id, {
-    instrument: 'suzuki violin', lessonType: 'group', groupName: 'Suzuki Group A (TEST)',
+    instrument: 'susuki violin', lessonType: 'group', groupName: 'Susuki Group A (TEST)',
     teacherId: tom.id, rate: 2500, duration: 60, weekday: 'tuesday', startTime: '17:00',
   });
 
@@ -266,8 +266,8 @@ async function main() {
 
   console.log(`\n✓ Done. All accounts use the password: ${PASSWORD}\n`);
   console.log('  qa2.teacher@lirico.test   Mari Ono (TEST)      piano, guitar');
-  console.log('  qa3.teacher@lirico.test   Tom Beck (TEST)      violin, cello, suzuki violin');
-  console.log('  qa2.parent@lirico.test    Nakamura family      Hana (piano+violin), Kenji (guitar+suzuki group)');
+  console.log('  qa3.teacher@lirico.test   Tom Beck (TEST)      violin, cello, susuki violin');
+  console.log('  qa2.parent@lirico.test    Nakamura family      Hana (piano+violin), Kenji (guitar+susuki group)');
   console.log('  qa3.parent@lirico.test    Adeyemi family       Tunde (cello+piano)');
   console.log('  qa2.student@lirico.test   Hana Nakamura (TEST)  student login in a family WITH a balance');
   console.log('  qa3.student@lirico.test   Tunde Adeyemi (TEST) student-portal login');

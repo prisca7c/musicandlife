@@ -93,7 +93,7 @@ const INSTRUMENT_ICON_MAP: Record<string, (props: IconProps) => ReactNode> = {
   drums: (p) => <Drum {...p} />,
   vocal: (p) => <MicVocal {...p} />,
   violin: (p) => <ViolinIcon {...p} />,
-  'suzuki violin': (p) => <ViolinIcon {...p} />,
+  'susuki violin': (p) => <ViolinIcon {...p} />,
   viola: (p) => <ViolaIcon {...p} />,
   cello: (p) => <CelloIcon {...p} />,
   'bass guitar': (p) => <BassGuitarIcon {...p} />,

@@ -162,7 +162,7 @@ export default function RegisterPage() {
   // The instruments offered are editable from Settings, so they're fetched
   // rather than compiled in. The build-time constants stay as the fallback: if
   // this call fails the form still renders a usable list instead of nothing.
-  // `notes` explains anything a chip label can't: Suzuki violin, for instance,
+  // `notes` explains anything a chip label can't: Susuki violin, for instance,
   // is a package of a group class and a 1-on-1 rather than one or the other.
   const [offered, setOffered] = useState<Offered>({
     private: [...PRIVATE_INSTRUMENTS],
@@ -734,7 +734,7 @@ export default function RegisterPage() {
                 <input type="checkbox" checked={tcAccepted} readOnly className="mt-px h-4 w-4 rounded shrink-0" style={{ accentColor: 'var(--sage)' }} />
                 <span className="text-sm text-[var(--txt2)] leading-relaxed">
                   I have read and agree to the{' '}
-                  <Link href="/terms" target="_blank" className="text-[var(--sky)] font-semibold hover:underline">Terms &amp; Conditions</Link>,
+                  <a href="https://www.musicandlife.co.uk/terms-conditions" target="_blank" rel="noopener noreferrer" className="text-[var(--sky)] font-semibold hover:underline">Terms &amp; Conditions</a>,
                   including the fees, cancellation policy, and make-up lesson policy.
                 </span>
               </label>

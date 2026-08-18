@@ -42,7 +42,7 @@ function randInt(min: number, max: number) { return min + Math.floor(rand() * (m
 function shuffle<T>(arr: T[]): T[] { return arr.map(a => [rand(), a] as const).sort((a, b) => a[0] - b[0]).map(a => a[1]); }
 
 const PRIVATE_INSTR = ['guitar','piano','violin','drums','bass guitar','cello','viola','vocal'] as const;
-const GROUP_INSTR = ['guitar','ukulele','suzuki violin','ensemble'] as const;
+const GROUP_INSTR = ['guitar','ukulele','susuki violin','ensemble'] as const;
 
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];

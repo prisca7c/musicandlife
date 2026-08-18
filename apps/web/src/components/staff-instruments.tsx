@@ -11,7 +11,7 @@ import { Check } from 'lucide-react';
 const INSTR_HUE: Record<string, string> = {
   piano: '#3D7A55', violin: '#2B6CB0', guitar: '#B7791F', drums: '#C05621',
   cello: '#553C9A', viola: '#2C7A7B', 'bass guitar': '#276749', vocal: '#97266D',
-  ukulele: '#D69E2E', 'suzuki violin': '#2B6CB0', ensemble: '#718096',
+  ukulele: '#D69E2E', 'susuki violin': '#2B6CB0', ensemble: '#718096',
 };
 function instrColor(name: string) { return INSTR_HUE[name] ?? '#4A5568'; }
 
