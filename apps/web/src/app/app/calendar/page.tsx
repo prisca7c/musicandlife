@@ -135,7 +135,7 @@ function minutesFromDayStart(iso: string): number {
 // ordered chronologically (then alphabetically by student for exact ties) —
 // same ordering `sorted` below already produces, so a cluster's array order
 // *is* its stack order.
-const STACK_ROW_H = 40;  // px per row once a slot is stacked — sized for the compact 2-line block
+const STACK_ROW_H = 50;  // px per row once a slot is stacked — sized for the compact 2-line block (larger text)
 const STACK_GAP    = 1;  // gap between rows sharing the same/overlapping time — they're one moment, keep them tight
 const CLUSTER_GAP  = 5;  // gap between separate time clusters — visually distinct from the same-time gap above
 
@@ -379,13 +379,13 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
       className="absolute rounded-lg border cursor-pointer text-left overflow-hidden transition-all hover:brightness-95 hover:shadow-md group z-10 flex items-stretch gap-0.5 px-1"
     >
       {/* Left rail: attendance status, paid status stacked underneath */}
-      <span className="flex flex-col items-center justify-center shrink-0 w-3 gap-0.5">
+      <span className="flex flex-col items-center justify-center shrink-0 w-4 gap-0.5">
         <span title={present.title}>
-          <present.Icon size={10} style={{ color: present.color }} aria-label={present.title} />
+          <present.Icon size={13} style={{ color: present.color }} aria-label={present.title} />
         </span>
         {paid && (
           <span title={paid.title}>
-            <PoundSterling size={9} style={{ color: paid.color }} aria-label={paid.title} />
+            <PoundSterling size={12} style={{ color: paid.color }} aria-label={paid.title} />
           </span>
         )}
       </span>
@@ -393,23 +393,23 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
       {/* Middle: two compact lines — time + name, then instrument/group + teacher */}
       <span className="flex-1 min-w-0 flex flex-col justify-center gap-0.5 py-0.5">
         <span className="flex items-baseline gap-1 min-w-0">
-          <span className="text-[8px] font-bold leading-none tabular-nums shrink-0" style={{ color: tColor, opacity: 0.7 }}>
+          <span className="text-[12px] font-bold leading-none tabular-nums shrink-0" style={{ color: tColor, opacity: 0.7 }}>
             {fmtTime(lesson.startsAt)}
           </span>
-          <span className="text-[11px] font-bold leading-tight truncate" style={{ color: tColor, textDecoration: cancelled ? 'line-through' : undefined }}>
+          <span className="text-[16px] font-bold leading-tight truncate" style={{ color: tColor, textDecoration: cancelled ? 'line-through' : undefined }}>
             {lesson.student?.firstName} {lesson.student?.lastName}
           </span>
         </span>
         <span className="flex items-center gap-1 min-w-0">
-          {instr && <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={9} /></span>}
+          {instr && <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={13} /></span>}
           {secondaryLabel && (
-            <span className="text-[9px] font-semibold capitalize truncate" style={{ color: iColor }}>
+            <span className="text-[13px] font-semibold capitalize truncate" style={{ color: iColor }}>
               {secondaryLabel}
             </span>
           )}
-          {isSub && <Shuffle size={8} className="shrink-0" style={{ color: tColor }} aria-label="Substitute teacher" />}
+          {isSub && <Shuffle size={12} className="shrink-0" style={{ color: tColor }} aria-label="Substitute teacher" />}
           {lesson.teacher && (
-            <span className="text-[9px] leading-tight truncate" style={{ color: tColor, opacity: 0.7 }}>
+            <span className="text-[13px] leading-tight truncate" style={{ color: tColor, opacity: 0.7 }}>
               · {lesson.teacher.firstName} {lesson.teacher.lastName}
             </span>
           )}
@@ -1561,9 +1561,18 @@ export default function CalendarPage() {
     .sort((a, b) => a.name.localeCompare(b.name));
 
   // Recompute the per-teacher colour map whenever the staff set changes.
+  // teacherColorMap itself is a plain module-level object (read by LessonBlock
+  // and other non-hook helpers scattered through this file), so mutating it
+  // alone doesn't trigger a re-render — the very first paint runs before
+  // `staff` has loaded, shows every teacher via the id-hash fallback colour
+  // (e.g. Dunni as red instead of her named brown), and stays wrong until some
+  // unrelated state change happens to force a re-render. Bumping this counter
+  // right after the mutation is what actually makes the correct colours paint.
   const staffIdsKey = staff.map(s => s.id).join(',');
+  const [, forceColorRepaint] = useState(0);
   useEffect(() => {
     setTeacherColorMap(staff);
+    forceColorRepaint(v => v + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [staffIdsKey]);
 
@@ -1768,31 +1777,30 @@ export default function CalendarPage() {
           )}
 
           {/* Teacher + student filters. Applied on the client, so the option
-              lists stay complete regardless of what's currently selected. */}
+              lists stay complete regardless of what's currently selected.
+              Searchable — a plain <select> was unusable once the roster grew
+              past a couple dozen names, since scrolling a native dropdown to
+              find one name among hundreds is painfully slow. */}
           {showFilters && (
             <>
-              <select
-                value={filterTeacherId}
-                onChange={e => setFilterTeacherId(e.target.value)}
-                className="text-xs rounded-lg border px-2 py-1.5 ml-1 bg-white"
-                style={{ borderColor: 'var(--bd2)', color: filterTeacherId ? 'var(--txt)' : 'var(--txt4)' }}
-              >
-                <option value="">All teachers</option>
-                {staff.map(s => (
-                  <option key={s.id} value={s.id}>{s.firstName} {s.lastName}</option>
-                ))}
-              </select>
-              <select
-                value={filterStudentId}
-                onChange={e => setFilterStudentId(e.target.value)}
-                className="text-xs rounded-lg border px-2 py-1.5 bg-white"
-                style={{ borderColor: 'var(--bd2)', color: filterStudentId ? 'var(--txt)' : 'var(--txt4)' }}
-              >
-                <option value="">All students</option>
-                {studentOptions.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+              <div className="ml-1" style={{ width: 150 }}>
+                <SearchableSelect
+                  value={filterTeacherId}
+                  onChange={setFilterTeacherId}
+                  emptyLabel="All teachers"
+                  placeholder="All teachers"
+                  options={staff.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+                />
+              </div>
+              <div style={{ width: 150 }}>
+                <SearchableSelect
+                  value={filterStudentId}
+                  onChange={setFilterStudentId}
+                  emptyLabel="All students"
+                  placeholder="All students"
+                  options={studentOptions.map(s => ({ value: s.id, label: s.name }))}
+                />
+              </div>
               {(filterTeacherId || filterStudentId) && (
                 <button onClick={() => { setFilterTeacherId(''); setFilterStudentId(''); }}
                   className="ui-btn-ghost text-xs px-2 py-1.5" title="Clear filters">
