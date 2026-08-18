@@ -20,6 +20,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, UserPlus, Users, Check, X, Repe
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string; notes: string | null;
+  enrollmentId?: string | null;
   student: { id: string; firstName: string; lastName: string } | null;
   teacher: { id: string; firstName: string; lastName: string } | null;
   attendance: { status: string } | null;
@@ -1078,6 +1079,9 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
   const [showReschedule, setShowReschedule] = useState(false);
   const [newDate, setNewDate] = useState('');
   const [newTime, setNewTime] = useState('');
+  const [applyToSeries, setApplyToSeries] = useState(false);
+  const [seriesFromMode, setSeriesFromMode] = useState<'now' | 'custom'>('now');
+  const [seriesFromDate, setSeriesFromDate] = useState('');
   const [actionError, setActionError] = useState('');
   const [showSub, setShowSub] = useState(false);
   const [subTeacherId, setSubTeacherId] = useState('');
@@ -1089,6 +1093,7 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
 
   useEffect(() => {
     setShowReschedule(false); setActionError(''); setShowSub(false); setSubTeacherId(''); setShowClone(false);
+    setApplyToSeries(false); setSeriesFromMode('now'); setSeriesFromDate('');
     if (lesson) {
       // Prefill date + time in the studio zone so they match what's shown elsewhere
       // and round-trip correctly (the backend interprets the naive value as studio-local).
@@ -1151,11 +1156,27 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
 
   async function rescheduleLesson() {
     if (!newDate || !newTime) return;
+    if (applyToSeries && seriesFromMode === 'custom' && !seriesFromDate) {
+      setActionError('Pick a date for the change to take effect from, or choose "From now" instead.');
+      return;
+    }
     setSaving(true); setActionError('');
     try {
-      await apiFetch(`/lessons/${lesson!.id}/reschedule`, {
-        method: 'POST', token: tok(), body: JSON.stringify({ startsAt: `${newDate}T${newTime}:00` }),
-      });
+      if (applyToSeries && lesson!.enrollmentId) {
+        // Same weekly-move mechanism as the student profile's "Reschedule"
+        // action — the new date's weekday becomes the series' new weekday.
+        const weekday = WEEKDAY_KEYS[(new Date(`${newDate}T12:00:00Z`).getUTCDay() + 6) % 7];
+        await apiFetch(`/enrollments/${lesson!.enrollmentId}/reschedule-weekly`, {
+          method: 'PATCH', token: tok(), body: JSON.stringify({
+            weekday, startTime: newTime,
+            effectiveFrom: seriesFromMode === 'custom' ? seriesFromDate : undefined,
+          }),
+        });
+      } else {
+        await apiFetch(`/lessons/${lesson!.id}/reschedule`, {
+          method: 'POST', token: tok(), body: JSON.stringify({ startsAt: `${newDate}T${newTime}:00` }),
+        });
+      }
       onUpdated(); onClose();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Could not reschedule lesson');
@@ -1362,6 +1383,29 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
               <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} className="ui-input" />
               <input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} className="ui-input" />
             </div>
+            {lesson.enrollmentId && (
+              <div className="space-y-2 pt-1 border-t" style={{ borderColor: 'var(--bd)' }}>
+                <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--txt2)' }}>
+                  <input type="checkbox" checked={applyToSeries} onChange={e => setApplyToSeries(e.target.checked)} />
+                  Apply this day/time to all future lessons in this series too
+                </label>
+                {applyToSeries && (
+                  <div className="pl-6 space-y-2">
+                    <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--txt3)' }}>
+                      <input type="radio" checked={seriesFromMode === 'now'} onChange={() => setSeriesFromMode('now')} />
+                      From now
+                    </label>
+                    <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--txt3)' }}>
+                      <input type="radio" checked={seriesFromMode === 'custom'} onChange={() => setSeriesFromMode('custom')} />
+                      From a custom date
+                    </label>
+                    {seriesFromMode === 'custom' && (
+                      <input type="date" value={seriesFromDate} onChange={e => setSeriesFromDate(e.target.value)} className="ui-input" style={{ width: 160 }} />
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="flex gap-2">
               <button onClick={rescheduleLesson} disabled={saving} className="ui-btn-primary text-sm">
                 {saving ? 'Saving…' : 'Confirm reschedule'}
@@ -1628,10 +1672,16 @@ export default function CalendarPage() {
     return lessons.filter(l => studioDayString(l.startsAt) === dayStr && (l.teacher?.id ?? null) === teacherId);
   }
 
-  // Week view: merged "someone is available" bands for a given weekday column.
+  // Week view: "someone is available" bands for a given weekday column —
+  // merged across every teacher for the ambient/unfiltered view, but scoped
+  // to just that one teacher's own windows once the teacher filter is set
+  // (previously stayed merged even with one teacher picked, so filtering to
+  // e.g. Dunni still showed everyone else's hours blended into hers).
   function weekAvailabilityBands(dayIndex: number): { top: number; height: number }[] {
     const key = WEEKDAY_KEYS[dayIndex];
-    const wins = availability.filter(a => a.weekday === key);
+    const wins = filterTeacherId
+      ? availability.filter(a => a.staffId === filterTeacherId && a.weekday === key)
+      : availability.filter(a => a.weekday === key);
     return mergeWindows(wins)
       .map(([s, e]) => elasticBandBox(s, e, weekHourHeights, weekOffsets))
       .filter((b): b is { top: number; height: number } => b !== null);
@@ -1907,7 +1957,7 @@ export default function CalendarPage() {
                   {/* Availability bands — shaded hours a teacher is free to teach.
                       Admin only sees these for today (the "today section"); a
                       teacher sees their own windows on any day. */}
-                  {(role === 'teacher' || isToday) && weekAvailabilityBands(di).map((b, bi) => (
+                  {(role === 'teacher' || isToday || !!filterTeacherId) && weekAvailabilityBands(di).map((b, bi) => (
                     <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
                       style={{ top: b.top, height: b.height, background: hexToRgba('#3D7A55', 0.09), borderLeft: '2px solid rgba(61,122,85,0.35)' }} />
                   ))}
@@ -2005,7 +2055,7 @@ export default function CalendarPage() {
                       {/* Availability bands — this teacher's free-to-teach hours, in their
                           colour. Admin only sees these for today; a teacher always sees
                           their own. */}
-                      {(role === 'teacher' || isAnchorToday) && teacherAvailabilityBands(col.id).map((b, bi) => (
+                      {(role === 'teacher' || isAnchorToday || !!filterTeacherId) && teacherAvailabilityBands(col.id).map((b, bi) => (
                         <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
                           style={{ top: b.top, height: b.height, background: hexToRgba(teacherColor(col.id), 0.1), borderLeft: `2px solid ${hexToRgba(teacherColor(col.id), 0.4)}` }}>
                           <span className="absolute left-1.5 top-1 text-[8px] font-bold uppercase tracking-wide pointer-events-none"
