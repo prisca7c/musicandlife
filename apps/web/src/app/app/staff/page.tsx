@@ -227,13 +227,14 @@ export default function StaffPage() {
               <th>Instruments</th>
               <th>Lesson length</th>
               <th>Assigned students</th>
+              <th>Pay rate</th>
               <th>Payroll balance</th>
               <th>Status</th>
             </tr>
           </thead>
           <tbody>
             {staff.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={8} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No staff yet.
               </td></tr>
             )}
@@ -256,6 +257,9 @@ export default function StaffPage() {
                 <td className="capitalize" style={{ color: 'var(--txt3)' }}>{s.instruments.join(', ') || '—'}</td>
                 <td style={{ color: 'var(--txt3)' }}>{s.defaultDuration} min</td>
                 <td style={{ color: 'var(--txt3)' }}>{s.assignments.length}</td>
+                <td style={{ color: 'var(--txt3)' }}>
+                  {s.hourlyRate === null ? <span style={{ color: 'var(--txt4)' }}>—</span> : `${formatMoney(s.hourlyRate)}/hr`}
+                </td>
                 <td className="font-medium">
                   {/* Orlando & Yanice Bonzi are paid outside payroll — null rather
                       than a misleading £0.00 that reads as "unpaid". */}

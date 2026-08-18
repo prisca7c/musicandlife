@@ -24,11 +24,13 @@ export class StudentsController {
   findAll(
     @CurrentUser() user: RequestUser,
     @Query('search') search?: string,
+    @Query('status') status?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
     return this.students.findAll(user.orgId, user.userId, user.role, {
       search,
+      status,
       page: parsePage(limit, offset),
     });
   }

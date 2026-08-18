@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 const VARIANTS: Record<string, string> = {
   active:                  'bg-[var(--sage-lt)] text-[var(--sage-dk)] border border-[var(--sage-md)]',
   trial:                   'bg-[var(--sky-lt)] text-[var(--sky)] border border-[var(--sky-md)]',
+  waiting:                 'bg-[var(--amber-lt)] text-[var(--amber)] border border-[var(--amber-md)]',
   paused:                  'bg-[var(--amber-lt)] text-[var(--amber)] border border-[var(--amber-md)]',
   withdrawn:               'bg-[var(--surf)] text-[var(--txt4)] border border-[var(--bd2)]',
   inactive:                'bg-[var(--surf)] text-[var(--txt4)] border border-[var(--bd2)]',

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, FormEvent } from 'react';
+import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
@@ -357,20 +358,41 @@ function ImportCsvPanel() {
   );
 }
 
+interface WaitingStudent {
+  id: string; firstName: string; lastName: string;
+  family: { id: string; name: string; contactName: string | null; email: string | null; phone: string | null } | null;
+  enrollments?: { instrument: string; teacher: { firstName: string; lastName: string } | null }[];
+}
+
 export default function IntakePage() {
-  const [tab, setTab] = useState<'registrations' | 'leads' | 'import'>('registrations');
+  const [tab, setTab] = useState<'registrations' | 'waiting' | 'leads' | 'import'>('registrations');
   const [regFilter, setRegFilter] = useState('pending');
   const [selectedReg, setSelectedReg] = useState<Registration | null>(null);
   const [showAddLead, setShowAddLead] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [promoting, setPromoting] = useState<string | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   // Cached reads. Registrations re-key on the status filter; both refresh via
   // their mutate() after a decision or lead update.
   const { data: registrations = [], mutate: mutateRegs } = useApi<Registration[]>(`/registrations?status=${regFilter}`);
   const { data: leads = [], mutate: mutateLeads } = useApi<Lead[]>('/leads');
+  const { data: waitingData, mutate: mutateWaiting } = useApi<{ data: WaitingStudent[] }>('/students?status=waiting&limit=200&offset=0');
+  const waiting = waitingData?.data ?? [];
   const loadRegistrations = () => mutateRegs();
   const loadLeads = () => mutateLeads();
+
+  // The waiting list is the studio's own "hasn't been scheduled a trial yet"
+  // bucket — promoting one just flips status to trial, same one-click pattern
+  // as the roster's own trial→active promote button.
+  async function promoteToTrial(id: string) {
+    setPromoting(id);
+    try {
+      await apiFetch(`/students/${id}`, { method: 'PATCH', token: tok(), body: JSON.stringify({ status: 'trial' }) });
+      mutateWaiting();
+    } catch { /* leave as-is on failure */ }
+    finally { setPromoting(null); }
+  }
 
   async function updateLeadStatus(id: string, status: 'new' | 'contacted' | 'converted' | 'lost') {
     setUpdatingId(id);
@@ -388,12 +410,13 @@ export default function IntakePage() {
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">
-            New students
-            <InfoTooltip text="Everyone on their way to becoming a student. 'Enquiries' are people you're following up; 'Sign-ups' are families who completed the form and are waiting for you to approve them into full student accounts. Existing students live under Students." />
+            Pending
+            <InfoTooltip text="Everyone on their way to becoming a student. 'Sign-ups' are families who completed the form and are waiting for you to approve them into full student accounts. 'Waiting list' is students who haven't been officially scheduled for a trial lesson yet. 'Enquiries' are people you're following up. Active and trial students live under their own tabs." />
           </span>
         }
         subtitle={
           tab === 'registrations' && regFilter === 'pending' && pending > 0 ? `${pending} pending review` :
+          tab === 'waiting' ? `${waiting.length} waiting` :
           tab === 'leads' ? `${leads.length} lead${leads.length !== 1 ? 's' : ''}` : undefined
         }
         action={
@@ -405,14 +428,14 @@ export default function IntakePage() {
 
       {/* Tab bar */}
       <div className="flex gap-1 mb-5 border-b" style={{ borderColor: 'var(--bd)' }}>
-        {(['registrations', 'leads', 'import'] as const).map(t => (
+        {(['registrations', 'waiting', 'leads', 'import'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
             className="px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors"
             style={{
               borderColor: tab === t ? 'var(--sage)' : 'transparent',
               color: tab === t ? 'var(--sage)' : 'var(--txt3)',
             }}>
-            {t === 'registrations' ? 'Sign-ups' : t === 'leads' ? 'Enquiries & Waitlist' : 'Import (CSV)'}
+            {t === 'registrations' ? 'Sign-ups' : t === 'waiting' ? 'Waiting list' : t === 'leads' ? 'Enquiries & Waitlist' : 'Import (CSV)'}
           </button>
         ))}
       </div>
@@ -477,6 +500,52 @@ export default function IntakePage() {
             </table>
           </div>
         </>
+      )}
+
+      {tab === 'waiting' && (
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Family / Contact</th>
+                <th>Instrument</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {waiting.length === 0 && (
+                <tr><td colSpan={4} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+                  No one on the waiting list.
+                </td></tr>
+              )}
+              {waiting.map(s => (
+                <tr key={s.id}>
+                  <td className="font-semibold">
+                    <Link href={`/app/students/${s.id}`} className="hover:underline" style={{ color: 'var(--sage-dk)' }}>
+                      {s.firstName} {s.lastName}
+                    </Link>
+                  </td>
+                  <td>
+                    <div style={{ color: 'var(--txt2)' }}>{s.family?.contactName || s.family?.name || '—'}</div>
+                    <div className="text-xs mt-0.5" style={{ color: 'var(--txt4)' }}>{s.family?.email}</div>
+                  </td>
+                  <td className="text-xs capitalize" style={{ color: 'var(--txt3)' }}>
+                    {s.enrollments?.map(e => e.instrument).join(', ') || '—'}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button onClick={() => promoteToTrial(s.id)} disabled={promoting === s.id}
+                      className="text-sm font-semibold hover:underline disabled:opacity-50"
+                      style={{ color: 'var(--sage)' }}
+                      title="Move this student from the waiting list to Trial once their trial lesson is scheduled">
+                      {promoting === s.id ? 'Moving…' : 'Move to Trial'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {tab === 'leads' && (
