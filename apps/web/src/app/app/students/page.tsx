@@ -8,7 +8,6 @@ import { AutomatedHint } from '@/components/automated-hint';
 import { LoadState } from '@/components/load-state';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
-import { Badge } from '@/components/badge';
 import { fmtDate } from '@/lib/datetime';
 import { UserPlus, Search } from 'lucide-react';
 import { AddStudentModal } from '@/components/add-student-modal';
@@ -61,10 +60,10 @@ const SORTERS: Record<SortKey, (a: Student, b: Student) => number> = {
 
 const PAGE_SIZE = 50;
 
-// The roster itself — split out so the default export below can put it behind
-// a "Students" tab alongside "New students" (sign-ups/enquiries/import, moved
-// here from its own sidebar entry so both live under one "Students" section).
-function StudentRoster() {
+// The roster itself, filtered to one status at a time — the "Active" and
+// "Trial" tabs on the page below each render this scoped to their own status,
+// rather than one mixed list with inline status badges.
+function StudentRoster({ status }: { status: 'active' | 'trial' }) {
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -76,7 +75,7 @@ function StudentRoster() {
   // page you already loaded) renders instantly from cache, then revalidates in
   // the background. keepPreviousData keeps the current rows on screen while a
   // new search/page loads instead of flashing empty.
-  const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
+  const params = new URLSearchParams({ status, limit: String(PAGE_SIZE), offset: String(offset) });
   if (search) params.set('search', search);
   const key = `/students?${params.toString()}`;
   const { data, error, isLoading, mutate } = useApi<{ data: Student[]; total: number }>(key);
@@ -104,7 +103,7 @@ function StudentRoster() {
       <AddStudentModal open={showAdd} onClose={() => setShowAdd(false)} onCreated={() => mutate()} />
       <PageHeader
         title={
-          <span className="inline-flex items-center gap-2">Students</span>
+          <span className="inline-flex items-center gap-2">{status === 'active' ? 'Active students' : 'Trial students'}</span>
         }
         subtitle={`${total} student${total !== 1 ? 's' : ''}`}
         action={
@@ -166,16 +165,15 @@ function StudentRoster() {
               <tr key={s.id}>
                 <td>
                   {/* Status lives on the detail page now — this list is a quick
-                      scan across many students, not a place to manage state. A
-                      trial student is still flagged inline since promoting one
-                      is a common, one-click action worth keeping visible. */}
+                      scan, not a place to manage state. A trial student gets a
+                      one-click promote button since that's a common action. */}
                   <span className="inline-flex items-center gap-2">
                     <Link href={`/app/students/${s.id}`}
                       className="font-semibold hover:underline"
                       style={{ color: 'var(--sage-dk)' }}>
                       {s.firstName} {s.lastName}
                     </Link>
-                    {s.status === 'trial' && (
+                    {status === 'trial' && (
                       <button
                         onClick={() => convertToActive(s.id)}
                         disabled={converting === s.id}
@@ -185,9 +183,6 @@ function StudentRoster() {
                       >
                         {converting === s.id ? 'Converting…' : 'Trial'}
                       </button>
-                    )}
-                    {s.status !== 'trial' && s.status !== 'active' && (
-                      <Badge variant={s.status}>{s.status}</Badge>
                     )}
                   </span>
                 </td>
@@ -248,29 +243,32 @@ function StudentRoster() {
   );
 }
 
-// New students (sign-ups/enquiries/import) is admin-only, matching /app/intake's
-// own access rule — a teacher just gets the roster with no tab bar at all.
+// Pending (sign-ups awaiting approval, the waiting list, enquiries and CSV
+// import) is admin-only, matching /app/intake's own access rule — a teacher
+// just gets the active roster with no tab bar at all.
 export default function StudentsPage() {
   const role = useRole();
-  const [tab, setTab] = useState<'roster' | 'new'>('roster');
+  const [tab, setTab] = useState<'active' | 'trial' | 'pending'>('active');
 
-  if (role !== 'admin') return <StudentRoster />;
+  if (role !== 'admin') return <StudentRoster status="active" />;
 
   return (
     <div>
       <div className="flex gap-1 mb-5 border-b" style={{ borderColor: 'var(--bd)' }}>
-        {(['roster', 'new'] as const).map(t => (
+        {(['active', 'trial', 'pending'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className="px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors"
+            className="px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px capitalize transition-colors"
             style={{
               borderColor: tab === t ? 'var(--sage)' : 'transparent',
               color: tab === t ? 'var(--sage)' : 'var(--txt3)',
             }}>
-            {t === 'roster' ? 'Students' : 'New students'}
+            {t}
           </button>
         ))}
       </div>
-      {tab === 'roster' ? <StudentRoster /> : <IntakePage />}
+      {tab === 'active' && <StudentRoster status="active" />}
+      {tab === 'trial' && <StudentRoster status="trial" />}
+      {tab === 'pending' && <IntakePage />}
     </div>
   );
 }

@@ -21,7 +21,7 @@ export class CreateStudentDto {
   email?: string;
 
   @IsOptional()
-  @IsIn(['trial', 'active', 'paused', 'withdrawn'])
+  @IsIn(['waiting', 'trial', 'active', 'paused', 'withdrawn'])
   status?: 'trial' | 'active' | 'paused' | 'withdrawn';
 
   @IsOptional()

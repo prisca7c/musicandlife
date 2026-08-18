@@ -52,11 +52,14 @@ export class StudentsService {
     orgId: string,
     userId: string,
     role: BaseRole,
-    opts: { search?: string; page?: PageParams | null } = {},
+    opts: { search?: string; status?: string; page?: PageParams | null } = {},
   ) {
-    const { search, page = null } = opts;
+    const { search, status, page = null } = opts;
     const searchClause: SQL | undefined = search
       ? or(ilike(students.firstName, `%${search}%`), ilike(students.lastName, `%${search}%`))
+      : undefined;
+    const statusClause: SQL | undefined = status
+      ? eq(students.status, status as 'waiting' | 'trial' | 'active' | 'paused' | 'withdrawn')
       : undefined;
 
     // Build the WHERE once so the count and the page share identical filtering.
@@ -67,9 +70,9 @@ export class StudentsService {
       if (ids.length === 0) {
         return page ? { data: [], total: 0, limit: page.limit, offset: page.offset } : [];
       }
-      whereClause = and(eq(students.organizationId, orgId), inArray(students.id, ids), searchClause);
+      whereClause = and(eq(students.organizationId, orgId), inArray(students.id, ids), searchClause, statusClause);
     } else {
-      whereClause = and(eq(students.organizationId, orgId), searchClause);
+      whereClause = and(eq(students.organizationId, orgId), searchClause, statusClause);
     }
 
     // Instruments + teachers shown in the list come from the student's

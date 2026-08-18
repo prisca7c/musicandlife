@@ -122,7 +122,9 @@ export const students = pgTable(
     dob: date('dob'),
     email: text('email'),
     studentUserId: uuid('student_user_id').references(() => users.id),
-    status: text('status', { enum: ['trial', 'active', 'paused', 'withdrawn'] })
+    // 'waiting' = hasn't been officially scheduled for a trial lesson yet — the
+    // studio's own waiting list, distinct from 'trial' (already scheduled/underway).
+    status: text('status', { enum: ['waiting', 'trial', 'active', 'paused', 'withdrawn'] })
       .notNull()
       .default('active'),
     notes: text('notes'),
@@ -225,7 +227,7 @@ export const enrollments = pgTable(
     defaultDuration: integer('default_duration').notNull().default(60),
     scheduleRule: jsonb('schedule_rule'),
     autoRenew: boolean('auto_renew').notNull().default(true),
-    status: text('status', { enum: ['trial', 'active', 'paused', 'withdrawn'] })
+    status: text('status', { enum: ['waiting', 'trial', 'active', 'paused', 'withdrawn'] })
       .notNull()
       .default('active'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

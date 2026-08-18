@@ -68,6 +68,6 @@ export class CreateEnrollmentDto {
   autoRenew?: boolean;
 
   @IsOptional()
-  @IsIn(['trial', 'active', 'paused', 'withdrawn'])
+  @IsIn(['waiting', 'trial', 'active', 'paused', 'withdrawn'])
   status?: 'trial' | 'active' | 'paused' | 'withdrawn';
 }
