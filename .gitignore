@@ -41,3 +41,4 @@ coverage/
 # production. Keep them local; promote anything reusable to a named, reviewed
 # script instead.
 packages/db/_*.mjs
+.db-backups/
