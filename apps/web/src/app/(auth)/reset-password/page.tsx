@@ -83,12 +83,12 @@ function ResetPasswordInner() {
           <>
             <div className="mb-6">
               <h1 className="text-[22px] font-extrabold tracking-tight" style={{ color: 'var(--txt)' }}>Set new password</h1>
-              <p className="text-sm mt-1" style={{ color: 'var(--txt3)' }}>Choose a strong password of at least 8 characters.</p>
+              <p className="text-sm mt-1" style={{ color: 'var(--txt3)' }}>Choose a password.</p>
             </div>
             <form onSubmit={handleReset} className="space-y-5">
               <div>
                 <label className="ui-label">New password <span style={{ color: 'var(--coral)' }}>*</span></label>
-                <input name="password" type="password" required minLength={8} placeholder="Min. 8 characters" className="ui-input" />
+                <input name="password" type="password" required className="ui-input" />
               </div>
               <button type="submit" disabled={loading} className="ui-btn-primary w-full justify-center py-3 text-[15px]" style={{ borderRadius: 12 }}>
                 {loading ? 'Resetting…' : 'Reset password'}
