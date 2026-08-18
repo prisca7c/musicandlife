@@ -22,6 +22,7 @@ export interface RouteAccess { href: string; roles: BaseRole[]; }
 export const ROUTE_ACCESS: RouteAccess[] = [
   { href: '/app/dashboard',             roles: ['admin', 'teacher'] },
   { href: '/app/family/dashboard',      roles: ['guardian', 'student'] },
+  { href: '/app/family/schedule',       roles: ['guardian', 'student'] },
   { href: '/app/family/book',           roles: ['guardian', 'student'] },
   { href: '/app/family/history',        roles: ['guardian', 'student'] },
   { href: '/app/family/notes',          roles: ['guardian', 'student'] },
