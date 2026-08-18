@@ -79,7 +79,7 @@ export default function ReconciliationPage() {
   }
 
   return (
-    <div className="p-6 max-w-6xl">
+    <div>
       <SectionTabs items={SECTION_ITEMS} />
       <PageHeader
         title="Payments &amp; reconciliation"
