@@ -10,7 +10,8 @@ import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { SearchableSelect } from '@/components/searchable-select';
 import { useInstruments } from '@/lib/use-instruments';
-import { Plus, CircleCheck, CircleX, Upload } from 'lucide-react';
+import { EditStudentModal } from '@/components/edit-student-modal';
+import { Plus, CircleCheck, CircleX, Upload, Pencil, Trash2 } from 'lucide-react';
 
 interface Registration {
   id: string; status: string; submittedAt: string; denyReason: string | null;
@@ -372,6 +373,10 @@ export default function IntakePage() {
   const [showAddLead, setShowAddLead] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [promoting, setPromoting] = useState<string | null>(null);
+  const [editingWaitingId, setEditingWaitingId] = useState<string | null>(null);
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
+  const [selectedWaiting, setSelectedWaiting] = useState<Set<string>>(new Set());
+  const [bulkWithdrawing, setBulkWithdrawing] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   // Cached reads. Registrations re-key on the status filter; both refresh via
@@ -395,6 +400,42 @@ export default function IntakePage() {
     finally { setPromoting(null); }
   }
 
+  async function withdrawWaitingOne(id: string, name: string) {
+    if (!confirm(`Withdraw ${name}? This removes them from the waiting list and ends any enrollment. This cannot be undone from here — re-enroll them to bring them back.`)) return;
+    setWithdrawingId(id);
+    try {
+      await apiFetch(`/students/${id}`, { method: 'DELETE', token: tok() });
+      mutateWaiting();
+      setSelectedWaiting(prev => { const next = new Set(prev); next.delete(id); return next; });
+    } catch (e) { alert(e instanceof Error ? e.message : 'Could not withdraw this student'); }
+    finally { setWithdrawingId(null); }
+  }
+
+  async function withdrawWaitingSelected() {
+    const targets = waiting.filter(s => selectedWaiting.has(s.id));
+    if (targets.length === 0) return;
+    if (!confirm(`Withdraw ${targets.length} student${targets.length !== 1 ? 's' : ''} from the waiting list? This cannot be undone from here.`)) return;
+    setBulkWithdrawing(true);
+    for (const s of targets) {
+      try { await apiFetch(`/students/${s.id}`, { method: 'DELETE', token: tok() }); }
+      catch { /* one failure shouldn't stop the rest */ }
+    }
+    setBulkWithdrawing(false);
+    setSelectedWaiting(new Set());
+    mutateWaiting();
+  }
+
+  function toggleWaitingSelected(id: string) {
+    setSelectedWaiting(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function toggleWaitingSelectAll() {
+    setSelectedWaiting(prev => prev.size === waiting.length ? new Set() : new Set(waiting.map(s => s.id)));
+  }
+
   async function updateLeadStatus(id: string, status: 'new' | 'contacted' | 'converted' | 'lost') {
     setUpdatingId(id);
     try { await apiFetch(`/leads/${id}`, { method: 'PATCH', token: tok(), body: JSON.stringify({ status }) }); loadLeads(); }
@@ -407,6 +448,7 @@ export default function IntakePage() {
     <div>
       <RegistrationDetailModal reg={selectedReg} open={!!selectedReg} onClose={() => setSelectedReg(null)} onDecision={loadRegistrations} />
       <AddLeadModal open={showAddLead} onClose={() => setShowAddLead(false)} onCreated={loadLeads} />
+      <EditStudentModal open={!!editingWaitingId} onClose={() => setEditingWaitingId(null)} studentId={editingWaitingId} onSaved={() => mutateWaiting()} />
 
       <PageHeader
         title={
@@ -423,6 +465,10 @@ export default function IntakePage() {
         action={
           tab === 'leads'
             ? <button onClick={() => setShowAddLead(true)} className="ui-btn-primary"><Plus size={15} /> Add lead</button>
+            : tab === 'waiting' && selectedWaiting.size > 0
+            ? <button onClick={withdrawWaitingSelected} disabled={bulkWithdrawing} className="ui-btn-ghost" style={{ color: 'var(--coral)' }}>
+                <Trash2 size={15} /> {bulkWithdrawing ? 'Withdrawing…' : `Withdraw (${selectedWaiting.size})`}
+              </button>
             : undefined
         }
       />
@@ -508,20 +554,27 @@ export default function IntakePage() {
           <table className="data-table">
             <thead>
               <tr>
+                <th>
+                  <input type="checkbox" checked={selectedWaiting.size > 0 && selectedWaiting.size === waiting.length} onChange={toggleWaitingSelectAll} />
+                </th>
                 <th>Student</th>
                 <th>Family / Contact</th>
                 <th>Instrument</th>
+                <th></th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {waiting.length === 0 && (
-                <tr><td colSpan={4} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+                <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                   No one on the waiting list.
                 </td></tr>
               )}
               {waiting.map(s => (
                 <tr key={s.id}>
+                  <td>
+                    <input type="checkbox" checked={selectedWaiting.has(s.id)} onChange={() => toggleWaitingSelected(s.id)} />
+                  </td>
                   <td className="font-semibold">
                     <Link href={`/app/students/${s.id}`} className="hover:underline" style={{ color: 'var(--sage-dk)' }}>
                       {s.firstName} {s.lastName}
@@ -541,6 +594,18 @@ export default function IntakePage() {
                       title="Move this student from the waiting list to Trial once their trial lesson is scheduled">
                       {promoting === s.id ? 'Moving…' : 'Move to Trial'}
                     </button>
+                  </td>
+                  <td>
+                    <div className="flex items-center gap-2.5">
+                      <button onClick={() => setEditingWaitingId(s.id)} title="Edit student" style={{ color: 'var(--sage-dk)' }}>
+                        <Pencil size={14} />
+                      </button>
+                      <button onClick={() => withdrawWaitingOne(s.id, `${s.firstName} ${s.lastName}`)}
+                        disabled={withdrawingId === s.id} title="Withdraw student" style={{ color: 'var(--coral)' }}
+                        className="disabled:opacity-50">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
