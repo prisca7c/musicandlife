@@ -992,18 +992,18 @@ export class BillingService {
         // prior payment instead of inserting again (closes that race since the
         // locked family row serialises concurrent calls through here).
         //
-        // A payment WITH a providerRef (Mollie, or any future gateway) is
-        // different: dto.providerRef is independently verified by re-fetching
-        // from the provider (see MollieService.handleWebhook), and it already
-        // passed the fast-path dedupeKey check above — meaning THIS is a
-        // genuinely different, real, distinct transaction, not a retry of the
-        // one that just paid the invoice. Two open tabs / two devices can each
-        // complete a real card charge before either webhook lands; the second
-        // charge is real money the family's card was actually billed. Treating
-        // it as "already paid, discard" here silently dropped that charge with
-        // NO payment row, NO ledger entry, and NO record anywhere that a second
-        // payment ever happened — the money vanished from the app's books while
-        // still sitting captured in Mollie's dashboard. It must still be
+        // A payment WITH a providerRef (a card gateway, if one is ever added
+        // back) is different: dto.providerRef is independently verified by
+        // re-fetching from the provider, and it already passed the fast-path
+        // dedupeKey check above — meaning THIS is a genuinely different, real,
+        // distinct transaction, not a retry of the one that just paid the
+        // invoice. Two open tabs / two devices can each complete a real card
+        // charge before either webhook lands; the second charge is real money
+        // the family's card was actually billed. Treating it as "already paid,
+        // discard" here silently dropped that charge with NO payment row, NO
+        // ledger entry, and NO record anywhere that a second payment ever
+        // happened — the money vanished from the app's books while still
+        // sitting captured at the gateway. It must still be
         // recorded (as a credit to the family's balance, same as any
         // overpayment) even though the invoice itself is already settled; the
         // status-flip logic further below already no-ops once status is 'paid',
