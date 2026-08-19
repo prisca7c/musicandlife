@@ -424,7 +424,8 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
 interface SlotsResponse { date: string; weekday: string; noWindows: boolean; slots: string[]; }
 type AddResult =
   | { kind: 'weekly'; created: number; through: string }
-  | { kind: 'request'; teacherName: string; count: number };
+  | { kind: 'request'; teacherName: string; count: number }
+  | { kind: 'single'; lessonId: string; studentName: string };
 
 function to12h(hhmm: string): string {
   const [h, m] = hhmm.split(':').map(Number);
@@ -468,6 +469,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   const [result, setResult] = useState<AddResult | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [undoing, setUndoing] = useState(false);
   const [isTeacher, setIsTeacher] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
   const orgInstruments = useInstruments();
@@ -660,14 +662,16 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
         })});
         setResult({ kind: 'request', teacherName, count: times.length });
       } else {
-        await apiFetch('/lessons', { method: 'POST', token: t, body: JSON.stringify({
+        const created = await apiFetch<{ id: string }>('/lessons', { method: 'POST', token: t, body: JSON.stringify({
           studentId, teacherId: teacherId || undefined,
           enrollmentId,
           startsAt: `${date}T${times[0]}:00`,
           duration: parseInt(duration) || 60,
           notes: notes || undefined,
         })});
-        onCreated(); onClose();
+        onCreated();
+        const studentName = studentsList.find(s => s.id === studentId);
+        setResult({ kind: 'single', lessonId: created.id, studentName: studentName ? `${studentName.firstName} ${studentName.lastName}` : 'the student' });
       }
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
     finally { setSaving(false); }
@@ -700,6 +704,11 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
                   <p>No new lessons were booked — they may already exist for this weekly slot.</p>
                 )}
               </>
+            ) : result.kind === 'single' ? (
+              <>
+                <p className="font-bold text-base mb-1">Lesson booked ✓</p>
+                <p>Booked for <strong>{result.studentName}</strong>. Made a mistake? You can undo this right away.</p>
+              </>
             ) : (
               <>
                 <p className="font-bold text-base mb-1">Sent to {result.teacherName} ✓</p>
@@ -709,6 +718,19 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
             )}
           </div>
           <div className="flex gap-3">
+            {result.kind === 'single' && (
+              <button type="button" disabled={undoing} onClick={async () => {
+                setUndoing(true);
+                try {
+                  await apiFetch(`/lessons/${result.lessonId}`, { method: 'DELETE', token: tok() });
+                  onCreated(); onClose();
+                } catch (e) { setError(e instanceof Error ? e.message : 'Could not undo — the lesson is still booked.'); }
+                finally { setUndoing(false); }
+              }} className="text-sm flex-1 rounded-[9px] px-3 py-2 font-semibold transition-colors disabled:opacity-50"
+                style={{ border: '1.5px solid var(--coral)', color: 'var(--coral)', background: '#fff' }}>
+                {undoing ? 'Undoing…' : 'Undo'}
+              </button>
+            )}
             <button type="button" onClick={onClose} className="ui-btn-primary">Done</button>
           </div>
         </div>
