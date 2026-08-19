@@ -21,6 +21,7 @@ import { SchedulingService } from '../scheduling/scheduling.service';
 import { FilesService } from '../files/files.service';
 import { invoices } from '@music-life/db';
 import { getOrgTimezone, formatInZone } from '../common/timezone';
+import { brandedEmail, detailsBlock } from '../email/branding';
 import type { RequestUser } from '@music-life/types';
 
 // Shape of the entries stored in notes.attachments (see NotesController).
@@ -842,32 +843,38 @@ export class FamilyPortalController {
     const tz = await getOrgTimezone(this.db.db, orgId);
     const dateStr = formatInZone(lesson.startsAt, tz, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const timeStr = formatInZone(lesson.startsAt, tz, { hour: '2-digit', minute: '2-digit' });
+    const endStr = formatInZone(new Date(lesson.startsAt.getTime() + lesson.duration * 60000), tz, { hour: '2-digit', minute: '2-digit' });
     const teacherName = `${teacher.firstName} ${teacher.lastName}`;
     const studentName = `${student.firstName} ${student.lastName}`;
-    const trialNote = isTrial ? '<p><strong>This is a trial lesson.</strong></p>' : '';
 
     // The student name (and instrument) are family/guardian-supplied and this
     // body is sent as raw HTML to the teacher AND every org admin, so escape
     // them to prevent stored HTML injection into a staff inbox. dateStr/timeStr
-    // come from formatInZone and duration is numeric — no user content there.
+    // come from formatInZone — no user content there.
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-    const html = `
-      <h2 style="color:#2A5A3D">Lesson Confirmed</h2>
-      ${trialNote}
-      <p>A ${isTrial ? 'trial ' : ''}lesson has been booked:</p>
-      <table>
-        <tr><td><strong>Student:</strong></td><td>${esc(studentName)}</td></tr>
-        <tr><td><strong>Teacher:</strong></td><td>${esc(teacherName)}</td></tr>
-        <tr><td><strong>Instrument:</strong></td><td style="text-transform:capitalize">${esc(instrument)}</td></tr>
-        <tr><td><strong>Date:</strong></td><td>${dateStr}</td></tr>
-        <tr><td><strong>Time:</strong></td><td>${timeStr}</td></tr>
-        <tr><td><strong>Duration:</strong></td><td>${lesson.duration} minutes</td></tr>
-      </table>
-      <p style="color:#888;font-size:12px;margin-top:24px">Music &amp; Life</p>
-    `;
+    const trialNote = isTrial
+      ? '<p style="margin:0 0 14px"><strong>This is a trial lesson.</strong></p>'
+      : '';
+    const bodyHtml = `<p style="margin:0 0 4px">Hi there,</p>` +
+      `<p style="margin:0 0 4px">A ${isTrial ? 'trial ' : ''}lesson has been booked and confirmed. Here are the details:</p>` +
+      trialNote +
+      detailsBlock([
+        { label: 'Student', value: esc(studentName) },
+        { label: 'Teacher', value: esc(teacherName) },
+        { label: 'Instrument', value: `<span style="text-transform:capitalize">${esc(instrument)}</span>` },
+        { label: 'Date', value: dateStr },
+        { label: 'Time', value: `${timeStr}&ndash;${endStr}` },
+      ]);
 
-    const subject = `Lesson confirmed — ${studentName} with ${teacherName} on ${dateStr}`;
+    const html = brandedEmail({
+      previewText: `${studentName}'s lesson with ${teacherName} on ${dateStr}`,
+      heading: 'Lesson confirmed',
+      bodyHtml,
+      footnote: 'Need to change anything? Just reply to this email and we will help.',
+    });
+
+    const subject = `Lesson confirmed: ${studentName} with ${teacherName} on ${dateStr}`;
     const recipients: string[] = [];
 
     if (student.family?.email) recipients.push(student.family.email);

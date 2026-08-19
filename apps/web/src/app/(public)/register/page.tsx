@@ -219,6 +219,7 @@ export default function RegisterPage() {
         next.guardianFirstName = next.studentFirstName;
         next.guardianLastName = next.studentLastName;
         next.contactEmail = next.studentEmail;
+        next.contactPhone = next.studentPhone;
         next.familyType = 'new';
       }
       return next;
@@ -231,8 +232,12 @@ export default function RegisterPage() {
     if (s === 1) {
       if (!data.studentFirstName.trim()) e.studentFirstName = 'Please enter first name';
       if (!data.studentLastName.trim()) e.studentLastName = 'Please enter last name';
-      if (data.isAdult && (!data.studentEmail.trim() || !data.studentEmail.includes('@'))) {
-        e.studentEmail = 'Please enter a valid email — this becomes your portal login';
+      if (data.isAdult) {
+        if (!data.studentEmail.trim() || !data.studentEmail.includes('@')) {
+          e.studentEmail = 'Please enter a valid email — this becomes your portal login';
+        }
+        if (!data.studentPhone.trim()) e.studentPhone = 'Please enter a phone number';
+        if (!data.address.trim()) e.address = 'Please enter your address';
       }
     }
     if (s === 2 && data.familyType === 'new') {
@@ -277,6 +282,7 @@ export default function RegisterPage() {
         studentFirstName: data.studentFirstName,
         studentLastName: data.studentLastName,
         studentEmail: data.studentEmail || undefined,
+        studentPhone: data.studentPhone || undefined,
         familyName: data.familyType === 'existing' && selectedFamily
           ? selectedFamily.name
           : `${data.guardianFirstName} ${data.guardianLastName}`,
@@ -448,18 +454,6 @@ export default function RegisterPage() {
                 </Field>
               </div>
               <div className="h-px bg-[var(--bd)] my-5" />
-              <SectionHead>Student contact <span className="normal-case tracking-normal text-[11px] font-normal">(optional — for students 16+)</span></SectionHead>
-              <Field label="Email" optional>
-                <InputWithIcon icon={<Mail size={16} />}
-                  type="email" placeholder="student@email.com" autoComplete="email"
-                  value={data.studentEmail} onChange={e => set({ studentEmail: e.target.value })} />
-              </Field>
-              <Field label="Phone" optional>
-                <InputWithIcon icon={<Phone size={16} />}
-                  type="tel" placeholder="07700900000" autoComplete="tel" digitsOnly
-                  value={data.studentPhone} onChange={e => set({ studentPhone: e.target.value })} />
-              </Field>
-              <div className="h-px bg-[var(--bd)] my-5" />
               <label className="flex items-start gap-2.5 cursor-pointer rounded-xl border-[1.5px] p-3 transition-colors"
                 style={{ borderColor: data.isAdult ? 'var(--sage)' : 'var(--bd2)', background: data.isAdult ? 'var(--sage-lt)' : 'transparent' }}>
                 <input type="checkbox" className="mt-0.5 h-4 w-4 rounded" style={{ accentColor: 'var(--sage)' }}
@@ -469,15 +463,51 @@ export default function RegisterPage() {
                     I&apos;m an adult and this registration is for myself
                   </span>
                   <span className="block text-[11px] mt-0.5" style={{ color: 'var(--txt3)' }}>
-                    Skips the separate parent/guardian step — the email above becomes your one portal login for both billing and lessons.
+                    Skips the separate parent/guardian step — fill in your contact details below instead.
                   </span>
                 </span>
               </label>
+              <div className="h-px bg-[var(--bd)] my-5" />
+              {data.isAdult ? (
+                <>
+                  <SectionHead>Your contact details</SectionHead>
+                  <Field label="Email" required error={errors.studentEmail}
+                    helper="Becomes your portal login, for invoices, lesson reminders, and booking.">
+                    <InputWithIcon icon={<Mail size={16} />} type="email" placeholder="you@email.com"
+                      error={!!errors.studentEmail} autoComplete="email"
+                      value={data.studentEmail} onChange={e => set({ studentEmail: e.target.value })} />
+                  </Field>
+                  <Field label="Phone" required error={errors.studentPhone}>
+                    <InputWithIcon icon={<Phone size={16} />} type="tel" placeholder="07700900000"
+                      error={!!errors.studentPhone} autoComplete="tel" digitsOnly
+                      value={data.studentPhone} onChange={e => set({ studentPhone: e.target.value })} />
+                  </Field>
+                  <Field label="Home address" required error={errors.address}>
+                    <InputWithIcon icon={<MapPin size={16} />} type="text" placeholder="123 High Street, Pinner, HA5 5PJ"
+                      error={!!errors.address} autoComplete="street-address"
+                      value={data.address} onChange={e => set({ address: e.target.value })} />
+                  </Field>
+                </>
+              ) : (
+                <>
+                  <SectionHead>Student contact <span className="normal-case tracking-normal text-[11px] font-normal">(optional — for students 16+)</span></SectionHead>
+                  <Field label="Email" optional>
+                    <InputWithIcon icon={<Mail size={16} />}
+                      type="email" placeholder="student@email.com" autoComplete="email"
+                      value={data.studentEmail} onChange={e => set({ studentEmail: e.target.value })} />
+                  </Field>
+                  <Field label="Phone" optional>
+                    <InputWithIcon icon={<Phone size={16} />}
+                      type="tel" placeholder="07700900000" autoComplete="tel" digitsOnly
+                      value={data.studentPhone} onChange={e => set({ studentPhone: e.target.value })} />
+                  </Field>
+                </>
+              )}
             </div>
             <div className="px-7 py-4 border-t border-[var(--bd)] flex items-center justify-between">
               <span className="text-xs text-[var(--txt4)] font-medium">Step 1 of 4</span>
-              <button onClick={() => next(2)} className="flex items-center gap-1.5 bg-[var(--sage)] text-white rounded-[10px] px-6 py-2.5 text-sm font-bold hover:bg-[var(--sage-dk)] transition-colors ml-auto">
-                Next: Family info <ArrowRight size={16} />
+              <button onClick={() => next(data.isAdult ? 3 : 2)} className="flex items-center gap-1.5 bg-[var(--sage)] text-white rounded-[10px] px-6 py-2.5 text-sm font-bold hover:bg-[var(--sage-dk)] transition-colors ml-auto">
+                {data.isAdult ? 'Next: Instruments' : 'Next: Family info'} <ArrowRight size={16} />
               </button>
             </div>
           </>
@@ -696,7 +726,7 @@ export default function RegisterPage() {
               </div>
             </div>
             <div className="px-7 py-4 border-t border-[var(--bd)] flex items-center justify-between">
-              <button onClick={() => setStep(2)} className="flex items-center gap-1.5 border-[1.5px] border-[var(--bd2)] rounded-[10px] px-5 py-2.5 text-sm font-semibold text-[var(--txt2)] hover:bg-[var(--surf)] transition-colors">
+              <button onClick={() => setStep(data.isAdult ? 1 : 2)} className="flex items-center gap-1.5 border-[1.5px] border-[var(--bd2)] rounded-[10px] px-5 py-2.5 text-sm font-semibold text-[var(--txt2)] hover:bg-[var(--surf)] transition-colors">
                 <ArrowLeft size={16} /> Back
               </button>
               <span className="text-xs text-[var(--txt4)] font-medium">Step 3 of 4</span>
@@ -744,7 +774,7 @@ export default function RegisterPage() {
                   <p className="text-[11px] font-bold text-[var(--txt4)] uppercase tracking-[0.09em]">
                     <Users size={12} className="inline mr-1 mb-px" />Family / Guardian
                   </p>
-                  <button onClick={() => setStep(2)} className="text-[11px] font-semibold text-[var(--sky)] hover:underline">Edit</button>
+                  <button onClick={() => setStep(data.isAdult ? 1 : 2)} className="text-[11px] font-semibold text-[var(--sky)] hover:underline">Edit</button>
                 </div>
                 {data.familyType === 'existing' && selectedFamily ? (
                   <>

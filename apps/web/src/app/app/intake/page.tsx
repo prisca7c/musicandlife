@@ -16,7 +16,7 @@ import { Plus, CircleCheck, CircleX, Upload, Pencil, Trash2 } from 'lucide-react
 interface Registration {
   id: string; status: string; submittedAt: string; denyReason: string | null;
   payload: {
-    studentFirstName: string; studentLastName: string; studentEmail?: string;
+    studentFirstName: string; studentLastName: string; studentEmail?: string; studentPhone?: string;
     familyName: string; contactName: string; contactEmail: string; contactPhone?: string;
     instruments: { instrument: string; lessonType: string }[];
     notes?: string;
@@ -78,6 +78,7 @@ function RegistrationDetailModal({ reg, open, onClose, onDecision }: {
           {[
             { label: 'Student', value: `${p.studentFirstName} ${p.studentLastName}` },
             ...(p.studentEmail ? [{ label: 'Student email', value: p.studentEmail }] : []),
+            ...(p.studentPhone ? [{ label: 'Student phone', value: p.studentPhone }] : []),
             { label: 'Family', value: p.familyName },
             { label: 'Contact', value: p.contactName },
             { label: 'Email', value: hasEmail ? p.contactEmail : 'None on file' },

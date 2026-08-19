@@ -97,24 +97,26 @@ ${preview}
         ${foot}
         ${signature}
       </td></tr>
-      <!-- footer -->
-      <!-- footer: solid pine, so the email reads green even in a client that
-           blocks the logo image -->
-      <tr><td align="center" style="background:${BRAND.pine};padding:26px 24px 28px;text-align:center">
-        <p style="margin:0 0 8px;font-family:${FONT};font-size:15px;line-height:22px;font-weight:700;letter-spacing:.5px;color:#ffffff">
+      <!-- hairline rule separating body from footer -->
+      <tr><td style="padding:0 36px"><div style="height:1px;background:${BRAND.line}"></div></td></tr>
+      <!-- footer: same warm cream as the header instead of a solid dark
+           block, with pine text/links — same brand, lighter close to the
+           page. -->
+      <tr><td align="center" style="background:${BRAND.paper};padding:22px 24px 26px;text-align:center">
+        <p style="margin:0 0 8px;font-family:${FONT};font-size:14px;line-height:20px;font-weight:700;letter-spacing:.3px;color:${BRAND.pine}">
           Music &amp; Life London
         </p>
-        <p style="margin:0 0 6px;font-family:${FONT};font-size:13px;line-height:21px;color:rgba(255,255,255,0.82)">
-          <a href="mailto:${BRAND.supportEmail}" style="color:#ffffff;text-decoration:none">${BRAND.supportEmail}</a>
+        <p style="margin:0 0 6px;font-family:${FONT};font-size:12.5px;line-height:20px;color:${BRAND.muted}">
+          <a href="mailto:${BRAND.supportEmail}" style="color:${BRAND.moss};text-decoration:none">${BRAND.supportEmail}</a>
           &nbsp;&nbsp;&middot;&nbsp;&nbsp; ${BRAND.phone}
         </p>
-        <p style="margin:0 0 12px;font-family:${FONT};font-size:13px;line-height:21px;color:rgba(255,255,255,0.82)">
+        <p style="margin:0 0 10px;font-family:${FONT};font-size:12.5px;line-height:20px;color:${BRAND.muted}">
           ${BRAND.address}
         </p>
-        <p style="margin:0;font-family:${FONT};font-size:12px;line-height:20px">
-          <a href="${BRAND.website}" style="color:#ffffff;text-decoration:underline">musicandlife.co.uk</a>
+        <p style="margin:0;font-family:${FONT};font-size:11.5px;line-height:19px">
+          <a href="${BRAND.website}" style="color:${BRAND.moss};text-decoration:underline">musicandlife.co.uk</a>
           &nbsp;&middot;&nbsp;
-          <a href="${BRAND.portalUrl}" style="color:#ffffff;text-decoration:underline">Your portal</a>
+          <a href="${BRAND.portalUrl}" style="color:${BRAND.moss};text-decoration:underline">Your portal</a>
         </p>
       </td></tr>
     </table>

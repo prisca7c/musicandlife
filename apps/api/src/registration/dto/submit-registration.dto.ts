@@ -37,6 +37,11 @@ export class SubmitRegistrationDto {
   @MaxLength(255)
   studentEmail?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  studentPhone?: string;
+
   // Family
   @IsString()
   @MinLength(1)
