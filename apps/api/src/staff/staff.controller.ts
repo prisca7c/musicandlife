@@ -126,10 +126,13 @@ export class StaffController {
     return this.staff.create(user.orgId, dto);
   }
 
+  // Teacher-or-above: a teacher may load this for their own id only (the
+  // service enforces that), so their own portal can show the same enriched
+  // "Assigned Students" data admin sees on a teacher's staff page.
   @Get(':id')
-  @Roles('admin')
+  @Roles('teacher')
   findOne(@CurrentUser() user: RequestUser, @Param('id') id: string) {
-    return this.staff.findOne(user.orgId, id);
+    return this.staff.findOne(user.orgId, id, user.role === 'teacher' ? { userId: user.userId } : undefined);
   }
 
   @Patch(':id')

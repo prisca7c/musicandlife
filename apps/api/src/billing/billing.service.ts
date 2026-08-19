@@ -80,7 +80,13 @@ export class BillingService {
         ? and(eq(invoices.organizationId, orgId), eq(invoices.familyId, familyId))
         : eq(invoices.organizationId, orgId),
       with: { family: { columns: { id: true, name: true } } },
-      orderBy: (i, { desc }) => [desc(i.issuedOn)],
+      // Newest invoice first, not oldest — issuedOn is a bare date, so a batch
+      // of invoices generated the same day sorted by it alone had no reliable
+      // order among themselves. createdAt is a real timestamp that always
+      // agrees with invoice number order (numbers are assigned sequentially at
+      // creation), without the pitfall of comparing "INV-0001" style numbers
+      // as strings once the count passes 4 digits.
+      orderBy: (i, { desc }) => [desc(i.createdAt)],
     });
   }
 

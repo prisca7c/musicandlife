@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
-import { eq, and, gte, inArray } from 'drizzle-orm';
+import { eq, and, gte, inArray, sql } from 'drizzle-orm';
 import {
   staffMembers, staffPrivileges, teacherAssignments,
   users, memberships, passwordResetTokens, availability, blockedTime, students, lessons, enrollments,
+  invoiceLineItems, invoices,
 } from '@music-life/db';
 import { DEFAULT_TEACHER_PRIVILEGES } from '@music-life/types';
 import { randomBytes, createHash } from 'crypto';
@@ -22,14 +23,38 @@ export class StaffService {
   ) {}
 
   async findAll(orgId: string) {
-    return this.db.db.query.staffMembers.findMany({
+    const rows = await this.db.db.query.staffMembers.findMany({
       where: and(eq(staffMembers.organizationId, orgId), eq(staffMembers.status, 'active')),
       with: {
         user: { columns: { id: true, email: true } },
         privileges: { columns: { privileges: true } },
-        assignments: { columns: { id: true } },
+        assignments: { columns: { id: true, studentId: true } },
       },
       orderBy: (s, { asc }) => [asc(s.firstName), asc(s.lastName)],
+    });
+
+    // A student can be linked to a teacher either through teacherAssignments
+    // (the "Assign students" picker) or purely through an enrolment's own
+    // teacherId — findOne() already unions both for a single teacher's page,
+    // but this list only ever counted the first, so the same teacher showed
+    // a smaller "assigned students" count here than on their own profile.
+    // One query across every enrolment in the org (rather than N+1 per
+    // teacher) to build the same union for the whole list.
+    const allEnrollments = await this.db.db.query.enrollments.findMany({
+      where: eq(enrollments.organizationId, orgId),
+      columns: { studentId: true, teacherId: true },
+    });
+    const enrolledByTeacher = new Map<string, Set<string>>();
+    for (const e of allEnrollments) {
+      if (!e.teacherId) continue;
+      if (!enrolledByTeacher.has(e.teacherId)) enrolledByTeacher.set(e.teacherId, new Set());
+      enrolledByTeacher.get(e.teacherId)!.add(e.studentId);
+    }
+
+    return rows.map((s) => {
+      const ids = new Set(s.assignments.map((a) => a.studentId));
+      for (const sid of enrolledByTeacher.get(s.id) ?? []) ids.add(sid);
+      return { ...s, assignedStudentCount: ids.size };
     });
   }
 
@@ -69,7 +94,16 @@ export class StaffService {
     });
   }
 
-  async findOne(orgId: string, id: string) {
+  async findOne(orgId: string, id: string, teacherScope?: { userId: string }) {
+    // A teacher may only ever load their OWN profile through this route — the
+    // admin-facing staff list/pay rate/notes stay admin-only, but the same
+    // "Assigned Students" data (instruments, per-teacher enrolment status,
+    // billed-unpaid, edit) a teacher's own portal needs is exactly this
+    // record's `assignments`, so scoping rather than duplicating the query.
+    if (teacherScope) {
+      const self = await this.findByUserId(orgId, teacherScope.userId);
+      if (!self || self.id !== id) throw new NotFoundException('Staff member not found');
+    }
     const member = await this.db.db.query.staffMembers.findFirst({
       where: and(eq(staffMembers.id, id), eq(staffMembers.organizationId, orgId)),
       with: {
@@ -94,7 +128,7 @@ export class StaffService {
     const linkedStudentIds = new Set(member.assignments.map((a) => a.student.id));
     const enrolled = await this.db.db.query.enrollments.findMany({
       where: and(eq(enrollments.organizationId, orgId), eq(enrollments.teacherId, id)),
-      columns: { studentId: true },
+      columns: { studentId: true, instrument: true, status: true },
     });
     const extraIds = [...new Set(enrolled.map((e) => e.studentId))].filter((sid) => !linkedStudentIds.has(sid));
     const extraStudents = extraIds.length > 0
@@ -104,13 +138,62 @@ export class StaffService {
         })
       : [];
 
+    // Each row's status/instruments should reflect this teacher's own
+    // enrolment(s) with the student, not the student's unrelated overall
+    // status (which can legitimately disagree — a student "active" studio-wide
+    // can still have a specific enrolment with this teacher sitting paused).
+    // Prefer a live (non-withdrawn) enrolment when the student has more than
+    // one with this teacher; fall back to the student's own status only when
+    // there's no enrolment at all (a pure "Assign students" link).
+    const byStudent = new Map<string, { instrument: string; status: string }[]>();
+    for (const e of enrolled) {
+      if (!byStudent.has(e.studentId)) byStudent.set(e.studentId, []);
+      byStudent.get(e.studentId)!.push({ instrument: e.instrument, status: e.status });
+    }
+    const unpaidByStudent = await this.unpaidBilledByStudent(orgId, [...linkedStudentIds, ...extraIds], id);
+
+    function enrichRow(student: { id: string; firstName: string; lastName: string; status: string }) {
+      const rows = byStudent.get(student.id) ?? [];
+      const live = rows.filter((r) => r.status !== 'withdrawn');
+      const relevant = live.length > 0 ? live : rows;
+      return {
+        student,
+        instruments: relevant.map((r) => r.instrument),
+        // Only meaningful when there's at least one enrolment with this
+        // teacher — otherwise there's no enrolment status to show at all.
+        enrollmentStatus: relevant.length > 0 ? relevant[0]!.status : null,
+        unpaidBilled: unpaidByStudent.get(student.id) ?? 0,
+      };
+    }
+
     return {
       ...member,
       assignments: [
-        ...member.assignments,
-        ...extraStudents.map((student) => ({ id: `enrollment-${student.id}`, role: 'primary' as const, student })),
+        ...member.assignments.map((a) => ({ ...a, ...enrichRow(a.student) })),
+        ...extraStudents.map((student) => ({ id: `enrollment-${student.id}`, role: 'primary' as const, ...enrichRow(student) })),
       ],
     };
+  }
+
+  // Same idea as families.service.ts's per-student "unpaid billed" figure,
+  // scoped to lessons THIS teacher actually taught — a traceable sum of
+  // outstanding invoice-line amounts, not a claim about the family's pooled
+  // balance (payments aren't allocated per student or per teacher).
+  private async unpaidBilledByStudent(orgId: string, studentIds: string[], teacherId: string) {
+    if (studentIds.length === 0) return new Map<string, number>();
+    const rows = await this.db.db
+      .select({ studentId: lessons.studentId, total: sql<number>`coalesce(sum(${invoiceLineItems.amount}), 0)` })
+      .from(invoiceLineItems)
+      .innerJoin(invoices, eq(invoiceLineItems.invoiceId, invoices.id))
+      .innerJoin(lessons, eq(invoiceLineItems.lessonId, lessons.id))
+      .where(and(
+        eq(invoices.organizationId, orgId),
+        eq(lessons.teacherId, teacherId),
+        inArray(lessons.studentId, studentIds),
+        inArray(invoices.status, ['draft', 'sent']),
+      ))
+      .groupBy(lessons.studentId);
+    return new Map(rows.map((r) => [r.studentId, Number(r.total)]));
   }
 
   async create(orgId: string, dto: CreateStaffDto) {

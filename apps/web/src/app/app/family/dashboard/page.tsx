@@ -12,11 +12,12 @@ import { Badge } from '@/components/badge';
 import { PaidDot } from '@/components/paid-dot';
 import { AvailabilityWeekGrid, type AvailWindow } from '@/components/availability-week-grid';
 import { Modal } from '@/components/modal';
-import { InfoTooltip } from '@/components/info-tooltip';
+import { CancelLessonModal } from '@/components/cancel-lesson-modal';
+import { RescheduleLessonModal } from '@/components/reschedule-lesson-modal';
 import { linkify } from '@/lib/linkify';
 import {
   Calendar, Clock, BookOpen, AlertCircle,
-  Plus, X, Check, Megaphone, CalendarClock,
+  Plus, X, Megaphone, CalendarClock,
 } from 'lucide-react';
 
 interface NewsPost { id: string; title: string; body: string; publishedAt: string; }
@@ -42,20 +43,6 @@ interface DashboardData {
   lastNote: { body: string; student: { firstName: string; lastName: string } | null } | null;
 }
 
-// 15-minute time slots (08:00–21:00) so parents pick a tidy time, never "3:27pm".
-const RESCHED_TIME_OPTIONS = (() => {
-  const out: { value: string; label: string }[] = [];
-  for (let m = 8 * 60; m <= 21 * 60; m += 15) {
-    const hh = String(Math.floor(m / 60)).padStart(2, '0');
-    const mm = String(m % 60).padStart(2, '0');
-    const value = `${hh}:${mm}`;
-    const h12 = ((Math.floor(m / 60) + 11) % 12) + 1;
-    const ampm = m < 12 * 60 ? 'am' : 'pm';
-    out.push({ value, label: `${h12}:${mm} ${ampm}` });
-  }
-  return out;
-})();
-
 export default function FamilyDashboardPage() {
   // Cached reads — the portal renders instantly on revisit, then revalidates.
   // mutateData() refreshes the dashboard after a payment or cancellation.
@@ -67,15 +54,7 @@ export default function FamilyDashboardPage() {
   const news = newsRaw.slice(0, 3);
   const [availTeacherFilter, setAvailTeacherFilter] = useState<string>('all');
   const [cancelModal, setCancelModal] = useState<{ lessonId: string; hoursUntil: number } | null>(null);
-  const [cancelling, setCancelling] = useState(false);
   const [reschedModal, setReschedModal] = useState<{ lessonId: string } | null>(null);
-  // Three preferred slots, each a date + a 15-minute time (kept separate so the
-  // time picker can only offer :00/:15/:30/:45 — no "3:27pm").
-  const [reschedDates, setReschedDates] = useState<[string, string, string]>(['', '', '']);
-  const [reschedTimes, setReschedTimes] = useState<[string, string, string]>(['', '', '']);
-  const [reschedErr, setReschedErr] = useState('');
-  const [reschedSaving, setReschedSaving] = useState(false);
-  const [reschedDone, setReschedDone] = useState(false);
   // How the family says they'll pay. Bank transfer keeps the existing
   // reference + "I've sent it" self-reported claim flow. Cash is purely
   // informational — a staff member records it by hand once received, so
@@ -96,34 +75,7 @@ export default function FamilyDashboardPage() {
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   function openReschedule(lessonId: string) {
-    setReschedDates(['', '', '']); setReschedTimes(['', '', '']);
-    setReschedErr(''); setReschedDone(false);
     setReschedModal({ lessonId });
-  }
-
-  async function submitReschedule() {
-    if (!reschedModal) return;
-    if (!reschedDates[0] || !reschedTimes[0]) { setReschedErr('Please choose a date and time for your first preferred slot.'); return; }
-    setReschedSaving(true); setReschedErr('');
-    try {
-      // Compose the naive wall-clock exactly as picked (e.g. "2026-07-13T16:00:00");
-      // the backend interprets it in the studio timezone. Converting via
-      // new Date().toISOString() here would wrongly bake in the parent's *browser*
-      // timezone. A choice only counts when both its date and time are set.
-      const toIso = (i: number) =>
-        reschedDates[i] && reschedTimes[i] ? `${reschedDates[i]}T${reschedTimes[i]}:00` : undefined;
-      await apiFetch('/reschedule-requests', {
-        method: 'POST', token: tok(),
-        body: JSON.stringify({
-          lessonId: reschedModal.lessonId,
-          proposedStartsAt: toIso(0),
-          proposedStartsAt2: toIso(1),
-          proposedStartsAt3: toIso(2),
-        }),
-      });
-      setReschedDone(true);
-    } catch (e) { setReschedErr(e instanceof Error ? e.message : 'Could not send request'); }
-    finally { setReschedSaving(false); }
   }
 
   async function markInvoicePaid() {
@@ -138,20 +90,6 @@ export default function FamilyDashboardPage() {
       mutateData();
     } catch (e) { setPayErr(e instanceof Error ? e.message : 'Could not record payment'); }
     finally { setPaying(false); }
-  }
-
-  async function cancelLesson(choice: 'absent_makeup' | 'absent_no_pay') {
-    if (!cancelModal) return;
-    setCancelling(true);
-    try {
-      await apiFetch(`/family/lessons/${cancelModal.lessonId}/cancel`, {
-        method: 'POST', token: tok(),
-        body: JSON.stringify({ choice }),
-      });
-      setCancelModal(null);
-      mutateData();
-    } catch (e) { console.error(e); }
-    finally { setCancelling(false); }
   }
 
   if (!data) return <div className="p-8 text-[var(--txt3)]">Loading…</div>;
@@ -527,129 +465,15 @@ export default function FamilyDashboardPage() {
         )}
       </div>
 
-      {/* ── Cancel modal ── */}
-      <Modal open={!!cancelModal} onClose={() => setCancelModal(null)} title="Cancel lesson">
-        <div className="space-y-4">
-          {cancelModal && cancelModal.hoursUntil >= 24 ? (
-            <>
-              <p className="text-sm" style={{ color: 'var(--txt3)' }}>
-                You have given more than 24 hours&apos; notice, so there is no charge either way.
-                Which is it?
-              </p>
-              <button
-                onClick={() => cancelLesson('absent_makeup')}
-                disabled={cancelling}
-                className="w-full flex items-start gap-3 p-4 rounded-xl border-2 border-[var(--sage-md)] bg-[var(--sage-lt)] hover:bg-[var(--sage-lt)] text-left disabled:opacity-50">
-                <Check size={18} className="text-[var(--sage-dk)] mt-0.5 shrink-0" />
-                <div>
-                  <p className="font-bold text-sm text-[var(--sage-dk)]">I&apos;d like to rebook it</p>
-                  {/* This used to read "your lesson fee is still charged" — it
-                      isn't, with this much notice. */}
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--txt3)' }}>
-                    No charge for this lesson. We&apos;ll arrange another time with your teacher.
-                  </p>
-                </div>
-              </button>
-              <button
-                onClick={() => cancelLesson('absent_no_pay')}
-                disabled={cancelling}
-                className="w-full flex items-start gap-3 p-4 rounded-xl border-2 border-[var(--bd2)] hover:border-[var(--bd)] hover:bg-[var(--surf)] text-left disabled:opacity-50">
-                <X size={18} className="text-[var(--txt3)] mt-0.5 shrink-0" />
-                <div>
-                  <p className="font-bold text-sm" style={{ color: 'var(--txt)' }}>No lesson needed</p>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--txt3)' }}>
-                    No charge, and we won&apos;t chase you for a new time. The slot is freed.
-                  </p>
-                </div>
-              </button>
-              <button onClick={() => setCancelModal(null)} disabled={cancelling} className="ui-btn-ghost w-full">
-                Never mind
-              </button>
-            </>
-          ) : (
-            <>
-              <p className="text-sm" style={{ color: 'var(--txt3)' }}>
-                This lesson is within 24 hours. Cancelling now will still charge the lesson fee, and no extra lesson is given.
-              </p>
-              <button
-                onClick={() => cancelLesson('absent_no_pay')}
-                disabled={cancelling}
-                className="w-full py-3 px-4 rounded-xl bg-[var(--coral)] text-white font-bold text-sm hover:opacity-90 disabled:opacity-50">
-                Confirm cancellation (fee applies)
-              </button>
-              <button onClick={() => setCancelModal(null)} disabled={cancelling} className="ui-btn-ghost w-full">
-                Never mind
-              </button>
-            </>
-          )}
-        </div>
-      </Modal>
-
-      {/* ── Request reschedule ── */}
-      <Modal open={!!reschedModal} onClose={() => setReschedModal(null)} title="Request a reschedule">
-        {reschedDone ? (
-          <div className="text-center py-4">
-            <div className="inline-flex items-center justify-center w-11 h-11 rounded-full mb-3"
-              style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)' }}>
-              <Check size={22} />
-            </div>
-            <p className="font-semibold" style={{ color: 'var(--txt)' }}>Request sent</p>
-            <p className="text-sm mt-1" style={{ color: 'var(--txt3)' }}>
-              The studio will pick whichever of your preferred times works best for the teacher and let you know.
-            </p>
-            <button onClick={() => setReschedModal(null)} className="ui-btn-primary mt-4">Done</button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <p className="text-sm flex items-start gap-1.5" style={{ color: 'var(--txt3)' }}>
-              <span>Give up to three preferred slots, in order of preference. The studio picks whichever works best for the teacher.</span>
-              <InfoTooltip text="You don't have to match the teacher's schedule yourself. Offering a few options lets the studio slot you into a time the teacher is actually free, often back-to-back with other lessons. Only your 1st choice is required." />
-            </p>
-            {reschedErr && (
-              <div className="text-sm rounded-xl px-4 py-3"
-                style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
-                {reschedErr}
-              </div>
-            )}
-            {([0, 1, 2] as const).map((i) => {
-              const ordinal = i === 0 ? '1st choice' : i === 1 ? '2nd choice' : '3rd choice';
-              return (
-                <div key={i}>
-                  <label htmlFor={`resched-date-${i}`} className="ui-label">
-                    {ordinal}
-                    {i === 0 ? <span style={{ color: 'var(--coral)' }}> *</span> : <span className="font-normal text-[11px]" style={{ color: 'var(--txt4)' }}> (optional)</span>}
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      id={`resched-date-${i}`}
-                      type="date"
-                      value={reschedDates[i]}
-                      min={studioDayString(new Date())}
-                      onChange={(e) => setReschedDates((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
-                      className="ui-input flex-1"
-                    />
-                    <select
-                      aria-label={`${ordinal} time`}
-                      value={reschedTimes[i]}
-                      onChange={(e) => setReschedTimes((t) => { const n = [...t] as [string, string, string]; n[i] = e.target.value; return n; })}
-                      className="ui-input shrink-0" style={{ width: 128 }}
-                    >
-                      <option value="">Time…</option>
-                      {RESCHED_TIME_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </div>
-                </div>
-              );
-            })}
-            <div className="flex gap-3 pt-1">
-              <button onClick={submitReschedule} disabled={reschedSaving} className="ui-btn-primary">
-                {reschedSaving ? 'Sending…' : 'Send request'}
-              </button>
-              <button onClick={() => setReschedModal(null)} className="ui-btn-ghost">Cancel</button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <CancelLessonModal
+        open={!!cancelModal} onClose={() => setCancelModal(null)}
+        lessonId={cancelModal?.lessonId ?? null} hoursUntil={cancelModal?.hoursUntil ?? 0}
+        onCancelled={mutateData}
+      />
+      <RescheduleLessonModal
+        open={!!reschedModal} onClose={() => setReschedModal(null)}
+        lessonId={reschedModal?.lessonId ?? null} onSent={() => {}}
+      />
     </div>
   );
 }
