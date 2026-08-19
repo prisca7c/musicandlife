@@ -24,10 +24,18 @@ function token(): string | undefined {
 const fetcher = <T,>(path: string) => apiFetch<T>(path, { token: token() });
 
 const CONFIG: SWRConfiguration = {
-  // Don't refetch every time the window regains focus — too chatty for a
-  // dashboard people tab away from constantly. Revalidation still happens on
-  // mount and on explicit mutate().
-  revalidateOnFocus: false,
+  // Refetch when the window regains focus — there's no push/broadcast
+  // mechanism telling an already-open session that someone ELSE changed
+  // something (an admin assigning a student, editing a lesson, etc.), so
+  // without this a tab left open all day just keeps rendering whatever it
+  // fetched on first mount. That's exactly the shape teachers hit: they
+  // leave their calendar/students tab open between lessons rather than
+  // navigating fresh each time, so an admin-made change never appeared until
+  // a full log-out/log-in happened to also clear the cache (clearApiCache()
+  // in api.ts) and force a remount. focusThrottleInterval keeps re-focusing
+  // repeatedly from becoming chatty.
+  revalidateOnFocus: true,
+  focusThrottleInterval: 60_000,
   // While the key changes (pagination, search), keep showing the previous data
   // instead of flashing empty — the swap feels instant.
   keepPreviousData: true,

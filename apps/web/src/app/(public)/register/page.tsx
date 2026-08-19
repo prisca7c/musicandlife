@@ -20,6 +20,13 @@ interface InstrumentSelection { instrument: string; lessonType: 'private' | 'gro
 interface Offered { private: string[]; group: string[]; notes: Record<string, string>; }
 interface FormData {
   studentFirstName: string; studentLastName: string; studentEmail: string; studentPhone: string;
+  // An adult registering for themselves — the same person is both the family
+  // contact and the pupil, so we reuse the student's own name/email as the
+  // guardian contact instead of asking for a separate "parent" identity. This
+  // is what makes approve() link ONE user account as both guardian and
+  // student (see registration.service.ts), so the studio can assign them a
+  // teacher without a second, disconnected record.
+  isAdult: boolean;
   familyType: 'new' | 'existing';
   guardianFirstName: string; guardianLastName: string;
   contactEmail: string; contactPhone: string; address: string;
@@ -30,6 +37,7 @@ interface FormData {
 
 const EMPTY: FormData = {
   studentFirstName: '', studentLastName: '', studentEmail: '', studentPhone: '',
+  isAdult: false,
   familyType: 'new',
   guardianFirstName: '', guardianLastName: '',
   contactEmail: '', contactPhone: '', address: '',
@@ -201,7 +209,20 @@ export default function RegisterPage() {
   }, [familySearch, data.familyType]);
 
   function set(updates: Partial<FormData>) {
-    setData(d => ({ ...d, ...updates }));
+    setData(d => {
+      const next = { ...d, ...updates };
+      // While registering as an adult, the guardian identity IS the student
+      // identity — keep name/email mirrored live so step 2 (and the payload
+      // sent to the API) always reflects whatever was typed in step 1,
+      // without asking the person to type their own name and email twice.
+      if (next.isAdult) {
+        next.guardianFirstName = next.studentFirstName;
+        next.guardianLastName = next.studentLastName;
+        next.contactEmail = next.studentEmail;
+        next.familyType = 'new';
+      }
+      return next;
+    });
     setErrors({});
   }
 
@@ -210,6 +231,9 @@ export default function RegisterPage() {
     if (s === 1) {
       if (!data.studentFirstName.trim()) e.studentFirstName = 'Please enter first name';
       if (!data.studentLastName.trim()) e.studentLastName = 'Please enter last name';
+      if (data.isAdult && (!data.studentEmail.trim() || !data.studentEmail.includes('@'))) {
+        e.studentEmail = 'Please enter a valid email — this becomes your portal login';
+      }
     }
     if (s === 2 && data.familyType === 'new') {
       if (!data.guardianFirstName.trim()) e.guardianFirstName = 'Please enter first name';
@@ -435,6 +459,20 @@ export default function RegisterPage() {
                   type="tel" placeholder="07700900000" autoComplete="tel" digitsOnly
                   value={data.studentPhone} onChange={e => set({ studentPhone: e.target.value })} />
               </Field>
+              <div className="h-px bg-[var(--bd)] my-5" />
+              <label className="flex items-start gap-2.5 cursor-pointer rounded-xl border-[1.5px] p-3 transition-colors"
+                style={{ borderColor: data.isAdult ? 'var(--sage)' : 'var(--bd2)', background: data.isAdult ? 'var(--sage-lt)' : 'transparent' }}>
+                <input type="checkbox" className="mt-0.5 h-4 w-4 rounded" style={{ accentColor: 'var(--sage)' }}
+                  checked={data.isAdult} onChange={e => set({ isAdult: e.target.checked })} />
+                <span>
+                  <span className="block text-[13px] font-semibold" style={{ color: 'var(--txt)' }}>
+                    I&apos;m an adult and this registration is for myself
+                  </span>
+                  <span className="block text-[11px] mt-0.5" style={{ color: 'var(--txt3)' }}>
+                    Skips the separate parent/guardian step — the email above becomes your one portal login for both billing and lessons.
+                  </span>
+                </span>
+              </label>
             </div>
             <div className="px-7 py-4 border-t border-[var(--bd)] flex items-center justify-between">
               <span className="text-xs text-[var(--txt4)] font-medium">Step 1 of 4</span>
@@ -455,7 +493,17 @@ export default function RegisterPage() {
               <p className="text-[13px] text-[var(--txt3)] mt-1.5">Primary contact for scheduling, billing, and communication.</p>
             </div>
             <div className="px-7 py-6">
+              {data.isAdult && (
+                <div className="mb-5 flex items-start gap-2.5 rounded-xl border border-[var(--sage-md)] bg-[var(--sage-lt)] p-3.5">
+                  <CircleCheck size={16} className="mt-0.5 shrink-0" style={{ color: 'var(--sage)' }} />
+                  <p className="text-[13px]" style={{ color: 'var(--sage-dk)' }}>
+                    You&apos;re registering for yourself, so your name and email from step 1 are reused as
+                    the family contact. Just add a phone number and address below.
+                  </p>
+                </div>
+              )}
               {/* New vs existing */}
+              {!data.isAdult && (
               <div className="mb-5">
                 <p className="text-xs font-semibold text-[var(--txt2)] mb-2">Is this student part of an existing family in our system?</p>
                 <div className="grid grid-cols-2 gap-3">
@@ -473,9 +521,10 @@ export default function RegisterPage() {
                   ))}
                 </div>
               </div>
+              )}
 
               {/* Existing family search */}
-              {data.familyType === 'existing' && (
+              {!data.isAdult && data.familyType === 'existing' && (
                 <div className="mb-5">
                   <Field label="Search by email address" error={errors.familySearch}>
                     <InputWithIcon icon={<Search size={16} />}
@@ -503,28 +552,36 @@ export default function RegisterPage() {
                 </div>
               )}
 
-              {/* New family fields */}
-              {data.familyType === 'new' && (
+              {/* New family fields — for an adult registering for themselves, name
+                  and email are mirrored from step 1 (not shown here again), so
+                  only phone/address are collected. */}
+              {(data.isAdult || data.familyType === 'new') && (
                 <>
-                  <SectionHead>Guardian name</SectionHead>
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    <Field label="First name" required error={errors.guardianFirstName}>
-                      <input className={inputCls(!!errors.guardianFirstName)} placeholder="e.g. Jane"
-                        value={data.guardianFirstName} onChange={e => set({ guardianFirstName: e.target.value })} />
-                    </Field>
-                    <Field label="Last name" required error={errors.guardianLastName}>
-                      <input className={inputCls(!!errors.guardianLastName)} placeholder="e.g. Smith"
-                        value={data.guardianLastName} onChange={e => set({ guardianLastName: e.target.value })} />
-                    </Field>
-                  </div>
-                  <div className="h-px bg-[var(--bd)] my-5" />
+                  {!data.isAdult && (
+                    <>
+                      <SectionHead>Guardian name</SectionHead>
+                      <div className="grid grid-cols-2 gap-3 mb-4">
+                        <Field label="First name" required error={errors.guardianFirstName}>
+                          <input className={inputCls(!!errors.guardianFirstName)} placeholder="e.g. Jane"
+                            value={data.guardianFirstName} onChange={e => set({ guardianFirstName: e.target.value })} />
+                        </Field>
+                        <Field label="Last name" required error={errors.guardianLastName}>
+                          <input className={inputCls(!!errors.guardianLastName)} placeholder="e.g. Smith"
+                            value={data.guardianLastName} onChange={e => set({ guardianLastName: e.target.value })} />
+                        </Field>
+                      </div>
+                      <div className="h-px bg-[var(--bd)] my-5" />
+                    </>
+                  )}
                   <SectionHead>Contact details</SectionHead>
-                  <Field label="Email" required error={errors.contactEmail}
-                    helper="Used for invoices, lesson reminders, and important notices.">
-                    <InputWithIcon icon={<Mail size={16} />} type="email" placeholder="jane.smith@email.com"
-                      error={!!errors.contactEmail} autoComplete="email"
-                      value={data.contactEmail} onChange={e => set({ contactEmail: e.target.value })} />
-                  </Field>
+                  {!data.isAdult && (
+                    <Field label="Email" required error={errors.contactEmail}
+                      helper="Used for invoices, lesson reminders, and important notices.">
+                      <InputWithIcon icon={<Mail size={16} />} type="email" placeholder="jane.smith@email.com"
+                        error={!!errors.contactEmail} autoComplete="email"
+                        value={data.contactEmail} onChange={e => set({ contactEmail: e.target.value })} />
+                    </Field>
+                  )}
                   <Field label="Phone" required error={errors.contactPhone}>
                     <InputWithIcon icon={<Phone size={16} />} type="tel" placeholder="07700900000"
                       error={!!errors.contactPhone} autoComplete="tel" digitsOnly
