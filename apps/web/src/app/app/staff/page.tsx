@@ -27,7 +27,7 @@ const SORTERS: Record<SortKey, (a: StaffMember, b: StaffMember) => number> = {
   assigned: (a, b) => b.assignments.length - a.assignments.length,
 };
 
-interface Colleague { id: string; firstName: string; lastName: string; title: string | null; phone: string | null; user: { email: string } | null; }
+interface Colleague { id: string; firstName: string; lastName: string; title: string | null; phone: string | null; instruments: string[]; user: { email: string } | null; }
 
 function getRoleFromToken(token?: string): string {
   try {
@@ -55,13 +55,14 @@ function ColleaguesDirectory() {
             <tr>
               <th>Name</th>
               <th>Title</th>
+              <th>Instruments</th>
               <th>Email</th>
               <th>Phone</th>
             </tr>
           </thead>
           <tbody>
             {colleagues.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+              <tr><td colSpan={5} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                 No other teachers yet.
               </td></tr>
             )}
@@ -69,6 +70,7 @@ function ColleaguesDirectory() {
               <tr key={c.id}>
                 <td className="font-semibold" style={{ color: 'var(--sage-dk)' }}>{c.firstName} {c.lastName}</td>
                 <td style={{ color: 'var(--txt3)' }}>{c.title ?? '—'}</td>
+                <td className="capitalize" style={{ color: 'var(--txt3)' }}>{c.instruments?.join(', ') || '—'}</td>
                 <td style={{ color: 'var(--txt3)' }}>{c.user?.email ?? '—'}</td>
                 <td style={{ color: 'var(--txt3)' }}>{c.phone ?? '—'}</td>
               </tr>

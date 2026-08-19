@@ -55,7 +55,7 @@ export class StaffService {
   async directory(orgId: string) {
     return this.db.db.query.staffMembers.findMany({
       where: and(eq(staffMembers.organizationId, orgId), eq(staffMembers.status, 'active')),
-      columns: { id: true, firstName: true, lastName: true, title: true, phone: true },
+      columns: { id: true, firstName: true, lastName: true, title: true, phone: true, instruments: true },
       with: { user: { columns: { email: true } } },
       orderBy: (s, { asc }) => [asc(s.firstName), asc(s.lastName)],
     });

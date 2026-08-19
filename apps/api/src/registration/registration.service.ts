@@ -133,6 +133,44 @@ export class RegistrationService {
       emailRemindersEnabled: payload.emailReminders ?? true,
     }).returning();
 
+    // A student who gave their own email gets a portal login too — mirrors the
+    // contact/guardian wiring below (link an existing user, or invite a new
+    // one). Previously this only ever wrote payload.studentEmail into
+    // students.email as a contact address: no user, no membership, so the
+    // student could never actually log in and never got a welcome email even
+    // though they'd typed one in on the registration form.
+    let studentUserId: string | undefined;
+    let studentWelcome: { to: string; name: string; link: string; isNewAccount: boolean } | undefined;
+    if (payload.studentEmail) {
+      const normalizedEmail = payload.studentEmail.toLowerCase();
+      const existingStudentUser = await tx.query.users.findFirst({ where: eq(users.email, normalizedEmail) });
+      if (existingStudentUser) {
+        studentUserId = existingStudentUser.id;
+        const existingMembership = await tx.query.memberships.findFirst({
+          where: and(eq(memberships.userId, existingStudentUser.id), eq(memberships.organizationId, orgId)),
+        });
+        if (!existingMembership) {
+          await tx.insert(memberships).values({ userId: existingStudentUser.id, organizationId: orgId, baseRole: 'student' });
+        }
+        studentWelcome = { to: payload.studentEmail, name: payload.studentFirstName, link: `${process.env.WEB_URL}/login`, isNewAccount: false };
+      } else {
+        const [newStudentUser] = await tx.insert(users).values({
+          email: normalizedEmail, passwordHash: 'INVITE_PENDING', emailVerifiedAt: new Date(),
+        }).returning();
+        studentUserId = newStudentUser!.id;
+        await tx.insert(memberships).values({ userId: newStudentUser!.id, organizationId: orgId, baseRole: 'student' });
+        const rawToken = randomBytes(32).toString('hex');
+        const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+        await tx.insert(passwordResetTokens).values({
+          userId: newStudentUser!.id, tokenHash, expiresAt: new Date(Date.now() + 7 * 86400000),
+        });
+        studentWelcome = {
+          to: payload.studentEmail, name: payload.studentFirstName,
+          link: `${process.env.WEB_URL}/reset-password?token=${rawToken}`, isNewAccount: true,
+        };
+      }
+    }
+
     // Create student
     const [student] = await tx.insert(students).values({
       organizationId: orgId,
@@ -141,6 +179,7 @@ export class RegistrationService {
       lastName: payload.studentLastName,
       dob: payload.studentDob,
       email: payload.studentEmail,
+      studentUserId,
       status: 'trial',
     }).returning();
 
@@ -245,7 +284,7 @@ export class RegistrationService {
         .catch((e) => this.logger.warn('Add student contact failed', e));
     }
 
-    return { familyId: family!.id, studentId: student!.id, welcome };
+    return { familyId: family!.id, studentId: student!.id, welcome, studentWelcome };
   }
 
   /**
@@ -257,13 +296,15 @@ export class RegistrationService {
     const name = escapeHtml(w.contactName || 'there');
     const body = w.isNewAccount
       ? `<p>Hi ${name},</p><p>Your registration has been approved &mdash; welcome to Music &amp; Life! Set your portal password to get started, then you can view lessons, book sessions, and see the notes and materials your teacher shares.</p>`
-      : `<p>Hi ${name},</p><p>Good news &mdash; your new registration has been approved and added to your existing Music &amp; Life account. Just log in to see everything in one place.</p>`;
+      : `<p>Hi ${name},</p><p>Good news! Your new registration has been approved and added to your existing Music &amp; Life account. Just log in to see everything in one place.</p>`;
     const html = brandedEmail({
       previewText: w.isNewAccount ? 'Set your portal password to get started.' : 'Your new registration has been approved.',
       heading: w.isNewAccount ? 'Welcome to Music & Life!' : "You're all set at Music & Life",
       bodyHtml: body + loginDetailsBlock(w.to),
       cta: { label: w.isNewAccount ? 'Set your password' : 'Log in to your portal', url: w.link },
-      footnote: 'Questions? Just reply to this email and our team will be happy to help.',
+      footnote: w.isNewAccount
+        ? 'Don\'t see this in your inbox next time? Check your spam or junk folder, and mark it "not spam" so our emails reach you from then on. Questions? Just reply to this email.'
+        : 'Questions? Just reply to this email and our team will be happy to help.',
     });
     this.email.send({
       to: w.to,
@@ -272,10 +313,33 @@ export class RegistrationService {
     }).catch((e) => this.logger.warn('Welcome email failed', e));
   }
 
+  /** Same as sendWelcome, addressed to the student directly rather than the family contact. */
+  private sendStudentWelcome(w: { to: string; name: string; link: string; isNewAccount: boolean }) {
+    const name = escapeHtml(w.name || 'there');
+    const body = w.isNewAccount
+      ? `<p>Hi ${name},</p><p>Your registration has been approved &mdash; welcome to Music &amp; Life! Set your portal password to get started, then you can view your lessons and the notes and materials your teacher shares.</p>`
+      : `<p>Hi ${name},</p><p>Good news! Your new registration has been approved and added to your existing Music &amp; Life account. Just log in to see everything in one place.</p>`;
+    const html = brandedEmail({
+      previewText: w.isNewAccount ? 'Set your portal password to get started.' : 'Your new registration has been approved.',
+      heading: w.isNewAccount ? 'Welcome to Music & Life!' : "You're all set at Music & Life",
+      bodyHtml: body + loginDetailsBlock(w.to),
+      cta: { label: w.isNewAccount ? 'Set your password' : 'Log in to your portal', url: w.link },
+      footnote: w.isNewAccount
+        ? 'Don\'t see this in your inbox next time? Check your spam or junk folder, and mark it "not spam" so our emails reach you from then on. Questions? Just reply to this email.'
+        : 'Questions? Just reply to this email and our team will be happy to help.',
+    });
+    this.email.send({
+      to: w.to,
+      subject: w.isNewAccount ? 'Welcome to Music & Life — set your password' : 'Your Music & Life registration is approved',
+      html,
+    }).catch((e) => this.logger.warn('Student welcome email failed', e));
+  }
+
   /** Shared by registration approval and CSV import: atomically creates family + student + enrollments (+ portal account). */
   async createFamilyStudentEnrollments(orgId: string, payload: CreationPayload) {
     const result = await this.db.db.transaction(tx => this.createFamilyStudentEnrollmentsTx(tx, orgId, payload));
     if (result.welcome) this.sendWelcome(result.welcome);
+    if (result.studentWelcome) this.sendStudentWelcome(result.studentWelcome);
     return { familyId: result.familyId, studentId: result.studentId };
   }
 
@@ -307,6 +371,7 @@ export class RegistrationService {
     });
 
     if (result.welcome) this.sendWelcome(result.welcome);
+    if (result.studentWelcome) this.sendStudentWelcome(result.studentWelcome);
     return { id: regId, status: 'approved', familyId: result.familyId, studentId: result.studentId };
   }
 

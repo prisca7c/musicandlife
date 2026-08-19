@@ -1997,9 +1997,10 @@ export default function CalendarPage() {
                   ))}
 
                   {/* Availability bands — shaded hours a teacher is free to teach.
-                      Admin only sees these for today (the "today section"); a
-                      teacher sees their own windows on any day. */}
-                  {(role === 'teacher' || isToday || !!filterTeacherId) && weekAvailabilityBands(di).map((b, bi) => (
+                      Admin only sees these once a specific teacher is filtered
+                      (otherwise every teacher's hours would blend together);
+                      a teacher always sees their own windows. */}
+                  {(role === 'teacher' || !!filterTeacherId) && weekAvailabilityBands(di).map((b, bi) => (
                     <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
                       style={{ top: b.top, height: b.height, background: hexToRgba('#3D7A55', 0.09), borderLeft: '2px solid rgba(61,122,85,0.35)' }} />
                   ))}
@@ -2095,9 +2096,9 @@ export default function CalendarPage() {
                           style={{ top: dayOffsets[hi]! + dayHourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
                       ))}
                       {/* Availability bands — this teacher's free-to-teach hours, in their
-                          colour. Admin only sees these for today; a teacher always sees
-                          their own. */}
-                      {(role === 'teacher' || isAnchorToday || !!filterTeacherId) && teacherAvailabilityBands(col.id).map((b, bi) => (
+                          colour. Admin only sees these once a specific teacher is
+                          filtered; a teacher always sees their own. */}
+                      {(role === 'teacher' || !!filterTeacherId) && teacherAvailabilityBands(col.id).map((b, bi) => (
                         <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
                           style={{ top: b.top, height: b.height, background: hexToRgba(teacherColor(col.id), 0.1), borderLeft: `2px solid ${hexToRgba(teacherColor(col.id), 0.4)}` }}>
                           <span className="absolute left-1.5 top-1 text-[8px] font-bold uppercase tracking-wide pointer-events-none"
