@@ -111,6 +111,16 @@ export class SchedulingController {
     return this.scheduling.deleteLesson(user.orgId, id, { role: user.role, userId: user.userId });
   }
 
+  @Delete('lessons/:id/series')
+  @Roles('teacher')
+  deleteLessonSeries(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Query('until') until?: string,
+  ) {
+    return this.scheduling.deleteLessonSeries(user.orgId, id, until, { role: user.role, userId: user.userId });
+  }
+
   // ─── Availability-driven booking ──────────────────────────────────────────
   // Bookable 15-min slots for a teacher on a date (inside their hours, conflict-free).
   @Get('scheduling/available-slots')

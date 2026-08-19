@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { fmtTime, studioDayString } from '@/lib/datetime';
 import { useRole } from '@/lib/use-role';
+import { usePendingBadges } from '@/lib/use-pending-badges';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { Badge } from '@/components/badge';
@@ -21,11 +22,13 @@ const CAN_TAKE_PAYMENT = ['admin'];
 
 // Attendance and Requests no longer have their own sidebar entries — they
 // live "under" Calendar, reached via this tab strip instead.
-const SECTION_ITEMS = [
-  { label: 'Calendar', href: '/app/calendar' },
-  { label: 'Attendance', href: '/app/attendance' },
-  { label: 'Requests', href: '/app/lesson-requests' },
-];
+function sectionItems(badges: { unmarkedToday: number; pendingRequests: number }) {
+  return [
+    { label: 'Calendar', href: '/app/calendar' },
+    { label: 'Attendance', href: '/app/attendance', badge: badges.unmarkedToday },
+    { label: 'Requests', href: '/app/lesson-requests', badge: badges.pendingRequests },
+  ];
+}
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string;
@@ -200,6 +203,7 @@ function MonthGrid({
 }
 
 export default function AttendancePage() {
+  const badges = usePendingBadges();
   const [pending, setPending] = useState<Record<string, AttendanceStatus>>({});
   const [saving, setSaving] = useState<string | null>(null);
   // The already-marked lesson whose register the user is correcting, if any.
@@ -329,7 +333,7 @@ export default function AttendancePage() {
 
   return (
     <div>
-      <SectionTabs items={SECTION_ITEMS} />
+      <SectionTabs items={sectionItems(badges)} />
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">

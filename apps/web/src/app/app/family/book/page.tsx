@@ -42,7 +42,6 @@ interface Slot {
 }
 
 const ALL = '__all__';
-const LEAD_HOURS = 48;
 
 // A small, colour-blind-friendly palette so each teacher reads as a distinct
 // colour when more than one is shown at once.
@@ -209,7 +208,6 @@ export default function BookLessonPage() {
   useEffect(() => { setPicks([]); setChosenEnrollmentId(null); setRecurring(false); setRecurringEnd(''); }, [calendarFetchKey, ws]);
 
   const lockedCalendar = picks[0] ? `${picks[0].teacherId}:${picks[0].duration}` : null;
-  const cutoff = Date.now() + LEAD_HOURS * 3600000;
   const slotKey = (s: Slot) => `${s.teacherId}:${s.duration}@${s.startsAt}`;
   const pickRank = (s: Slot) => picks.findIndex(p => slotKey(p) === slotKey(s));
 
@@ -432,13 +430,10 @@ export default function BookLessonPage() {
                           ) : daySlots.map(s => {
                             const rank = pickRank(s);
                             const picked = rank >= 0;
-                            const tooSoon = new Date(s.startsAt).getTime() < cutoff;
                             const c = colorFor(s.teacherId);
                             return (
-                              <button key={slotKey(s)} disabled={tooSoon} onClick={() => toggleSlot(s)}
-                                title={tooSoon
-                                  ? `Online bookings need ${LEAD_HOURS}h notice — call the studio for sooner.`
-                                  : `${s.teacherName} · ${s.duration} min`}
+                              <button key={slotKey(s)} onClick={() => toggleSlot(s)}
+                                title={`${s.teacherName} · ${s.duration} min`}
                                 className="relative w-full rounded-lg text-xs font-semibold border py-1.5 px-1 transition disabled:opacity-35 disabled:cursor-not-allowed"
                                 style={picked
                                   ? { borderColor: 'var(--sage)', background: 'var(--sage)', color: '#fff' }

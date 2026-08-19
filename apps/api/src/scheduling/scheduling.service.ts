@@ -647,6 +647,68 @@ export class SchedulingService {
     return { id };
   }
 
+  /**
+   * Delete this lesson and every future scheduled occurrence in the same
+   * recurring series — either open-ended or up to (and including) `until`.
+   * Either way the series' scheduleRule.endDate is capped at the last date
+   * touched, so the nightly recurrence worker doesn't just regenerate the
+   * rows this just deleted (materializeEnrollment dedups purely on whether a
+   * lessons row currently occupies the slot — deleting the row without also
+   * capping the rule would make it reappear on the next run).
+   */
+  async deleteLessonSeries(orgId: string, id: string, until: string | undefined, actor?: Actor) {
+    const lesson = await this.getLesson(orgId, id);
+    await this.assertOwnsLesson(orgId, lesson.teacherId, actor);
+    if (!lesson.enrollmentId) {
+      throw new BadRequestException('This lesson isn’t part of a recurring series.');
+    }
+    const enrollment = await this.db.db.query.enrollments.findFirst({
+      where: and(eq(enrollments.id, lesson.enrollmentId), eq(enrollments.organizationId, orgId)),
+    });
+    if (!enrollment) throw new NotFoundException('Enrollment not found');
+
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const untilCap = until ? parseZonedDateTime(`${until}T23:59:59`, tz) : null;
+    if (untilCap && untilCap.getTime() < lesson.startsAt.getTime()) {
+      throw new BadRequestException('The end date must be on or after this lesson.');
+    }
+
+    const candidates = await this.db.db.query.lessons.findMany({
+      where: and(
+        eq(lessons.enrollmentId, lesson.enrollmentId),
+        eq(lessons.organizationId, orgId),
+        gte(lessons.startsAt, lesson.startsAt),
+        eq(lessons.status, 'scheduled'),
+        ...(untilCap ? [lte(lessons.startsAt, untilCap)] : []),
+      ),
+      with: { attendance: true },
+    });
+
+    let deleted = 0, skipped = 0;
+    for (const l of candidates) {
+      if (l.attendance) { skipped++; continue; }
+      const billed = await this.db.db.query.invoiceLineItems.findFirst({
+        where: eq(invoiceLineItems.lessonId, l.id),
+        columns: { id: true },
+      });
+      if (billed) { skipped++; continue; }
+      await this.db.db.delete(lessons).where(eq(lessons.id, l.id));
+      deleted++;
+    }
+
+    // Cap the series so it stops generating past whatever we just cleared —
+    // "until a custom date" ends the series there rather than leaving a gap
+    // the worker would refill; "all future" ends it at this lesson.
+    const dayBefore = new Date(lesson.startsAt.getTime() - 86400000);
+    const newEndDate = untilCap ? until! : formatInZone(dayBefore, tz, { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-CA');
+    const rule = (enrollment.scheduleRule ?? {}) as Record<string, unknown>;
+    await this.db.db.update(enrollments)
+      .set({ scheduleRule: { ...rule, endDate: newEndDate }, updatedAt: new Date() })
+      .where(eq(enrollments.id, enrollment.id));
+
+    return { deleted, skipped };
+  }
+
   async directReschedule(orgId: string, id: string, newStartsAt: string, actor?: Actor) {
     const lesson = await this.getLesson(orgId, id);
     await this.assertOwnsLesson(orgId, lesson.teacherId, actor);
@@ -1022,9 +1084,10 @@ export class SchedulingService {
     return req!;
   }
 
-  // A family self-booking books its 1st choice this many hours ahead at the
-  // earliest, so the teacher always has room to move or decline before it runs.
-  private static readonly FAMILY_BOOKING_LEAD_HOURS = 48;
+  // A family self-booking's 1st choice just has to be in the future — the
+  // teacher can still Accept, Move (to a recorded alternative) or Decline the
+  // auto_confirmed request before the lesson runs, so there's no separate
+  // minimum notice window to enforce here.
 
   /**
    * A family self-books from the calendar. Unlike the front-desk lesson request
@@ -1050,11 +1113,8 @@ export class SchedulingService {
       .map((s) => parseZonedDateTime(s, tz));
     if (ranked.length === 0) throw new BadRequestException('Pick at least one time.');
 
-    const leadMs = SchedulingService.FAMILY_BOOKING_LEAD_HOURS * 3600000;
-    if (ranked[0]!.getTime() - Date.now() < leadMs) {
-      throw new BadRequestException(
-        `Lessons booked online must be at least ${SchedulingService.FAMILY_BOOKING_LEAD_HOURS} hours ahead. For anything sooner, please contact the studio.`,
-      );
+    if (ranked[0]!.getTime() <= Date.now()) {
+      throw new BadRequestException('That time has already passed. Please pick a time in the future.');
     }
 
     // Group classes meet at a fixed shared time — they aren't self-bookable as
@@ -1127,12 +1187,12 @@ export class SchedulingService {
       await this.db.db.update(enrollments)
         .set({ scheduleRule: rule, updatedAt: new Date() })
         .where(and(eq(enrollments.id, dto.enrollmentId), eq(enrollments.organizationId, orgId)));
-      // Generate the series starting from the first booked lesson, NOT from now.
-      // The family's 1st choice can be a week out precisely because this week's
-      // slot fell inside the 48h lead window; materialising from now would emit
-      // that nearer (<48h) occurrence too — an extra lesson they never booked
-      // that then bills them. Anchoring at ranked[0] keeps the series to the
-      // times the family actually chose.
+      // Generate the series starting from the first booked lesson, NOT from now —
+      // materialising from now could emit an earlier occurrence than the one the
+      // family actually picked (e.g. picking next Wednesday for a weekly series
+      // that would otherwise start this Monday), billing them for a lesson they
+      // never booked. Anchoring at ranked[0] keeps the series to the times the
+      // family actually chose.
       await this.materializeEnrollment(orgId, dto.enrollmentId, { fromDate: ranked[0]!.toISOString() }).catch((e) =>
         this.logger.warn(`materialize after recurring family booking failed: ${e}`),
       );
