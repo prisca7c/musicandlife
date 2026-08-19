@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { eq, and, gte } from 'drizzle-orm';
-import { enrollments, students, staffMembers, terms, lessons, lessonCredits, lessonRequests } from '@music-life/db';
+import { enrollments, students, staffMembers, terms, lessons, lessonCredits } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateEnrollmentDto } from './dto/create-enrollment.dto';
 import type { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
+import type { Actor } from '../scheduling/scheduling.service';
 
 @Injectable()
 export class EnrollmentsService {
@@ -71,6 +72,15 @@ export class EnrollmentsService {
     }
   }
 
+  async findOne(orgId: string, id: string) {
+    const enrollment = await this.db.db.query.enrollments.findFirst({
+      where: and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)),
+      with: { teacher: { columns: { id: true, firstName: true, lastName: true } } },
+    });
+    if (!enrollment) throw new NotFoundException('Enrollment not found');
+    return enrollment;
+  }
+
   async create(orgId: string, studentId: string, dto: CreateEnrollmentDto) {
     const student = await this.db.db.query.students.findFirst({
       where: and(eq(students.id, studentId), eq(students.organizationId, orgId)),
@@ -117,11 +127,29 @@ export class EnrollmentsService {
     return enrollment!;
   }
 
-  async update(orgId: string, id: string, dto: UpdateEnrollmentDto) {
+  async update(orgId: string, id: string, dto: UpdateEnrollmentDto, actor?: Actor) {
     const existing = await this.db.db.query.enrollments.findFirst({
       where: and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)),
     });
     if (!existing) throw new NotFoundException('Enrollment not found');
+
+    // A teacher may reach this route only to set their OWN enrolment's weekly
+    // schedule (the calendar's "Add lesson" → Repeat weekly, self-booking) —
+    // not to touch rate, instrument, status, or another teacher's enrolment.
+    // Everything else here stays admin-only.
+    if (actor?.role === 'teacher') {
+      const staffId = await this.db.db.query.staffMembers.findFirst({
+        where: eq(staffMembers.userId, actor.userId), columns: { id: true },
+      });
+      if (!staffId || existing.teacherId !== staffId.id) {
+        throw new ForbiddenException('You can only manage your own enrolments.');
+      }
+      const allowedKeys = new Set(['scheduleRule']);
+      const attempted = Object.keys(dto).filter((k) => (dto as Record<string, unknown>)[k] !== undefined);
+      if (attempted.some((k) => !allowedKeys.has(k))) {
+        throw new ForbiddenException('You can only change the weekly schedule for your own enrolment.');
+      }
+    }
 
     await this.assertTeacherAndTermInOrg(orgId, dto.teacherId, dto.termId);
 
@@ -249,10 +277,16 @@ export class EnrollmentsService {
   // for the audit trail), but an enrolment created by pure mistake — wrong
   // student, duplicate click, never actually happened — has no history worth
   // keeping and clutters the list forever since withdrawn rows stay visible.
-  // Only allowed when nothing downstream references it yet: any lesson (past
-  // or future), lesson credit, or lesson request tied to this enrolment means
-  // it has real history, and this must be withdrawn instead so that record
-  // survives.
+  // Only blocked by real, irreversible history: any lesson (past or future) or
+  // an already-USED credit tied to this enrolment. An unspent lesson request
+  // that never became a lesson isn't history (the eventual lesson, if any,
+  // is what the lessons check catches). An AVAILABLE (unused) credit isn't
+  // history either — it's banked money the student/family hasn't spent yet,
+  // sometimes just a legacy-import artifact sitting on a placeholder
+  // enrolment — so it's kept, reassigned to no particular enrolment (the
+  // pool is scoped by student, and pickCreditForEnrollment already falls
+  // back to an enrolment-less credit), rather than silently destroyed along
+  // with the mistaken enrolment record.
   async remove(orgId: string, id: string) {
     const existing = await this.db.db.query.enrollments.findFirst({
       where: and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)),
@@ -262,19 +296,22 @@ export class EnrollmentsService {
     const [anyLesson] = await this.db.db.query.lessons.findMany({
       where: eq(lessons.enrollmentId, id), columns: { id: true }, limit: 1,
     });
-    const [anyCredit] = await this.db.db.query.lessonCredits.findMany({
-      where: eq(lessonCredits.enrollmentId, id), columns: { id: true }, limit: 1,
+    const [anyUsedCredit] = await this.db.db.query.lessonCredits.findMany({
+      where: and(eq(lessonCredits.enrollmentId, id), eq(lessonCredits.status, 'used')),
+      columns: { id: true }, limit: 1,
     });
-    const [anyRequest] = await this.db.db.query.lessonRequests.findMany({
-      where: eq(lessonRequests.enrollmentId, id), columns: { id: true }, limit: 1,
-    });
-    if (anyLesson || anyCredit || anyRequest) {
+    if (anyLesson || anyUsedCredit) {
       throw new ConflictException(
         'This enrolment has lesson history and can’t be deleted — withdraw it instead to end it while keeping the record.',
       );
     }
 
-    await this.db.db.delete(enrollments).where(and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)));
+    await this.db.db.transaction(async (tx) => {
+      await tx.update(lessonCredits)
+        .set({ enrollmentId: null })
+        .where(and(eq(lessonCredits.enrollmentId, id), eq(lessonCredits.status, 'available')));
+      await tx.delete(enrollments).where(and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)));
+    });
     return { deleted: true };
   }
 }

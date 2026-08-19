@@ -265,7 +265,18 @@ export class SchedulingService {
   // week. A confirmed lesson request (decideLessonRequest, including a
   // confirmed family booking) leaves notify at its default — the same
   // in-app+email notice a front-desk-confirmed request already used.
-  async createLesson(orgId: string, dto: CreateLessonDto, opts?: { seriesSlotAt?: Date; notify?: boolean }) {
+  async createLesson(orgId: string, dto: CreateLessonDto, opts?: { seriesSlotAt?: Date; notify?: boolean; actor?: Actor }) {
+    // A teacher booking directly (the calendar's "Add lesson" dialog, self-
+    // service) may only ever book a lesson taught BY THEMSELVES — without this,
+    // any teacher could set teacherId to a colleague and create a lesson
+    // attributed to (and paid to) someone else. Internal callers (recurrence,
+    // confirming a lesson request) never pass an actor, so they're unaffected.
+    if (opts?.actor?.role === 'teacher') {
+      const staffId = await this.resolveStaffId(orgId, opts.actor.userId);
+      if (!staffId || dto.teacherId !== staffId) {
+        throw new ForbiddenException('You can only book lessons for yourself.');
+      }
+    }
     // A caller-supplied teacherId must belong to this org. Without this, a bad (or
     // foreign-org) id slips past the conflict check and blows up on the row's
     // foreign key — surfacing as a 500 to the family portal. Validate up front so
@@ -381,6 +392,7 @@ export class SchedulingService {
     orgId: string,
     enrollmentId: string,
     opts?: { weeks?: number; fromDate?: string },
+    actor?: Actor,
   ): Promise<{ created: number; skippedExisting: number; skippedConflicts: number; through: string; weeks: number }> {
     const weeks = Math.min(Math.max(opts?.weeks ?? RECURRENCE_WINDOW_WEEKS, 1), 520);
 
@@ -388,6 +400,18 @@ export class SchedulingService {
       where: and(eq(enrollments.id, enrollmentId), eq(enrollments.organizationId, orgId)),
     });
     if (!enrollment) throw new NotFoundException('Enrollment not found');
+
+    // A teacher materialising their own recurring series directly (the
+    // calendar's "Add lesson" → Repeat weekly) may only do so for an
+    // enrolment taught BY THEMSELVES — same reasoning as createLesson's actor
+    // check. Internal callers (the nightly worker, confirming a lesson
+    // request) never pass an actor.
+    if (actor?.role === 'teacher') {
+      const staffId = await this.resolveStaffId(orgId, actor.userId);
+      if (!staffId || enrollment.teacherId !== staffId) {
+        throw new ForbiddenException('You can only book lessons for your own students.');
+      }
+    }
 
     const rule = enrollment.scheduleRule as { weekday?: string; startTime?: string; endDate?: string } | null;
     if (!rule?.weekday || !rule?.startTime) {
