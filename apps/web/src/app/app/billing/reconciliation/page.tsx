@@ -114,7 +114,7 @@ export default function ReconciliationPage() {
           <button
             onClick={() => fileRef.current?.click()}
             disabled={importing}
-            className="rounded-xl bg-[var(--green)] text-white text-sm font-semibold py-2 px-4 hover:opacity-90 transition disabled:opacity-60 inline-flex items-center gap-2"
+            className="rounded-xl bg-[var(--sage)] text-white text-sm font-semibold py-2 px-4 hover:opacity-90 transition disabled:opacity-60 inline-flex items-center gap-2"
           >
             <Upload size={15} />
             {importing ? 'Importing…' : 'Choose CSV'}
@@ -134,7 +134,7 @@ export default function ReconciliationPage() {
         {summary && (
           <div className="mt-4 rounded-xl p-3 text-sm" style={{ background: 'var(--bg)' }}>
             <p className="font-semibold flex items-center gap-1.5">
-              <CheckCircle2 size={15} className="text-[var(--green)]" />
+              <CheckCircle2 size={15} className="text-[var(--sage)]" />
               {summary.imported} new line{summary.imported === 1 ? '' : 's'} imported
             </p>
             <ul className="mt-2 space-y-0.5 text-xs" style={{ color: 'var(--txt3)' }}>
@@ -254,7 +254,7 @@ export default function ReconciliationPage() {
                           act(`/reconciliation/claims/${c.id}/confirm`);
                         }
                       }}
-                      className="text-xs font-semibold px-2 py-1 rounded-lg bg-[var(--green)] text-white"
+                      className="text-xs font-semibold px-2 py-1 rounded-lg bg-[var(--sage)] text-white"
                     >
                       Confirm anyway
                     </button>

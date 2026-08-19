@@ -76,7 +76,12 @@ export default function FamilyDashboardPage() {
   const [reschedErr, setReschedErr] = useState('');
   const [reschedSaving, setReschedSaving] = useState(false);
   const [reschedDone, setReschedDone] = useState(false);
-  const [confirmPay, setConfirmPay] = useState(false);
+  // How the family says they'll pay. Bank transfer keeps the existing
+  // reference + "I've sent it" self-reported claim flow. Cash is purely
+  // informational — a staff member records it by hand once received, so
+  // there's nothing here to claim automatically. Online has no processor
+  // wired up (Mollie card payments were removed) — shown but disabled.
+  const [payMethod, setPayMethod] = useState<'bank' | 'cash' | null>(null);
   const [paying, setPaying] = useState(false);
   const [payErr, setPayErr] = useState('');
   // Set once the family has told us they've sent the transfer. The invoice stays
@@ -128,7 +133,7 @@ export default function FamilyDashboardPage() {
       await apiFetch(`/family/invoices/${data.outstandingInvoice.id}/mark-paid`, {
         method: 'POST', token: tok(),
       });
-      setConfirmPay(false);
+      setPayMethod(null);
       setClaimed(true);
       mutateData();
     } catch (e) { setPayErr(e instanceof Error ? e.message : 'Could not record payment'); }
@@ -304,13 +309,46 @@ export default function FamilyDashboardPage() {
                   Thanks! We&apos;ll confirm {outstandingInvoice.number} as paid once the transfer
                   reaches the studio account. You don&apos;t need to do anything else.
                 </p>
-              ) : !confirmPay ? (
-                <button
-                  onClick={() => { setPayErr(''); setConfirmPay(true); }}
-                  className="mt-3 w-full rounded-xl bg-[var(--amber)] text-white text-sm font-semibold py-2 hover:opacity-90 transition"
-                >
-                  I&apos;ve sent the transfer
-                </button>
+              ) : payMethod === 'cash' ? (
+                <div className="mt-3">
+                  <p className="text-xs" style={{ color: 'var(--txt3)' }}>
+                    Pay {formatMoney(outstandingInvoice.total)} in cash at the studio. A staff member
+                    will mark {outstandingInvoice.number} as paid once it&apos;s received. You don&apos;t
+                    need to do anything else here.
+                  </p>
+                  <button
+                    onClick={() => setPayMethod(null)}
+                    className="mt-2 text-xs font-semibold"
+                    style={{ color: 'var(--txt3)' }}
+                  >
+                    ← Choose a different way to pay
+                  </button>
+                </div>
+              ) : !payMethod ? (
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <button
+                    disabled
+                    title="Card payments aren't set up yet"
+                    className="rounded-xl border text-xs font-semibold py-2 px-1 opacity-50 cursor-not-allowed"
+                    style={{ borderColor: 'var(--bd)', color: 'var(--txt3)' }}
+                  >
+                    Pay online
+                    <span className="block text-[10px] font-normal mt-0.5">Coming soon</span>
+                  </button>
+                  <button
+                    onClick={() => { setPayErr(''); setPayMethod('bank'); }}
+                    className="rounded-xl bg-[var(--amber)] text-white text-xs font-semibold py-2 px-1 hover:opacity-90 transition"
+                  >
+                    Bank transfer
+                  </button>
+                  <button
+                    onClick={() => { setPayErr(''); setPayMethod('cash'); }}
+                    className="rounded-xl border text-xs font-semibold py-2 px-1 hover:bg-[var(--bg)] transition"
+                    style={{ borderColor: 'var(--bd)', color: 'var(--txt2)' }}
+                  >
+                    Cash
+                  </button>
+                </div>
               ) : (
                 <div className="mt-3">
                   <p className="text-xs mb-2" style={{ color: 'var(--txt3)' }}>
@@ -359,7 +397,7 @@ export default function FamilyDashboardPage() {
                       {paying ? 'Sending…' : "I've sent it"}
                     </button>
                     <button
-                      onClick={() => setConfirmPay(false)}
+                      onClick={() => setPayMethod(null)}
                       disabled={paying}
                       className="rounded-xl border text-sm font-semibold py-2 px-3"
                       style={{ borderColor: 'var(--bd)', color: 'var(--txt3)' }}
@@ -427,7 +465,7 @@ export default function FamilyDashboardPage() {
              than one teacher, a switcher to view one at a time instead of
              everyone's hours blended into one hard-to-read grid. ── */}
         {teacherAvail.length > 0 && (
-          <div className="lg:col-span-3 bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+          <div className="lg:col-span-2 bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
             <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
               <p className="text-xs font-bold uppercase tracking-widest flex items-center gap-1.5" style={{ color: 'var(--txt3)' }}>
                 <CalendarClock size={12} /> When your teacher{teachers.length > 1 ? 's are' : ' is'} free
