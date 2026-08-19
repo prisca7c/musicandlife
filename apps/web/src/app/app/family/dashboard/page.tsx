@@ -65,6 +65,7 @@ export default function FamilyDashboardPage() {
   const { data: teachers = [] } = useApi<{ id: string; firstName: string; lastName: string; phone: string | null; user: { email: string } | null }[]>('/family/teachers');
   const { data: newsRaw = [] } = useApi<NewsPost[]>('/news');
   const news = newsRaw.slice(0, 3);
+  const [availTeacherFilter, setAvailTeacherFilter] = useState<string>('all');
   const [cancelModal, setCancelModal] = useState<{ lessonId: string; hoursUntil: number } | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [reschedModal, setReschedModal] = useState<{ lessonId: string } | null>(null);
@@ -257,7 +258,7 @@ export default function FamilyDashboardPage() {
               </>
             ) : (
               <p className="text-sm" style={{ color: 'var(--txt3)' }}>
-                No notes yet — your teacher&apos;s notes will appear here after your lesson.
+                No notes yet. Your teacher&apos;s notes will appear here after your lesson.
               </p>
             )}
           </div>
@@ -277,12 +278,12 @@ export default function FamilyDashboardPage() {
                 what the number means and what, if anything, they should do. */}
             <p className="text-xs mt-1" style={{ color: 'var(--txt4)' }}>
               {balance > 0
-                ? 'in credit — nothing to pay right now'
+                ? 'in credit, nothing to pay right now'
                 : balance === 0
-                  ? 'all settled — nothing to pay right now'
+                  ? 'all settled, nothing to pay right now'
                   : outstandingInvoice
-                    ? 'owing — see the invoice below'
-                    : 'owing — we’ll invoice you for this'}
+                    ? 'owing, see the invoice below'
+                    : 'owing, we’ll invoice you for this'}
             </p>
           </div>
 
@@ -300,7 +301,7 @@ export default function FamilyDashboardPage() {
 
               {claimed ? (
                 <p className="mt-3 text-xs" style={{ color: 'var(--txt3)' }}>
-                  Thanks — we&apos;ll confirm {outstandingInvoice.number} as paid once the transfer
+                  Thanks! We&apos;ll confirm {outstandingInvoice.number} as paid once the transfer
                   reaches the studio account. You don&apos;t need to do anything else.
                 </p>
               ) : !confirmPay ? (
@@ -421,14 +422,39 @@ export default function FamilyDashboardPage() {
           </div>
         )}
 
-        {/* ── Teacher availability ── */}
+        {/* ── Teacher availability — spans the full width (was stuck at 1/3
+             with the other two columns sitting empty beside it) and, with more
+             than one teacher, a switcher to view one at a time instead of
+             everyone's hours blended into one hard-to-read grid. ── */}
         {teacherAvail.length > 0 && (
-          <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
-            <p className="text-xs font-bold uppercase tracking-widest mb-1 flex items-center gap-1.5" style={{ color: 'var(--txt3)' }}>
-              <CalendarClock size={12} /> When your teacher is free
-            </p>
-            <p className="text-[11px] mb-3" style={{ color: 'var(--txt4)' }}>Shaded hours are when your teacher can take lessons — use “Book a lesson” to grab a slot.</p>
-            <AvailabilityWeekGrid windows={teacherAvail} />
+          <div className="lg:col-span-3 bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+              <p className="text-xs font-bold uppercase tracking-widest flex items-center gap-1.5" style={{ color: 'var(--txt3)' }}>
+                <CalendarClock size={12} /> When your teacher{teachers.length > 1 ? 's are' : ' is'} free
+              </p>
+              {teachers.length > 1 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button onClick={() => setAvailTeacherFilter('all')}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold border transition"
+                    style={availTeacherFilter === 'all'
+                      ? { borderColor: 'var(--sage)', background: 'var(--sage-lt)', color: 'var(--sage-dk)' }
+                      : { borderColor: 'var(--bd2)', color: 'var(--txt3)' }}>
+                    All teachers
+                  </button>
+                  {teachers.map(t => (
+                    <button key={t.id} onClick={() => setAvailTeacherFilter(t.id)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold border transition"
+                      style={availTeacherFilter === t.id
+                        ? { borderColor: 'var(--sage)', background: 'var(--sage-lt)', color: 'var(--sage-dk)' }
+                        : { borderColor: 'var(--bd2)', color: 'var(--txt3)' }}>
+                      {t.firstName} {t.lastName}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-[11px] mb-3" style={{ color: 'var(--txt4)' }}>Shaded hours are when your teacher can take lessons. Use “Book a lesson” to grab a slot.</p>
+            <AvailabilityWeekGrid windows={availTeacherFilter === 'all' ? teacherAvail : teacherAvail.filter(w => w.staffId === availTeacherFilter)} />
           </div>
         )}
 
@@ -505,7 +531,7 @@ export default function FamilyDashboardPage() {
           ) : (
             <>
               <p className="text-sm" style={{ color: 'var(--txt3)' }}>
-                This lesson is within 24 hours. Cancelling now will still charge the lesson fee — no extra lesson is given.
+                This lesson is within 24 hours. Cancelling now will still charge the lesson fee, and no extra lesson is given.
               </p>
               <button
                 onClick={() => cancelLesson('absent_no_pay')}
@@ -539,7 +565,7 @@ export default function FamilyDashboardPage() {
           <div className="space-y-4">
             <p className="text-sm flex items-start gap-1.5" style={{ color: 'var(--txt3)' }}>
               <span>Give up to three preferred slots, in order of preference. The studio picks whichever works best for the teacher.</span>
-              <InfoTooltip text="You don't have to match the teacher's schedule yourself — offering a few options lets the studio slot you into a time the teacher is actually free, often back-to-back with other lessons. Only your 1st choice is required." />
+              <InfoTooltip text="You don't have to match the teacher's schedule yourself. Offering a few options lets the studio slot you into a time the teacher is actually free, often back-to-back with other lessons. Only your 1st choice is required." />
             </p>
             {reschedErr && (
               <div className="text-sm rounded-xl px-4 py-3"

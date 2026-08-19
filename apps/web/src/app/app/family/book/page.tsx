@@ -3,9 +3,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
-import { formatMoney } from '@/lib/money';
 import { useApi } from '@/lib/swr';
-import { fmtTime, fmtDate, studioDayString } from '@/lib/datetime';
+import { fmtTime, fmtTimeEnd, fmtDate, studioDayString } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { SearchableSelect } from '@/components/searchable-select';
@@ -63,13 +62,19 @@ export default function BookLessonPage() {
   const { data: teachers = [] } = useApi<Teacher[]>('/family/teachers');
   const { data: dashData } = useApi<DashboardData>('/family/dashboard');
   const students = useMemo(() => (dashData?.students as unknown as Student[]) ?? [], [dashData]);
+  const { data: activeTerm } = useApi<{ id: string; name: string; endsOn: string } | null>('/family/active-term');
 
   const [selectedStudent, setSelectedStudent] = useState('');
   const [teacherFilter, setTeacherFilter] = useState<string>(ALL);
+  // Overrides every assignment's own default lesson length. Some families
+  // want a longer/shorter session than the enrolment's usual duration; null
+  // means "use whatever each enrolment is normally booked for".
+  const [durationOverride, setDurationOverride] = useState<number | null>(null);
   const [weekStart, setWeekStart] = useState(() => weekMonday(new Date()));
   const [recurring, setRecurring] = useState(false);
   // Optional last date for a recurring series (studio-local YYYY-MM-DD); '' = open-ended.
   const [recurringEnd, setRecurringEnd] = useState('');
+  const [endMode, setEndMode] = useState<'ongoing' | 'term' | 'custom'>('ongoing');
   // Ranked time picks (1st = booked now, 2nd/3rd = fallbacks). All must belong
   // to the same teacher+duration calendar — you book one lesson at one length,
   // not a mix of teachers or lesson lengths.
@@ -156,11 +161,12 @@ export default function BookLessonPage() {
   const calendars = useMemo(() => {
     const seen = new Map<string, { teacherId: string; duration: number }>();
     for (const a of activeAssignments) {
-      const key = `${a.teacherId}:${a.duration}`;
-      if (!seen.has(key)) seen.set(key, { teacherId: a.teacherId, duration: a.duration });
+      const duration = durationOverride ?? a.duration;
+      const key = `${a.teacherId}:${duration}`;
+      if (!seen.has(key)) seen.set(key, { teacherId: a.teacherId, duration });
     }
     return [...seen.values()];
-  }, [activeAssignments]);
+  }, [activeAssignments, durationOverride]);
   const calendarFetchKey = calendars.map(c => `${c.teacherId}:${c.duration}`).join('|');
 
   const [slots, setSlots] = useState<Slot[]>([]);
@@ -185,7 +191,9 @@ export default function BookLessonPage() {
             `/family/availability?teacherId=${c.teacherId}&weekStart=${ws}&duration=${c.duration}`,
             { token: tok() },
           );
-          const candidates = activeAssignments.filter(a => a.teacherId === c.teacherId && a.duration === c.duration);
+          const candidates = activeAssignments.filter(a =>
+            a.teacherId === c.teacherId && (durationOverride != null || a.duration === c.duration),
+          );
           return (raw ?? []).map<Slot>(s => ({
             startsAt: s.startsAt,
             teacherId: c.teacherId,
@@ -205,7 +213,7 @@ export default function BookLessonPage() {
 
   // Clear picks whenever the scope/week changes — stale picks would point at slots
   // no longer shown.
-  useEffect(() => { setPicks([]); setChosenEnrollmentId(null); setRecurring(false); setRecurringEnd(''); }, [calendarFetchKey, ws]);
+  useEffect(() => { setPicks([]); setChosenEnrollmentId(null); setRecurring(false); setRecurringEnd(''); setEndMode('ongoing'); }, [calendarFetchKey, ws]);
 
   const lockedCalendar = picks[0] ? `${picks[0].teacherId}:${picks[0].duration}` : null;
   const slotKey = (s: Slot) => `${s.teacherId}:${s.duration}@${s.startsAt}`;
@@ -273,7 +281,7 @@ export default function BookLessonPage() {
       });
       setDone({ recurring });
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Booking failed — that time may no longer be available.');
+      alert(e instanceof Error ? e.message : 'Booking failed. That time may no longer be available.');
     } finally { setBooking(false); }
   }
 
@@ -291,7 +299,7 @@ export default function BookLessonPage() {
           : 'Your first-choice time is booked. Your teacher will confirm it, or move it to one of your other choices if they need to.'}
       </p>
       <div className="flex gap-3">
-        <button onClick={() => { setDone(null); setPicks([]); setChosenEnrollmentId(null); setRecurring(false); setRecurringEnd(''); }}
+        <button onClick={() => { setDone(null); setPicks([]); setChosenEnrollmentId(null); setRecurring(false); setRecurringEnd(''); setEndMode('ongoing'); }}
           className="px-4 py-2 rounded-xl border border-[var(--bd2)] text-sm font-medium hover:bg-[var(--surf)]">
           Book another
         </button>
@@ -328,6 +336,20 @@ export default function BookLessonPage() {
             />
           </div>
         )}
+
+        {/* Lesson length — defaults to whatever each enrolment is normally
+            booked for, but not every family wants the studio default (30 min
+            here, 45 there for another child). Overriding it re-fetches
+            availability at the new length instead of the enrolment's own. */}
+        <div className="min-w-[140px]">
+          <SearchableSelect
+            options={[30, 45, 60, 90].map(d => ({ value: String(d), label: `${d} min` }))}
+            value={durationOverride != null ? String(durationOverride) : ''}
+            onChange={v => setDurationOverride(v ? parseInt(v) : null)}
+            emptyLabel="Usual length"
+            placeholder="Usual length"
+          />
+        </div>
 
         {/* Single teacher in scope: no filter chips needed, but the parent still
             needs to see who they're booking with — previously this was only in
@@ -442,7 +464,7 @@ export default function BookLessonPage() {
                                   <span className="absolute left-1 top-1 w-1.5 h-1.5 rounded-full" style={{ background: c }} />
                                 )}
                                 <span className="block leading-tight">
-                                  {fmtTime(s.startsAt)}
+                                  {fmtTime(s.startsAt)}&ndash;{fmtTimeEnd(s.startsAt, s.duration)}
                                   {picked && <span className="ml-1 text-[10px] font-black">#{rank + 1}</span>}
                                 </span>
                               </button>
@@ -491,7 +513,6 @@ export default function BookLessonPage() {
                             className="rounded border-[var(--bd2)]" />
                           <span style={{ color: 'var(--txt)' }}>
                             {cap(c.instrument)}{multiChild ? ` · ${c.studentName}` : ''}
-                            <span style={{ color: 'var(--txt4)' }}> · {formatMoney(c.price)}</span>
                           </span>
                         </label>
                       ))}
@@ -503,7 +524,10 @@ export default function BookLessonPage() {
                   <div className="mb-3 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: 'var(--bd2)', background: 'var(--surf)' }}>
                     <p className="font-bold" style={{ color: 'var(--txt)' }}>{cap(chosen.instrument)}</p>
                     <p className="text-xs" style={{ color: 'var(--txt3)' }}>
-                      {chosen.studentName} · {picks[0]!.teacherName} · {picks[0]!.duration} min · {formatMoney(chosen.price)}
+                      {chosen.studentName} · {picks[0]!.teacherName} · {picks[0]!.duration} min
+                    </p>
+                    <p className="text-[11px] mt-1" style={{ color: 'var(--txt4)' }}>
+                      Price is confirmed on your invoice, not shown here.
                     </p>
                   </div>
                 )}
@@ -543,25 +567,44 @@ export default function BookLessonPage() {
                 {recurring && (
                   <div className="mb-2">
                     <p className="text-xs mb-2 rounded-lg px-2.5 py-1.5" style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)' }}>
-                      Books this time every week — no need to rebook. Back-up times don&apos;t apply to a weekly series.
+                      Books this time every week, no need to rebook. Back-up times don&apos;t apply to a weekly series.
                     </p>
                     <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--txt2)' }}>
-                      Ends on (optional)
+                      Ends
                     </label>
-                    <div className="flex items-center gap-2">
-                      <input type="date" value={recurringEnd}
-                        min={picks[0] ? studioDayString(picks[0].startsAt) : undefined}
-                        onChange={e => setRecurringEnd(e.target.value)}
-                        className="ui-input text-xs py-1.5 flex-1 min-w-0" />
-                      {recurringEnd && (
-                        <button type="button" onClick={() => setRecurringEnd('')}
-                          className="shrink-0 text-[var(--txt4)] hover:text-[var(--txt)]" aria-label="Clear end date">
-                          <X size={13} />
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {([
+                        ['ongoing', 'Ongoing'],
+                        ...(activeTerm ? [['term', `End of ${activeTerm.name}`] as [string, string]] : []),
+                        ['custom', 'Custom date'],
+                      ] as [string, string][]).map(([mode, label]) => (
+                        <button key={mode} type="button"
+                          onClick={() => {
+                            setEndMode(mode as 'ongoing' | 'term' | 'custom');
+                            if (mode === 'ongoing') setRecurringEnd('');
+                            else if (mode === 'term') setRecurringEnd(activeTerm?.endsOn ?? '');
+                            else setRecurringEnd('');
+                          }}
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold border transition"
+                          style={endMode === mode
+                            ? { borderColor: 'var(--sage)', background: 'var(--sage-lt)', color: 'var(--sage-dk)' }
+                            : { borderColor: 'var(--bd2)', color: 'var(--txt3)' }}>
+                          {label}
                         </button>
-                      )}
+                      ))}
                     </div>
+                    {endMode === 'custom' && (
+                      <div className="flex items-center gap-2">
+                        <input type="date" value={recurringEnd}
+                          min={picks[0] ? studioDayString(picks[0].startsAt) : undefined}
+                          onChange={e => setRecurringEnd(e.target.value)}
+                          className="ui-input text-xs py-1.5 flex-1 min-w-0" />
+                      </div>
+                    )}
                     <p className="text-[11px] mt-1" style={{ color: 'var(--txt4)' }}>
-                      Leave blank to keep going until you cancel.
+                      {endMode === 'ongoing' && 'Keeps going every week until you cancel.'}
+                      {endMode === 'term' && activeTerm && `Books every week through ${activeTerm.endsOn}, then stops on its own.`}
+                      {endMode === 'custom' && 'Books every week up to and including this date.'}
                     </p>
                   </div>
                 )}

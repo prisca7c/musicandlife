@@ -295,7 +295,7 @@ export class RegistrationService {
   private sendWelcome(w: { to: string; contactName: string; link: string; isNewAccount: boolean }) {
     const name = escapeHtml(w.contactName || 'there');
     const body = w.isNewAccount
-      ? `<p>Hi ${name},</p><p>Your registration has been approved &mdash; welcome to Music &amp; Life! Set your portal password to get started, then you can view lessons, book sessions, and see the notes and materials your teacher shares.</p>`
+      ? `<p>Hi ${name},</p><p>Your registration has been approved, welcome to Music &amp; Life! Set your portal password to get started, then you can view lessons, book sessions, and see the notes and materials your teacher shares.</p>`
       : `<p>Hi ${name},</p><p>Good news! Your new registration has been approved and added to your existing Music &amp; Life account. Just log in to see everything in one place.</p>`;
     const html = brandedEmail({
       previewText: w.isNewAccount ? 'Set your portal password to get started.' : 'Your new registration has been approved.',
@@ -308,7 +308,7 @@ export class RegistrationService {
     });
     this.email.send({
       to: w.to,
-      subject: w.isNewAccount ? 'Welcome to Music & Life — set your password' : 'Your Music & Life registration is approved',
+      subject: w.isNewAccount ? 'Welcome to Music & Life: set your password' : 'Your Music & Life registration is approved',
       html,
     }).catch((e) => this.logger.warn('Welcome email failed', e));
   }
@@ -317,7 +317,7 @@ export class RegistrationService {
   private sendStudentWelcome(w: { to: string; name: string; link: string; isNewAccount: boolean }) {
     const name = escapeHtml(w.name || 'there');
     const body = w.isNewAccount
-      ? `<p>Hi ${name},</p><p>Your registration has been approved &mdash; welcome to Music &amp; Life! Set your portal password to get started, then you can view your lessons and the notes and materials your teacher shares.</p>`
+      ? `<p>Hi ${name},</p><p>Your registration has been approved, welcome to Music &amp; Life! Set your portal password to get started, then you can view your lessons and the notes and materials your teacher shares.</p>`
       : `<p>Hi ${name},</p><p>Good news! Your new registration has been approved and added to your existing Music &amp; Life account. Just log in to see everything in one place.</p>`;
     const html = brandedEmail({
       previewText: w.isNewAccount ? 'Set your portal password to get started.' : 'Your new registration has been approved.',
@@ -330,7 +330,7 @@ export class RegistrationService {
     });
     this.email.send({
       to: w.to,
-      subject: w.isNewAccount ? 'Welcome to Music & Life — set your password' : 'Your Music & Life registration is approved',
+      subject: w.isNewAccount ? 'Welcome to Music & Life: set your password' : 'Your Music & Life registration is approved',
       html,
     }).catch((e) => this.logger.warn('Student welcome email failed', e));
   }

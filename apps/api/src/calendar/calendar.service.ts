@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { and, eq, gte, inArray, lte } from 'drizzle-orm';
-import { families, guardians, lessons, organizations } from '@music-life/db';
+import { families, guardians, students, lessons, organizations } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { buildIcs, type IcsEvent } from './ics';
 
@@ -15,21 +15,46 @@ const WINDOW_DAYS_FORWARD = 365;
 export class CalendarService {
   constructor(private readonly db: DbService) {}
 
-  /** The family for a logged-in guardian. */
-  private async familyForUser(userId: string, orgId: string) {
-    const link = await this.db.db.query.guardians.findFirst({
+  /**
+   * The family for a logged-in guardian OR student. A guardian's feed covers
+   * the whole household; a student's is scoped to just their own lessons
+   * (via `studentId` on the return) — same sibling-scoping principle already
+   * applied to the rest of the family portal (a logged-in student sees their
+   * own schedule, not a sibling's). The feed still shares the family's one
+   * calendarToken/URL structure — the studentId travels as a query param on
+   * the public feed URL, filtering `icsForToken` without needing its own
+   * per-student secret.
+   */
+  private async familyForUser(userId: string, orgId: string): Promise<{
+    id: string; name: string; calendarToken: string | null;
+    students: { id: string }[]; callerStudentId: string | null;
+  }> {
+    const guardianLink = await this.db.db.query.guardians.findFirst({
       where: and(eq(guardians.userId, userId), eq(guardians.organizationId, orgId)),
       columns: { familyId: true },
     });
-    if (!link) throw new NotFoundException('No family linked to this account');
+
+    let familyId: string;
+    let callerStudentId: string | null = null;
+    if (guardianLink) {
+      familyId = guardianLink.familyId;
+    } else {
+      const studentLink = await this.db.db.query.students.findFirst({
+        where: and(eq(students.studentUserId, userId), eq(students.organizationId, orgId)),
+        columns: { id: true, familyId: true },
+      });
+      if (!studentLink) throw new NotFoundException('No family linked to this account');
+      familyId = studentLink.familyId;
+      callerStudentId = studentLink.id;
+    }
 
     const family = await this.db.db.query.families.findFirst({
-      where: and(eq(families.id, link.familyId), eq(families.organizationId, orgId)),
+      where: and(eq(families.id, familyId), eq(families.organizationId, orgId)),
       columns: { id: true, name: true, calendarToken: true },
       with: { students: { columns: { id: true } } },
     });
     if (!family) throw new NotFoundException('Family not found');
-    return family;
+    return { ...family, callerStudentId };
   }
 
   /**
@@ -50,7 +75,7 @@ export class CalendarService {
         .where(eq(families.id, family.id));
     }
 
-    return { token, familyName: family.name };
+    return { token, familyName: family.name, studentId: family.callerStudentId };
   }
 
   /** Invalidates the old URL. Used when a family thinks the link has leaked. */
@@ -61,15 +86,19 @@ export class CalendarService {
       .update(families)
       .set({ calendarToken: token, updatedAt: new Date() })
       .where(eq(families.id, family.id));
-    return { token, familyName: family.name };
+    return { token, familyName: family.name, studentId: family.callerStudentId };
   }
 
   /**
    * Render a family's feed from its token. Unauthenticated by design — a
    * calendar app cannot log in, so the token in the URL is the credential.
-   * Only ever exposes lesson times, never money or notes.
+   * Only ever exposes lesson times, never money or notes. `studentId`
+   * (present on a student's own feed URL, absent on a guardian's) narrows the
+   * family-wide feed down to just that one child's lessons — verified against
+   * the token's own family so a crafted studentId from outside it can't be
+   * used to peek at another family's schedule.
    */
-  async icsForToken(token: string): Promise<string> {
+  async icsForToken(token: string, studentId?: string): Promise<string> {
     // Reject obviously-malformed tokens before touching the database.
     if (!token || token.length < 16) throw new NotFoundException('Calendar not found');
 
@@ -85,7 +114,8 @@ export class CalendarService {
       columns: { name: true },
     });
 
-    const studentIds = family.students.map((s) => s.id);
+    const allStudentIds = family.students.map((s) => s.id);
+    const studentIds = studentId && allStudentIds.includes(studentId) ? [studentId] : allStudentIds;
     const now = new Date();
     const from = new Date(now.getTime() - WINDOW_DAYS_BACK * 86400000);
     const to = new Date(now.getTime() + WINDOW_DAYS_FORWARD * 86400000);
