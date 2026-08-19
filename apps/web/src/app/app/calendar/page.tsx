@@ -136,7 +136,7 @@ function minutesFromDayStart(iso: string): number {
 // ordered chronologically (then alphabetically by student for exact ties) —
 // same ordering `sorted` below already produces, so a cluster's array order
 // *is* its stack order.
-const STACK_ROW_H = 50;  // px per row once a slot is stacked — sized for the compact 2-line block (larger text)
+const STACK_ROW_H = 45;  // px per row once a slot is stacked — sized for the compact 2-line block
 const STACK_GAP    = 1;  // gap between rows sharing the same/overlapping time — they're one moment, keep them tight
 const CLUSTER_GAP  = 5;  // gap between separate time clusters — visually distinct from the same-time gap above
 
@@ -382,11 +382,11 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
       {/* Left rail: attendance status, paid status stacked underneath */}
       <span className="flex flex-col items-center justify-center shrink-0 w-4 gap-0.5">
         <span title={present.title}>
-          <present.Icon size={13} style={{ color: present.color }} aria-label={present.title} />
+          <present.Icon size={11} style={{ color: present.color }} aria-label={present.title} />
         </span>
         {paid && (
           <span title={paid.title}>
-            <PoundSterling size={12} style={{ color: paid.color }} aria-label={paid.title} />
+            <PoundSterling size={10} style={{ color: paid.color }} aria-label={paid.title} />
           </span>
         )}
       </span>
@@ -394,23 +394,23 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
       {/* Middle: two compact lines — time + name, then instrument/group + teacher */}
       <span className="flex-1 min-w-0 flex flex-col justify-center gap-0.5 py-0.5">
         <span className="flex items-baseline gap-1 min-w-0">
-          <span className="text-[12px] font-bold leading-none tabular-nums shrink-0" style={{ color: tColor, opacity: 0.7 }}>
+          <span className="text-[10px] font-bold leading-none tabular-nums shrink-0" style={{ color: tColor, opacity: 0.7 }}>
             {fmtTime(lesson.startsAt)}
           </span>
-          <span className="text-[16px] font-bold leading-tight truncate" style={{ color: tColor, textDecoration: cancelled ? 'line-through' : undefined }}>
+          <span className="text-[13px] font-bold leading-tight truncate" style={{ color: tColor, textDecoration: cancelled ? 'line-through' : undefined }}>
             {lesson.student?.firstName} {lesson.student?.lastName}
           </span>
         </span>
         <span className="flex items-center gap-1 min-w-0">
-          {instr && <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={13} /></span>}
+          {instr && <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={11} /></span>}
           {secondaryLabel && (
-            <span className="text-[13px] font-semibold capitalize truncate" style={{ color: iColor }}>
+            <span className="text-[11px] font-semibold capitalize truncate" style={{ color: iColor }}>
               {secondaryLabel}
             </span>
           )}
-          {isSub && <Shuffle size={12} className="shrink-0" style={{ color: tColor }} aria-label="Substitute teacher" />}
+          {isSub && <Shuffle size={10} className="shrink-0" style={{ color: tColor }} aria-label="Substitute teacher" />}
           {lesson.teacher && (
-            <span className="text-[13px] leading-tight truncate" style={{ color: tColor, opacity: 0.7 }}>
+            <span className="text-[11px] leading-tight truncate" style={{ color: tColor, opacity: 0.7 }}>
               · {lesson.teacher.firstName} {lesson.teacher.lastName}
             </span>
           )}

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsUUID, IsIn, IsInt, Min, Max, MaxLength, IsBoolean, ValidateNested, Matches } from 'class-validator';
+import { IsString, IsOptional, IsUUID, IsIn, IsInt, Min, Max, MaxLength, IsBoolean, ValidateNested, Matches, IsDateString } from 'class-validator';
 import { Type } from 'class-transformer';
 
 // The weekly recurrence rule that drives lesson generation. Previously the
@@ -12,6 +12,16 @@ export class ScheduleRuleDto {
   @IsString()
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
   startTime!: string;
+
+  // Optional finite-run cutoff ("repeat weekly until N weeks / a custom
+  // date" on the calendar's booking modal, and reschedule-weekly's own
+  // endDate preservation) — the recurrence worker and materializeEnrollment
+  // both already read this off enrollments.scheduleRule; it was just never
+  // declared here, so any PATCH that included it 400'd with "scheduleRule.
+  // property endDate should not exist" before a single lesson was created.
+  @IsOptional()
+  @IsDateString()
+  endDate?: string;
 }
 
 export class CreateEnrollmentDto {
