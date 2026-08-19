@@ -15,7 +15,7 @@ import { useRouter } from 'next/navigation';
 import {
   Calendar, PoundSterling,
   ChevronRight, UserCheck,
-  Clock, Megaphone, Inbox, ChevronDown, Check,
+  Clock, Megaphone, Inbox, ChevronDown, Check, UserPlus,
 } from 'lucide-react';
 
 type AttendanceStatus = 'present' | 'absent_makeup' | 'absent_no_makeup' | 'absent_no_pay' | 'cancelled_teacher';
@@ -142,6 +142,11 @@ interface LessonRequest {
   enrollment: { instrument: string } | null;
 }
 
+interface PendingRegistration {
+  id: string; submittedAt: string;
+  payload: { studentFirstName: string; studentLastName: string; familyName: string };
+}
+
 function getRoleFromCookie(): string {
   try {
     const token = document.cookie.match(/access_token=([^;]+)/)?.[1];
@@ -236,6 +241,7 @@ function AdminDashboard() {
     mutateLessons(prev => prev?.filter(l => l.id !== lessonId), { revalidate: false });
   }
   const { data: pendingRequests = [] } = useApi<LessonRequest[]>('/lesson-requests?status=pending');
+  const { data: pendingSignups = [] } = useApi<PendingRegistration[]>('/registrations?status=pending');
   const { firstName } = useMe();
 
   // "Today" in the studio zone (matches how the calendar buckets lessons), and
@@ -303,9 +309,52 @@ function AdminDashboard() {
       {/* Row 3 — Pending requests + Today's lessons */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-4">
 
+        {/* Left column: pending signups stacked above requests — both are
+            "waiting on someone's decision" queues, and signups are the more
+            time-sensitive of the two (a family can't do anything else until
+            they're approved). */}
+        <div className="lg:col-span-2 flex flex-col gap-4">
+
+        {/* Pending registrations — new-family signups waiting for admin review/approval. */}
+        <div className="bg-white rounded-2xl border border-[var(--bd)] overflow-hidden flex flex-col">
+          <div className="px-5 py-3.5 border-b border-[var(--bd)] flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2">
+              <UserPlus size={16} style={{ color: 'var(--sage)' }} />
+              <h2 className="font-bold text-[var(--txt)] text-sm">Pending signups</h2>
+              {pendingSignups.length > 0 && (
+                <span className="text-[11px] font-bold bg-[var(--sage-lt)] text-[var(--sage)] rounded-full px-2 py-0.5">
+                  {pendingSignups.length}
+                </span>
+              )}
+            </div>
+            <Link href="/app/intake" className="text-xs text-[var(--sage)] hover:underline font-medium">All signups →</Link>
+          </div>
+          {pendingSignups.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center py-10 text-[var(--txt4)] text-sm">
+              No pending signups.
+            </div>
+          ) : (
+            <div className="px-5 py-4 space-y-3 overflow-auto">
+              {pendingSignups.slice(0, 6).map(r => (
+                <Link key={r.id} href="/app/intake" className="flex items-center justify-between gap-3 group">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold truncate group-hover:underline" style={{ color: 'var(--txt)' }}>
+                      {r.payload.studentFirstName} {r.payload.studentLastName}
+                    </span>
+                    <span className="block text-xs truncate" style={{ color: 'var(--txt4)' }}>
+                      {r.payload.familyName}
+                    </span>
+                  </span>
+                  <ChevronRight size={15} className="shrink-0" style={{ color: 'var(--txt4)' }} />
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Pending lesson requests — reschedules/bookings waiting on someone's
             decision, easy to lose track of once they're not the page you're on. */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-[var(--bd)] overflow-hidden flex flex-col">
+        <div className="bg-white rounded-2xl border border-[var(--bd)] overflow-hidden flex flex-col">
           <div className="px-5 py-3.5 border-b border-[var(--bd)] flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
               <Inbox size={16} style={{ color: 'var(--sage)' }} />
@@ -346,6 +395,8 @@ function AdminDashboard() {
               ))}
             </div>
           )}
+        </div>
+
         </div>
 
         {/* This week's lessons — grouped by day so attendance for the whole
