@@ -12,7 +12,7 @@ import { eq, and, gt, gte, lte, ne, inArray } from 'drizzle-orm';
 import {
   lessons, lessonCredits, notes, families, memberships, guardians, organizations,
   students, enrollments, staffMembers,
-  teacherAssignments, attendance, paymentClaims,
+  teacherAssignments, attendance, paymentClaims, terms,
 } from '@music-life/db';
 import { AttendanceService } from '../attendance/attendance.service';
 import { BillingService } from '../billing/billing.service';
@@ -567,6 +567,20 @@ export class FamilyPortalController {
 
   // ─── Available booking slots ───────────────────────────────────────────────
   // Returns open time slots for a teacher in a given week, filtered by duration.
+  // The currently-active term, for the "repeat weekly until end of term"
+  // option on self-booking — mirrors what the admin calendar's own "Termly"
+  // repeat option reads, just exposed at student/guardian role instead of
+  // teacher+.
+  @Get('active-term')
+  @Roles('student')
+  async getActiveTerm(@CurrentUser() user: RequestUser) {
+    const term = await this.db.db.query.terms.findFirst({
+      where: and(eq(terms.organizationId, user.orgId), eq(terms.status, 'active')),
+      columns: { id: true, name: true, endsOn: true },
+    });
+    return term ?? null;
+  }
+
   @Get('availability')
   @Roles('student')
   async getAvailability(

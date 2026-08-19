@@ -459,7 +459,7 @@ export class StaffService {
       // card); this one didn't, so it rendered as plain left-aligned black
       // text with no branding at all.
       html: brandedEmail({
-        previewText: "You've been added as a teacher — set your password to get started.",
+        previewText: "You've been added as a teacher. Set your password to get started.",
         heading: 'Welcome to Music & Life!',
         bodyHtml: `<p style="margin:0 0 12px">Hi ${safeName},</p><p style="margin:0">You&rsquo;ve been added as a teacher at Music &amp; Life. Set your password to access your portal.</p>`,
         cta: { label: 'Set your password', url: link },

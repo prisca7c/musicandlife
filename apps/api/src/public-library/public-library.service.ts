@@ -198,9 +198,9 @@ export class PublicLibraryService {
           heading: 'You’re in 🎵',
           bodyHtml: `<p style="margin:0">Your access to the resource library is now active${
             sub.name ? `, ${sub.name.split(' ')[0]}` : ''
-          }. Use the button below to browse sheet music, practice tracks and teaching videos — no login needed, just keep this link handy.</p>`,
+          }. Use the button below to browse sheet music, practice tracks and teaching videos. No login needed, just keep this link handy.</p>`,
           cta: { label: 'Open the library', url: link },
-          footnote: `Access runs until ${paidUntil}. Bookmark the link — anyone with it can view your library.`,
+          footnote: `Access runs until ${paidUntil}. Bookmark the link, since anyone with it can view your library.`,
         }),
       });
     } catch (err) {

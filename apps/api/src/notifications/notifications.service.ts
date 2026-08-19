@@ -137,7 +137,7 @@ export const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: strin
   'booking.review_reminder': (ctx) => ({
     subject: 'A new booking is waiting for your OK',
     html: brandedEmail({
-      previewText: 'A family booked a lesson — please confirm or suggest another time.',
+      previewText: 'A family booked a lesson. Please confirm or suggest another time.',
       heading: 'A booking needs your review',
       bodyHtml: `<p style="margin:0 0 12px">A family booked a lesson with you and it's on your calendar now.</p><p style="margin:0">${ctx.body}</p>`,
       cta: { label: 'Review in your portal', url: BRAND.portalUrl },
@@ -154,7 +154,7 @@ export const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: strin
       heading: 'You have a new message',
       bodyHtml:
         `<p style="margin:0 0 12px">${ctx.body}</p>` +
-        `<p style="margin:0;color:#6b6b6b;font-size:13px">Reply in your portal — replying to this email won't reach the sender.</p>`,
+        `<p style="margin:0;color:#6b6b6b;font-size:13px">Reply in your portal. Replying to this email won't reach the sender.</p>`,
       cta: { label: 'Read & reply in your portal', url: BRAND.portalUrl },
     }),
   }),

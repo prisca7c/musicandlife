@@ -37,7 +37,7 @@ interface StudentDetail { id: string; enrollments: Enrollment[]; }
 interface Availability { id: string; staffId: string; weekday: string; startTime: string; endTime: string; }
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
-const PX_PER_HOUR = 72;          // pixel height per 1 hour band — smaller means more of the day fits on screen before scrolling
+const PX_PER_HOUR = 100;         // pixel height per 1 hour band
 const DAY_START   = 8;           // 08:00
 const DAY_END     = 21;          // 21:00
 const HOURS       = Array.from({ length: DAY_END - DAY_START }, (_, i) => i + DAY_START);

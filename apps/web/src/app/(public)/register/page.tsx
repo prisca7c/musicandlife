@@ -351,11 +351,12 @@ export default function RegisterPage() {
             </div>
             <h2 className="text-[22px] font-bold text-[var(--sage-dk)] tracking-tight">Registration submitted!</h2>
             <p className="text-sm text-[var(--txt3)] max-w-[360px] leading-relaxed">
-              Thank you, {data.guardianFirstName || contactName}! We&apos;ve received {data.studentFirstName}&apos;s registration and will review it as soon as we can.
+              {(data.guardianFirstName || contactName) ? `Thank you, ${data.guardianFirstName || contactName}! ` : 'Thank you! '}
+              We&apos;ve received {data.studentFirstName ? `${data.studentFirstName}'s` : 'your'} registration and will review it as soon as we can.
             </p>
             <div className="bg-[var(--sage-lt)] border border-[var(--sage-md)] rounded-xl p-4 w-full max-w-sm text-left mt-1">
               {([
-                { icon: <MailCheck size={16} />, text: "You'll receive a confirmation email at the address you provided — if you don't see it, please check your spam or junk folder." },
+                { icon: <MailCheck size={16} />, text: "You'll receive a confirmation email at the address you provided. If you don't see it, please check your spam or junk folder." },
                 { icon: <Clock size={16} />, text: "Our team will review and approve your registration as soon as we can." },
                 { icon: <CalendarPlus size={16} />, text: "Once approved, you'll get a welcome email with portal login details." },
               ] as { icon: React.ReactNode; text: string }[]).map((item, i) => (
@@ -391,7 +392,7 @@ export default function RegisterPage() {
           width={300} height={130}
           className="w-[240px] h-auto object-contain" priority />
         <p className="text-sm text-[var(--txt3)] max-w-[360px] leading-relaxed">
-          Register your student below. Takes about 2 minutes — we&apos;ll review your application and reach out as soon as we can.
+          Register your student below. Takes about 2 minutes, and we&apos;ll review your application and reach out as soon as we can.
         </p>
       </div>
 
@@ -438,7 +439,7 @@ export default function RegisterPage() {
             <div className="px-7 py-4 border-t border-[var(--bd)] flex items-center justify-between">
               <span className="text-xs text-[var(--txt4)] font-medium">Step 1 of 4</span>
               <button onClick={() => next(2)} className="flex items-center gap-1.5 bg-[var(--sage)] text-white rounded-[10px] px-6 py-2.5 text-sm font-bold hover:bg-[var(--sage-dk)] transition-colors ml-auto">
-                Next — Family info <ArrowRight size={16} />
+                Next: Family info <ArrowRight size={16} />
               </button>
             </div>
           </>
@@ -543,7 +544,7 @@ export default function RegisterPage() {
               </button>
               <span className="text-xs text-[var(--txt4)] font-medium">Step 2 of 4</span>
               <button onClick={() => next(3)} className="flex items-center gap-1.5 bg-[var(--sage)] text-white rounded-[10px] px-6 py-2.5 text-sm font-bold hover:bg-[var(--sage-dk)] transition-colors">
-                Next — Instruments <ArrowRight size={16} />
+                Next: Instruments <ArrowRight size={16} />
               </button>
             </div>
           </>

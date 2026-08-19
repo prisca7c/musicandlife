@@ -1,4 +1,4 @@
-import { Controller, Get, Header, Param, Post, Res, UseGuards } from '@nestjs/common';
+import { Controller, Get, Header, Param, Post, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -21,8 +21,8 @@ export class PublicCalendarController {
   // A leaked feed URL should never end up in a search index or a shared cache.
   @Header('Cache-Control', 'private, max-age=300')
   @Header('X-Robots-Tag', 'noindex, nofollow')
-  async feed(@Param('token') token: string, @Res() res: Response) {
-    const ics = await this.calendar.icsForToken(token);
+  async feed(@Param('token') token: string, @Query('student') studentId: string | undefined, @Res() res: Response) {
+    const ics = await this.calendar.icsForToken(token, studentId);
     res.send(ics);
   }
 }
@@ -32,8 +32,12 @@ export class PublicCalendarController {
 export class FamilyCalendarController {
   constructor(private readonly calendar: CalendarService) {}
 
+  // A guardian gets the whole household's feed; a logged-in student gets
+  // their own (see CalendarService.familyForUser) — same "student" role
+  // floor as the rest of the family portal, not 'guardian', which shut
+  // students out of subscribing to their own lesson calendar entirely.
   @Get()
-  @Roles('guardian')
+  @Roles('student')
   get(@CurrentUser() user: RequestUser) {
     return this.calendar.getOrCreateFeed(user.userId, user.orgId);
   }
@@ -41,7 +45,7 @@ export class FamilyCalendarController {
   // Invalidates the previous URL — for when a family thinks the link has spread
   // further than they meant it to.
   @Post('regenerate')
-  @Roles('guardian')
+  @Roles('student')
   regenerate(@CurrentUser() user: RequestUser) {
     return this.calendar.regenerate(user.userId, user.orgId);
   }
