@@ -402,15 +402,15 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
           </span>
         </span>
         <span className="flex items-center gap-1 min-w-0">
-          {instr && <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={11} /></span>}
+          {instr && <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={10} /></span>}
           {secondaryLabel && (
-            <span className="text-[11px] font-semibold capitalize truncate" style={{ color: iColor }}>
+            <span className="text-[10px] font-semibold capitalize shrink-0 whitespace-nowrap" style={{ color: iColor }}>
               {secondaryLabel}
             </span>
           )}
           {isSub && <Shuffle size={10} className="shrink-0" style={{ color: tColor }} aria-label="Substitute teacher" />}
           {lesson.teacher && (
-            <span className="text-[11px] leading-tight truncate" style={{ color: tColor, opacity: 0.7 }}>
+            <span className="text-[10px] leading-tight truncate min-w-0 flex-1" style={{ color: tColor, opacity: 0.7 }}>
               · {lesson.teacher.firstName} {lesson.teacher.lastName}
             </span>
           )}
