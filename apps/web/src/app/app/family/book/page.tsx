@@ -337,20 +337,6 @@ export default function BookLessonPage() {
           </div>
         )}
 
-        {/* Lesson length — defaults to whatever each enrolment is normally
-            booked for, but not every family wants the studio default (30 min
-            here, 45 there for another child). Overriding it re-fetches
-            availability at the new length instead of the enrolment's own. */}
-        <div className="min-w-[140px]">
-          <SearchableSelect
-            options={[30, 45, 60, 90].map(d => ({ value: String(d), label: `${d} min` }))}
-            value={durationOverride != null ? String(durationOverride) : ''}
-            onChange={v => setDurationOverride(v ? parseInt(v) : null)}
-            emptyLabel="Usual length"
-            placeholder="Usual length"
-          />
-        </div>
-
         {/* Single teacher in scope: no filter chips needed, but the parent still
             needs to see who they're booking with — previously this was only in
             a hover tooltip on each slot, invisible until you moused over one. */}
@@ -464,7 +450,7 @@ export default function BookLessonPage() {
                                   <span className="absolute left-1 top-1 w-1.5 h-1.5 rounded-full" style={{ background: c }} />
                                 )}
                                 <span className="block leading-tight">
-                                  {fmtTime(s.startsAt)}&ndash;{fmtTimeEnd(s.startsAt, s.duration)}
+                                  {fmtTime(s.startsAt)}
                                   {picked && <span className="ml-1 text-[10px] font-black">#{rank + 1}</span>}
                                 </span>
                               </button>
@@ -490,6 +476,24 @@ export default function BookLessonPage() {
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border p-5 sticky top-4" style={{ borderColor: 'var(--bd)' }}>
             <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--txt3)' }}>Your choices</p>
+
+            {/* Lesson length — defaults to whatever each enrolment is normally
+                booked for, but not every family wants the studio default (30
+                min here, 45 there for another child). Overriding it re-fetches
+                availability at the new length and every slot's shown range
+                updates to match. Lives here (rather than up with the calendar
+                itself) so the flow reads as: tap a start time on the grid,
+                then dial in how long it runs. */}
+            <div className="mb-3">
+              <label className="ui-label">Lesson length</label>
+              <SearchableSelect
+                options={[30, 45, 60, 90].map(d => ({ value: String(d), label: `${d} min` }))}
+                value={durationOverride != null ? String(durationOverride) : ''}
+                onChange={v => setDurationOverride(v ? parseInt(v) : null)}
+                emptyLabel="Usual length"
+                placeholder="Usual length"
+              />
+            </div>
 
             {picks.length === 0 ? (
               <p className="text-sm" style={{ color: 'var(--txt3)' }}>
@@ -524,7 +528,7 @@ export default function BookLessonPage() {
                   <div className="mb-3 rounded-xl border px-3 py-2 text-sm" style={{ borderColor: 'var(--bd2)', background: 'var(--surf)' }}>
                     <p className="font-bold" style={{ color: 'var(--txt)' }}>{cap(chosen.instrument)}</p>
                     <p className="text-xs" style={{ color: 'var(--txt3)' }}>
-                      {chosen.studentName} · {picks[0]!.teacherName} · {picks[0]!.duration} min
+                      {fmtTime(picks[0]!.startsAt)}&ndash;{fmtTimeEnd(picks[0]!.startsAt, picks[0]!.duration)} · {picks[0]!.teacherName} · {picks[0]!.duration} min
                     </p>
                     <p className="text-[11px] mt-1" style={{ color: 'var(--txt4)' }}>
                       Price is confirmed on your invoice, not shown here.

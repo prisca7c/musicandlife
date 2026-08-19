@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { eq, and, ilike, or, inArray, sql, asc } from 'drizzle-orm';
-import { families, guardians, students, invoices, ledgerEntries, payments, paymentClaims, bankTransactions } from '@music-life/db';
+import { families, guardians, students, invoices, invoiceLineItems, lessons, ledgerEntries, payments, paymentClaims, bankTransactions } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateFamilyDto } from './dto/create-family.dto';
 import type { UpdateFamilyDto } from './dto/update-family.dto';
@@ -35,12 +35,39 @@ export class FamiliesService {
     const family = await this.db.db.query.families.findFirst({
       where: and(eq(families.id, id), eq(families.organizationId, orgId)),
       with: {
-        students: true,
+        students: {
+          with: {
+            enrollments: { with: { teacher: { columns: { id: true, firstName: true, lastName: true } } } },
+          },
+        },
         guardians: { with: { user: { columns: { id: true, email: true } } } },
       },
     });
     if (!family) throw new NotFoundException('Family not found');
-    return family;
+
+    // How much of the family's outstanding (not yet paid/void) invoice total
+    // was billed for each individual student's lessons — the family's own
+    // balance is a single pooled figure (payments/credits aren't allocated
+    // per student), so this is deliberately labelled "billed, unpaid" rather
+    // than a per-student balance: it's the one honest, traceable number that
+    // can be attributed to a specific student without inventing an allocation
+    // scheme for shared payments.
+    const unpaidByStudent = family.students.length === 0 ? [] : await this.db.db
+      .select({ studentId: lessons.studentId, total: sql<number>`coalesce(sum(${invoiceLineItems.amount}), 0)` })
+      .from(invoiceLineItems)
+      .innerJoin(invoices, eq(invoiceLineItems.invoiceId, invoices.id))
+      .innerJoin(lessons, eq(invoiceLineItems.lessonId, lessons.id))
+      .where(and(
+        eq(invoices.familyId, id),
+        inArray(invoices.status, ['draft', 'sent']),
+      ))
+      .groupBy(lessons.studentId);
+    const unpaidMap = new Map(unpaidByStudent.map(r => [r.studentId, Number(r.total)]));
+
+    return {
+      ...family,
+      students: family.students.map(s => ({ ...s, unpaidBilled: unpaidMap.get(s.id) ?? 0 })),
+    };
   }
 
   async create(orgId: string, dto: CreateFamilyDto) {
