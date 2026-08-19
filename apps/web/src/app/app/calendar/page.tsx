@@ -905,7 +905,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
         {/* Repeat weekly — turns this into a recurring weekly booking (booked directly) */}
         <div className="rounded-xl border p-3" style={{ borderColor: repeat ? 'var(--sage)' : 'var(--bd)', background: repeat ? 'var(--sage-lt)' : 'transparent' }}>
           <label className="flex items-center gap-2.5 cursor-pointer">
-            <input type="checkbox" checked={repeat} onChange={e => { setRepeat(e.target.checked); setPicks([]); }}
+            <input type="checkbox" checked={repeat} onChange={e => setRepeat(e.target.checked)}
               className="h-4 w-4 rounded" style={{ accentColor: 'var(--sage)' }} />
             <span className="text-sm font-semibold" style={{ color: 'var(--txt)' }}>Repeat weekly</span>
           </label>
