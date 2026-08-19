@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { useMe } from '@/lib/use-me';
+import { formatMoney } from '@/lib/money';
 import { fmtTime, studioDayString } from '@/lib/datetime';
 import { Badge } from '@/components/badge';
 import { PaidDot } from '@/components/paid-dot';
@@ -233,6 +234,13 @@ function AdminDashboard() {
   // Teachers get their own availability grid; non-teachers get an empty list.
   const { data: myAvailability = [] } = useApi<AvailWindow[]>('/staff/me/availability');
   const { data: kpis } = useApi<KpiData>('/reports/dashboard');
+  // Payroll balance isn't part of the (financials-stripped) scoped KPI payload —
+  // fetch the teacher's own staff record for it, same figure StaffAdminDetails
+  // shows on the admin-side profile. Two round trips (id, then the record), but
+  // both are cheap and SWR-cached, and this is the only place on the dashboard
+  // that needs it.
+  const { data: myStaffId } = useApi<{ id: string } | null>(kpis?.scoped ? '/staff/me' : null);
+  const { data: myStaff } = useApi<{ payrollBalance: number | null }>(myStaffId ? `/staff/${myStaffId.id}` : null);
   const { data: lessons = [], mutate: mutateLessons } = useApi<Lesson[]>(`/lessons?weekStart=${weekStart}`);
   // Marking attendance moves a lesson off "scheduled" — drop it from the local
   // cache immediately rather than waiting on a refetch, so the row disappears
@@ -285,10 +293,19 @@ function AdminDashboard() {
           were dropped: the "Today's lessons" list below already shows the
           real schedule, and a raw count of families/staff isn't something
           anyone checks on the way past. Financials stay admin-only. */}
-      <div className={`grid grid-cols-1 ${kpis?.scoped ? 'sm:grid-cols-1' : 'sm:grid-cols-3'} gap-4 mb-6`}>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        {kpis?.scoped && (
+          <StatCard label="Lessons this week" href="/app/calendar" icon={<Calendar size={20} />}
+            value={kpis.weeklyLessons.total}
+            sub={kpis.weeklyLessons.completed > 0 ? `${kpis.weeklyLessons.completed} completed so far` : undefined} />
+        )}
         <StatCard label={kpis?.scoped ? 'My students' : 'Active students'} href="/app/students" icon={<UserCheck size={20} />}
           value={kpis?.students.active ?? '—'}
           sub={kpis?.students.trial ? `+ ${kpis.students.trial} on trial` : undefined} />
+        {kpis?.scoped && (
+          <StatCard label="Payroll balance" href="/app/my-pay" icon={<PoundSterling size={20} />}
+            value={myStaff ? formatMoney(myStaff.payrollBalance ?? 0) : '—'} />
+        )}
         {!kpis?.scoped && (
           <>
             <StatCard label={`Revenue — ${monthLabel}`} href="/app/billing" icon={<PoundSterling size={20} />}

@@ -128,7 +128,7 @@ export class StaffService {
     const linkedStudentIds = new Set(member.assignments.map((a) => a.student.id));
     const enrolled = await this.db.db.query.enrollments.findMany({
       where: and(eq(enrollments.organizationId, orgId), eq(enrollments.teacherId, id)),
-      columns: { studentId: true, instrument: true, status: true },
+      columns: { id: true, studentId: true, instrument: true, status: true },
     });
     const extraIds = [...new Set(enrolled.map((e) => e.studentId))].filter((sid) => !linkedStudentIds.has(sid));
     const extraStudents = extraIds.length > 0
@@ -145,10 +145,10 @@ export class StaffService {
     // Prefer a live (non-withdrawn) enrolment when the student has more than
     // one with this teacher; fall back to the student's own status only when
     // there's no enrolment at all (a pure "Assign students" link).
-    const byStudent = new Map<string, { instrument: string; status: string }[]>();
+    const byStudent = new Map<string, { id: string; instrument: string; status: string }[]>();
     for (const e of enrolled) {
       if (!byStudent.has(e.studentId)) byStudent.set(e.studentId, []);
-      byStudent.get(e.studentId)!.push({ instrument: e.instrument, status: e.status });
+      byStudent.get(e.studentId)!.push({ id: e.id, instrument: e.instrument, status: e.status });
     }
     const unpaidByStudent = await this.unpaidBilledByStudent(orgId, [...linkedStudentIds, ...extraIds], id);
 
@@ -162,6 +162,10 @@ export class StaffService {
         // Only meaningful when there's at least one enrolment with this
         // teacher — otherwise there's no enrolment status to show at all.
         enrollmentStatus: relevant.length > 0 ? relevant[0]!.status : null,
+        // The one enrolment "Edit" acts on — a student with more than one
+        // enrolment with this teacher (rare: two instruments) edits the
+        // first; the rest stay reachable from the student's own profile.
+        enrollmentId: relevant.length > 0 ? relevant[0]!.id : null,
         unpaidBilled: unpaidByStudent.get(student.id) ?? 0,
       };
     }

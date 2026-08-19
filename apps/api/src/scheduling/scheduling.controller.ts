@@ -34,22 +34,25 @@ export class SchedulingController {
     return this.scheduling.getLessons(user.orgId, { weekStart, from, to, teacherId, studentId, scope }, { role: user.role, userId: user.userId });
   }
 
+  // Teacher-or-above — a teacher may book a lesson for themselves (their own
+  // calendar's "Add lesson" dialog), scoped server-side to their own teacherId.
   @Post('lessons')
-  @Roles('admin')
+  @Roles('teacher')
   createLesson(@CurrentUser() user: RequestUser, @Body() dto: CreateLessonDto) {
-    return this.scheduling.createLesson(user.orgId, dto);
+    return this.scheduling.createLesson(user.orgId, dto, { actor: { role: user.role, userId: user.userId } });
   }
 
   // Materialise an enrollment's weekly schedule into real lessons now, rather than
   // waiting for the daily recurrence worker (so booking a weekly lesson shows up
-  // on the calendar immediately).
+  // on the calendar immediately). Teacher-or-above, scoped to their own
+  // enrollments the same way createLesson is scoped to their own teacherId.
   @Post('lessons/recurring')
-  @Roles('admin')
+  @Roles('teacher')
   generateRecurring(@CurrentUser() user: RequestUser, @Body() dto: GenerateRecurringDto) {
     return this.scheduling.materializeEnrollment(user.orgId, dto.enrollmentId, {
       weeks: dto.weeks,
       fromDate: dto.startFrom,
-    });
+    }, { role: user.role, userId: user.userId });
   }
 
   @Get('lessons/:id')

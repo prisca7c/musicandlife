@@ -15,6 +15,7 @@ import { useInstruments } from '@/lib/use-instruments';
 import { SearchableSelect } from '@/components/searchable-select';
 import { EditStudentModal } from '@/components/edit-student-modal';
 import { EditFamilyModal } from '@/components/edit-family-modal';
+import { EditEnrollmentModal } from '@/components/edit-enrollment-modal';
 import { BackButton } from '@/components/back-button';
 import { Mail, Phone } from 'lucide-react';
 import { useRole } from '@/lib/use-role';
@@ -331,126 +332,6 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
 
 type EnrollmentRow = StudentDetail['enrollments'][number];
 
-// Edit an EXISTING enrollment's instrument, type, teacher, rate and lesson
-// length. Registration creates enrollments with a flat £45, no teacher, and
-// whatever instrument the family typed on the public form — so this is the
-// one place to fix any of that (including a mis-picked instrument) after the
-// fact, not just the status dropdown on the row.
-function EditEnrollmentModal({ open, onClose, enrollment, onSaved }: {
-  open: boolean; onClose: () => void; enrollment: EnrollmentRow | null; onSaved: () => void;
-}) {
-  const [lessonType, setLessonType] = useState<'private' | 'group'>('private');
-  const [instrument, setInstrument] = useState('');
-  const [teacherId, setTeacherId] = useState('');
-  const [rateText, setRateText] = useState('');
-  const [trialRateText, setTrialRateText] = useState('');
-  const [duration, setDuration] = useState(60);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
-  const { data: staff = [] } = useApi<StaffMember[]>(open ? '/staff' : null);
-  const orgInstruments = useInstruments();
-  const instruments = lessonType === 'private' ? orgInstruments.private : orgInstruments.group;
-
-  // Load the enrollment's current values whenever the modal opens on a row.
-  useEffect(() => {
-    if (!open || !enrollment) return;
-    setLessonType(enrollment.lessonType === 'group' ? 'group' : 'private');
-    setInstrument(enrollment.instrument);
-    setTeacherId(enrollment.teacher?.id ?? '');
-    setRateText((enrollment.rate / 100).toFixed(2));
-    setTrialRateText(enrollment.trialRate != null ? (enrollment.trialRate / 100).toFixed(2) : '');
-    setDuration(enrollment.defaultDuration ?? 60);
-    setError('');
-  }, [open, enrollment]);
-
-  async function save() {
-    if (!instrument.trim()) { setError('Choose an instrument.'); return; }
-    const pence = Math.round(parseFloat(rateText) * 100);
-    if (!Number.isFinite(pence) || pence < 0) { setError('Enter a valid rate.'); return; }
-    if (!Number.isInteger(duration) || duration < 5 || duration > 240) { setError('Duration must be 5–240 minutes.'); return; }
-    // Blank trial rate = clear it (trials fall back to the normal rate).
-    let trialRate: number | null = null;
-    if (trialRateText.trim() !== '') {
-      const tp = Math.round(parseFloat(trialRateText) * 100);
-      if (!Number.isFinite(tp) || tp < 0) { setError('Enter a valid trial rate, or leave it blank.'); return; }
-      trialRate = tp;
-    }
-    if (!enrollment) return;
-    setSaving(true); setError('');
-    try {
-      await apiFetch(`/enrollments/${enrollment.id}`, {
-        method: 'PATCH', token: tok(),
-        body: JSON.stringify({ instrument, lessonType, teacherId: teacherId || null, rate: pence, trialRate, duration }),
-      });
-      onSaved(); onClose();
-    } catch (err) { setError(err instanceof Error ? err.message : 'Could not save'); }
-    finally { setSaving(false); }
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title={enrollment ? `Edit ${enrollment.instrument} enrollment` : 'Edit enrollment'}>
-      {error && <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="ui-label">Lesson type</label>
-            <div className="flex gap-4 mt-2">
-              {(['private', 'group'] as const).map(t => (
-                <label key={t} className="flex items-center gap-2 cursor-pointer text-sm">
-                  <input type="radio" checked={lessonType === t} onChange={() => { setLessonType(t); setInstrument(''); }}
-                    style={{ accentColor: 'var(--sage)' }} />
-                  <span className="capitalize">{t}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="ui-label">Instrument <span style={{ color: 'var(--coral)' }}>*</span></label>
-            <SearchableSelect
-              options={instruments.map(i => ({ value: i, label: i.charAt(0).toUpperCase() + i.slice(1) }))}
-              value={instrument} onChange={setInstrument} placeholder="Select…"
-            />
-          </div>
-        </div>
-        <div>
-          <label className="ui-label">Teacher</label>
-          <SearchableSelect
-            options={eligibleTeachers(staff, instrument).map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
-            value={teacherId} onChange={setTeacherId} emptyLabel="Unassigned" placeholder="Unassigned"
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="ui-label">Rate (£)</label>
-            <input type="number" step="0.01" min="0" value={rateText}
-              onChange={e => setRateText(e.target.value)} className="ui-input w-full" />
-          </div>
-          <div>
-            <label className="ui-label">Duration (min)</label>
-            <input type="number" step="5" min="5" max="240" value={duration}
-              onChange={e => setDuration(parseInt(e.target.value || '0', 10))} className="ui-input w-full" />
-          </div>
-        </div>
-        <div>
-          <label className="ui-label">Trial rate (£) — optional</label>
-          <input type="number" step="0.01" min="0" value={trialRateText} placeholder="Leave blank for normal rate"
-            onChange={e => setTrialRateText(e.target.value)} className="ui-input w-full" />
-        </div>
-        <p className="text-xs" style={{ color: 'var(--txt4)' }}>
-          The rate is what the family is charged for this enrollment; a lesson of a different length is prorated against the duration.
-          {lessonType === 'group' && ' For a group class, this is the set price and length.'}
-          {' '}A trial rate is a flat price charged for a lesson marked as a trial; leave it blank to charge trials the normal rate.
-        </p>
-        <div className="flex gap-3 pt-1">
-          <button onClick={save} disabled={saving} className="ui-btn-primary">{saving ? 'Saving…' : 'Save changes'}</button>
-          <button onClick={onClose} className="ui-btn-ghost">Cancel</button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
 // Change an already-recurring enrollment's weekly day/time. "Apply to all
 // future lessons" cancels and rebooks everything from today; unchecking it
 // reveals a date picker instead, so the old day/time keeps running up to
@@ -635,7 +516,7 @@ export default function StudentDetailPage() {
   const router = useRouter();
   const id = params.id;
   const [showEnroll, setShowEnroll] = useState(false);
-  const [editEnrollment, setEditEnrollment] = useState<EnrollmentRow | null>(null);
+  const [editEnrollmentId, setEditEnrollmentId] = useState<string | null>(null);
   const [rescheduleEnrollment, setRescheduleEnrollment] = useState<EnrollmentRow | null>(null);
   const [showEditStudent, setShowEditStudent] = useState(false);
   const [showEditFamily, setShowEditFamily] = useState(false);
@@ -708,7 +589,7 @@ export default function StudentDetailPage() {
   return (
     <div>
       <AddEnrollmentModal open={showEnroll} onClose={() => setShowEnroll(false)} studentId={id} onCreated={load} />
-      <EditEnrollmentModal open={!!editEnrollment} onClose={() => setEditEnrollment(null)} enrollment={editEnrollment} onSaved={load} />
+      <EditEnrollmentModal open={!!editEnrollmentId} onClose={() => setEditEnrollmentId(null)} enrollmentId={editEnrollmentId} onSaved={load} />
       <RescheduleWeeklyModal open={!!rescheduleEnrollment} onClose={() => setRescheduleEnrollment(null)} enrollment={rescheduleEnrollment} onSaved={load} />
       <EditStudentModal open={showEditStudent} onClose={() => setShowEditStudent(false)} studentId={id} onSaved={load} />
       {student.family && (
@@ -825,9 +706,11 @@ export default function StudentDetailPage() {
           <div className="data-table-wrap overflow-hidden">
             <div className="px-5 py-3.5 border-b flex items-center justify-between" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
               <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Enrollments</h2>
-              <button onClick={() => setShowEnroll(true)} className="ui-btn-primary text-xs px-3 py-1.5">
-                + Add enrollment
-              </button>
+              {role !== 'teacher' && (
+                <button onClick={() => setShowEnroll(true)} className="ui-btn-primary text-xs px-3 py-1.5">
+                  + Add enrollment
+                </button>
+              )}
             </div>
             <table className="data-table">
               <thead>
@@ -836,14 +719,20 @@ export default function StudentDetailPage() {
                   <th>Type</th>
                   <th>Teacher</th>
                   <th>Term</th>
-                  <th>Rate</th>
+                  {/* Rate/billing and edit actions are hidden from teachers —
+                      a shared student can have enrolments with OTHER
+                      teachers, and a teacher shouldn't see what a colleague
+                      charges (or be able to edit it). Their own rate for
+                      their own enrolment lives in the Assigned Students
+                      card on their own staff profile instead. */}
+                  {role !== 'teacher' && <th>Rate</th>}
                   <th>Status</th>
-                  <th>Actions</th>
+                  {role !== 'teacher' && <th>Actions</th>}
                 </tr>
               </thead>
               <tbody>
                 {student.enrollments.length === 0 && (
-                  <tr><td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+                  <tr><td colSpan={role !== 'teacher' ? 7 : 5} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                     No enrollments yet.
                   </td></tr>
                 )}
@@ -867,46 +756,48 @@ export default function StudentDetailPage() {
                         : '—'}
                     </td>
                     <td style={{ color: 'var(--txt3)' }}>{e.term?.name ?? '—'}</td>
-                    <td className="font-medium">{formatMoney(e.rate)}</td>
+                    {role !== 'teacher' && <td className="font-medium">{formatMoney(e.rate)}</td>}
                     <td><Badge variant={e.status}>{e.status}</Badge></td>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => setEditEnrollment(e)}
-                          className="text-xs font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}
-                          title="Edit teacher, rate and duration">
-                          Edit
-                        </button>
-                        <select value={e.status} onChange={ev => changeEnrollmentStatus(e.id, ev.target.value)}
-                          className="text-xs border rounded-lg px-2 py-1" style={{ borderColor: 'var(--bd2)' }}
-                          title="Change enrollment status">
-                          <option value="waiting">Waiting</option>
-                          <option value="trial">Trial</option>
-                          <option value="active">Active</option>
-                          <option value="paused">Paused</option>
-                          <option value="withdrawn">Withdrawn</option>
-                        </select>
-                        {e.scheduleRule && (
-                          <>
-                            <button onClick={() => setRescheduleEnrollment(e)}
-                              className="text-xs font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}
-                              title="Change the weekly day/time">
-                              Reschedule
-                            </button>
-                            <button onClick={() => stopWeekly(e.id)}
-                              className="text-xs font-semibold hover:underline" style={{ color: 'var(--coral)' }}>
-                              Stop weekly
-                            </button>
-                          </>
-                        )}
-                        {role === 'admin' && (
-                          <button onClick={() => deleteEnrollment(e.id, e.instrument)}
-                            className="text-xs font-semibold hover:underline" style={{ color: 'var(--coral)' }}
-                            title="Permanently delete — only works if this enrolment has no lesson history">
-                            Delete
+                    {role !== 'teacher' && (
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => setEditEnrollmentId(e.id)}
+                            className="text-xs font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}
+                            title="Edit teacher, rate and duration">
+                            Edit
                           </button>
-                        )}
-                      </div>
-                    </td>
+                          <select value={e.status} onChange={ev => changeEnrollmentStatus(e.id, ev.target.value)}
+                            className="text-xs border rounded-lg px-2 py-1" style={{ borderColor: 'var(--bd2)' }}
+                            title="Change enrollment status">
+                            <option value="waiting">Waiting</option>
+                            <option value="trial">Trial</option>
+                            <option value="active">Active</option>
+                            <option value="paused">Paused</option>
+                            <option value="withdrawn">Withdrawn</option>
+                          </select>
+                          {e.scheduleRule && (
+                            <>
+                              <button onClick={() => setRescheduleEnrollment(e)}
+                                className="text-xs font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}
+                                title="Change the weekly day/time">
+                                Reschedule
+                              </button>
+                              <button onClick={() => stopWeekly(e.id)}
+                                className="text-xs font-semibold hover:underline" style={{ color: 'var(--coral)' }}>
+                                Stop weekly
+                              </button>
+                            </>
+                          )}
+                          {role === 'admin' && (
+                            <button onClick={() => deleteEnrollment(e.id, e.instrument)}
+                              className="text-xs font-semibold hover:underline" style={{ color: 'var(--coral)' }}
+                              title="Permanently delete — only works if this enrolment has no lesson history">
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
