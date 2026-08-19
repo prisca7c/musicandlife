@@ -11,6 +11,7 @@ import { Modal } from '@/components/modal';
 import { SearchableSelect } from '@/components/searchable-select';
 import { useInstruments } from '@/lib/use-instruments';
 import { EditStudentModal } from '@/components/edit-student-modal';
+import { useIntakeBadges } from '@/lib/use-intake-badges';
 import { Plus, CircleCheck, CircleX, Upload, Pencil, Trash2 } from 'lucide-react';
 
 interface Registration {
@@ -370,6 +371,7 @@ interface WaitingStudent {
 
 export default function IntakePage() {
   const [tab, setTab] = useState<'registrations' | 'waiting' | 'leads' | 'import'>('registrations');
+  const { signupsPending, waitingList } = useIntakeBadges();
   const [regFilter, setRegFilter] = useState('pending');
   const [selectedReg, setSelectedReg] = useState<Registration | null>(null);
   const [showAddLead, setShowAddLead] = useState(false);
@@ -477,16 +479,31 @@ export default function IntakePage() {
 
       {/* Tab bar */}
       <div className="flex gap-1 mb-5 border-b" style={{ borderColor: 'var(--bd)' }}>
-        {(['registrations', 'waiting', 'leads', 'import'] as const).map(t => (
+        {(['registrations', 'waiting', 'leads', 'import'] as const).map(t => {
+          // "Enquiries & Waitlist" used to name the leads tab, right next to a
+          // separate tab that's ALSO called "Waiting list" — two different
+          // tabs both saying "waitlist" for two unrelated concepts (leads are
+          // prospects who haven't signed up at all; the waiting list tab is
+          // real students not yet scheduled for a trial). Dropped from the
+          // leads tab's name so there's only one "waitlist" in the UI.
+          const badgeCount = t === 'registrations' ? signupsPending : t === 'waiting' ? waitingList : 0;
+          return (
           <button key={t} onClick={() => setTab(t)}
-            className="px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors"
+            className="px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors flex items-center gap-1.5"
             style={{
               borderColor: tab === t ? 'var(--sage)' : 'transparent',
               color: tab === t ? 'var(--sage)' : 'var(--txt3)',
             }}>
-            {t === 'registrations' ? 'Sign-ups' : t === 'waiting' ? 'Waiting list' : t === 'leads' ? 'Enquiries & Waitlist' : 'Import (CSV)'}
+            {t === 'registrations' ? 'Sign-ups' : t === 'waiting' ? 'Waiting list' : t === 'leads' ? 'Enquiries' : 'Import (CSV)'}
+            {badgeCount > 0 && (
+              <span className="text-[10px] font-bold rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center"
+                style={{ background: 'var(--coral)', color: '#fff' }}>
+                {badgeCount > 99 ? '99+' : badgeCount}
+              </span>
+            )}
           </button>
-        ))}
+          );
+        })}
       </div>
 
       {tab === 'registrations' && (

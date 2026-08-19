@@ -253,6 +253,13 @@
       "when": 1787072444971,
       "tag": "0035_nullable_invoice_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1787430000000,
+      "tag": "0036_lesson_requests_recurring_end_date",
+      "breakpoints": true
     }
   ]
 }

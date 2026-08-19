@@ -3,9 +3,10 @@ import { SchedulingController } from './scheduling.controller';
 import { SchedulingService } from './scheduling.service';
 import { RecurrenceWorker } from './recurrence.worker';
 import { AuthModule } from '../auth/auth.module';
+import { AttendanceModule } from '../attendance/attendance.module';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, AttendanceModule],
   controllers: [SchedulingController],
   providers: [SchedulingService, RecurrenceWorker],
   exports: [SchedulingService],

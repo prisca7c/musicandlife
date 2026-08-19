@@ -10,6 +10,7 @@ import type { CreateRescheduleRequestDto } from './dto/reschedule-request.dto';
 import type { CreateLessonRequestDto } from './dto/lesson-request.dto';
 import type { BaseRole } from '@music-life/types';
 import { NotificationsService } from '../notifications/notifications.service';
+import { AttendanceService } from '../attendance/attendance.service';
 import { parseZonedDateTime, zonedWeekdayAndTime, formatInZone } from '../common/timezone';
 
 // Resolves to the caller's own staffId when their role is exactly 'teacher' (so service
@@ -85,6 +86,7 @@ export class SchedulingService {
   constructor(
     private readonly db: DbService,
     private readonly notifications: NotificationsService,
+    private readonly attendance: AttendanceService,
   ) {}
 
   // Booking conflicts are check-then-act, which races: two concurrent bookings can
@@ -257,11 +259,12 @@ export class SchedulingService {
     return withPayment!;
   }
 
-  // `notify` defaults true (a genuine one-off booking). Both bulk call sites —
-  // materializeEnrollment's recurring backfill (could be dozens of lessons per
-  // run) and createFamilyBooking (which already sends its own richer
-  // confirmation email) — explicitly pass false so this never double-notifies
-  // or spams a family/teacher with one banner per generated week.
+  // `notify` defaults true (a genuine one-off booking). materializeEnrollment's
+  // recurring backfill (could be dozens of lessons per run) explicitly passes
+  // false so it never spams a family/teacher with one banner per generated
+  // week. A confirmed lesson request (decideLessonRequest, including a
+  // confirmed family booking) leaves notify at its default — the same
+  // in-app+email notice a front-desk-confirmed request already used.
   async createLesson(orgId: string, dto: CreateLessonDto, opts?: { seriesSlotAt?: Date; notify?: boolean }) {
     // A caller-supplied teacherId must belong to this org. Without this, a bad (or
     // foreign-org) id slips past the conflict check and blows up on the row's
@@ -631,24 +634,34 @@ export class SchedulingService {
 
   /**
    * Permanently remove a lesson — distinct from cancelLesson, which keeps the
-   * row as an audit trail. Only safe once nothing depends on it: no attendance
-   * recorded (that's a real charge/credit event, reverse it from Attendance
-   * instead) and no invoice line item referencing it (that's billing history).
-   * Scheduled/makeup lessons and soft-cancelled ones with no attendance are
-   * the only rows that can reach this state.
+   * row as an audit trail. Never allowed once the lesson is on an invoice
+   * (that's billing history — reversing the ledger charge behind it would
+   * desync the invoice total, so it must be cancelled instead). Attendance is
+   * different: an admin CAN delete a lesson with attendance recorded — the
+   * server reverses whatever billing effect it applied (same reversal
+   * markAttendance itself uses on a correction) before removing the row, so
+   * nothing is silently lost. A teacher hits the same guard as before and
+   * must reverse it from Attendance themselves first.
    */
   async deleteLesson(orgId: string, id: string, actor?: Actor) {
     const lesson = await this.getLesson(orgId, id);
     await this.assertOwnsLesson(orgId, lesson.teacherId, actor);
-    if (lesson.attendance) {
-      throw new BadRequestException('This lesson has attendance recorded and can’t be deleted — reverse it from Attendance first.');
-    }
     const billed = await this.db.db.query.invoiceLineItems.findFirst({
       where: eq(invoiceLineItems.lessonId, id),
       columns: { id: true },
     });
     if (billed) {
       throw new BadRequestException('This lesson is on an invoice and can’t be deleted — cancel it instead.');
+    }
+    if (lesson.attendance) {
+      if (actor?.role !== 'admin') {
+        throw new BadRequestException('This lesson has attendance recorded and can’t be deleted — reverse it from Attendance first, or ask an admin to delete it.');
+      }
+      return this.db.db.transaction(async (tx) => {
+        await this.attendance.reverseAndClearAttendance(orgId, id, tx);
+        await tx.delete(lessons).where(eq(lessons.id, id));
+        return { id };
+      });
     }
     await this.db.db.delete(lessons).where(eq(lessons.id, id));
     return { id };
@@ -1097,20 +1110,23 @@ export class SchedulingService {
   // minimum notice window to enforce here.
 
   /**
-   * A family self-books from the calendar. Unlike the front-desk lesson request
-   * (which creates nothing until a teacher confirms a time), this books the
-   * family's 1st-choice time IMMEDIATELY — so they leave with a confirmed lesson
-   * — while recording the 2nd/3rd choices and opening an 'auto_confirmed' request
-   * the teacher can Accept, Move (to a recorded alternative) or Decline. The
-   * caller (family-portal) has already checked the student, enrolment and teacher
-   * belong to this family.
+   * A family self-books from the calendar. Nothing is booked or shown on the
+   * calendar until a teacher or admin confirms a time — the whole point of
+   * the request system is that a family's "1st choice" is a proposal, not a
+   * guarantee the teacher is actually free (the availability picker can be
+   * stale, or a slot can fill between two families requesting it). This is
+   * now identical to a front-desk-created request (createLessonRequest):
+   * insert a 'pending' row with up to three ranked times and nothing else —
+   * confirming it (decideLessonRequest) is what actually creates the lesson.
+   * The caller (family-portal) has already checked the student, enrolment
+   * and teacher belong to this family.
    */
   async createFamilyBooking(
     orgId: string,
     dto: {
-      studentId: string; teacherId: string; enrollmentId: string; termId?: string;
+      studentId: string; teacherId: string; enrollmentId: string;
       startsAt: string; startsAt2?: string; startsAt3?: string;
-      duration: number; isTrialLesson?: boolean; recurring?: boolean; recurringEndDate?: string; notes?: string;
+      duration: number; recurring?: boolean; recurringEndDate?: string; notes?: string;
     },
     requestedBy: string,
   ) {
@@ -1165,44 +1181,14 @@ export class SchedulingService {
       throw new BadRequestException('That teacher is no longer taking online bookings. Please contact the studio to be reassigned.');
     }
 
-    // Instant-book the 1st choice — runs the shared advisory lock + conflict
-    // checks, so self-service can't double-book a teacher.
-    const lesson = await this.createLesson(orgId, {
-      studentId: dto.studentId,
-      teacherId: dto.teacherId,
-      enrollmentId: dto.enrollmentId,
-      termId: dto.termId,
-      startsAt: ranked[0]!.toISOString(),
-      duration: dto.duration,
-      isTrialLesson: dto.isTrialLesson ?? false,
-      notes: dto.notes,
-    }, { notify: false }); // the caller (bookLesson) sends its own richer confirmation email
-
-    // Recording a recurring rule switches on the nightly generator for this
-    // enrolment; materialise the near-term window now so the series shows up
-    // immediately, not only after the 2 AM top-up.
-    if (dto.recurring) {
-      // An end date (if given) must be after the first lesson, else the series
-      // would generate nothing — reject rather than silently book an empty run.
-      if (dto.recurringEndDate) {
-        const endCap = parseZonedDateTime(`${dto.recurringEndDate}T23:59:59`, tz);
-        if (endCap.getTime() < ranked[0]!.getTime()) {
-          throw new BadRequestException('The end date must be on or after the first lesson.');
-        }
+    // An end date (if given) must be after the first choice, else a confirmed
+    // recurring series would generate nothing — reject at request time rather
+    // than silently accepting a request that can never produce a series.
+    if (dto.recurring && dto.recurringEndDate) {
+      const endCap = parseZonedDateTime(`${dto.recurringEndDate}T23:59:59`, tz);
+      if (endCap.getTime() < ranked[0]!.getTime()) {
+        throw new BadRequestException('The end date must be on or after the first lesson.');
       }
-      const rule = { ...zonedWeekdayAndTime(ranked[0]!, tz), endDate: dto.recurringEndDate };
-      await this.db.db.update(enrollments)
-        .set({ scheduleRule: rule, updatedAt: new Date() })
-        .where(and(eq(enrollments.id, dto.enrollmentId), eq(enrollments.organizationId, orgId)));
-      // Generate the series starting from the first booked lesson, NOT from now —
-      // materialising from now could emit an earlier occurrence than the one the
-      // family actually picked (e.g. picking next Wednesday for a weekly series
-      // that would otherwise start this Monday), billing them for a lesson they
-      // never booked. Anchoring at ranked[0] keeps the series to the times the
-      // family actually chose.
-      await this.materializeEnrollment(orgId, dto.enrollmentId, { fromDate: ranked[0]!.toISOString() }).catch((e) =>
-        this.logger.warn(`materialize after recurring family booking failed: ${e}`),
-      );
     }
 
     const [req] = await this.db.db.insert(lessonRequests).values({
@@ -1214,14 +1200,14 @@ export class SchedulingService {
       proposedStartsAt: ranked[0]!,
       proposedStartsAt2: ranked[1],
       proposedStartsAt3: ranked[2],
-      status: 'auto_confirmed',
+      status: 'pending',
       isRecurring: dto.recurring ?? false,
-      createdLessonId: lesson.id,
+      recurringEndDate: dto.recurring ? (dto.recurringEndDate ?? null) : null,
       requestedBy,
       notes: dto.notes,
     }).returning();
 
-    return { lesson, request: req! };
+    return { request: req! };
   }
 
   /**
@@ -1636,19 +1622,63 @@ export class SchedulingService {
     if (claimed.length === 0) throw new BadRequestException('Request already decided');
 
     if (decision === 'confirmed' && target) {
+      // Trial pricing and which term the lesson belongs to are both decided by
+      // the ENROLMENT's own state, never carried on the request — matches the
+      // family-booking principle (a client-supplied trial flag would be an
+      // unlimited cheap-lessons bypass) and closes the same gap for a
+      // front-desk request: this used to default isTrialLesson to false and
+      // drop the term unconditionally, silently billing a trial enrolment's
+      // confirmed lesson at full rate.
+      let isTrialLesson = false;
+      let termId: string | undefined;
+      if (req.enrollmentId) {
+        const enrollment = await this.db.db.query.enrollments.findFirst({
+          where: eq(enrollments.id, req.enrollmentId),
+          columns: { status: true, termId: true },
+        });
+        isTrialLesson = enrollment?.status === 'trial';
+        termId = enrollment?.termId ?? undefined;
+      }
+
       // target is a zoned ISO instant; createLesson re-parses it (a Z-suffixed
       // string round-trips) and re-checks conflicts under a lock.
       const lesson = await this.createLesson(orgId, {
         studentId: req.studentId,
         teacherId: req.teacherId,
         enrollmentId: req.enrollmentId ?? undefined,
+        termId,
         startsAt: target,
         duration: req.duration,
+        isTrialLesson,
         notes: req.notes ?? undefined,
-      });
+      }); // default notify: true — fires notifyBooked (teacher + family portal users), same as any other confirmed request
       await this.db.db.update(lessonRequests)
         .set({ createdLessonId: lesson.id })
         .where(eq(lessonRequests.id, id));
+
+      // A family booking that asked for a weekly series only sets up the
+      // recurrence NOW, once the first occurrence is actually confirmed — not
+      // at request time, when nothing was guaranteed to work for the teacher.
+      if (req.isRecurring && req.enrollmentId) {
+        const tz = await this.getOrgTimezone(this.db.db, orgId);
+        const targetDate = new Date(target);
+        const endDate = req.recurringEndDate ?? undefined;
+        const endCap = endDate ? parseZonedDateTime(`${endDate}T23:59:59`, tz) : null;
+        if (!endCap || endCap.getTime() >= targetDate.getTime()) {
+          const rule = { ...zonedWeekdayAndTime(targetDate, tz), endDate };
+          await this.db.db.update(enrollments)
+            .set({ scheduleRule: rule, updatedAt: new Date() })
+            .where(and(eq(enrollments.id, req.enrollmentId), eq(enrollments.organizationId, orgId)));
+          // Anchor at the confirmed time, not now — materialising from now could
+          // emit an earlier occurrence than the one actually confirmed.
+          await this.materializeEnrollment(orgId, req.enrollmentId, { fromDate: targetDate.toISOString() }).catch((e) =>
+            this.logger.warn(`materialize after confirmed recurring booking failed: ${e}`),
+          );
+        } else {
+          this.logger.warn(`Recurring booking ${id} confirmed past its own end date (${endDate}) — series not set up.`);
+        }
+      }
+
       return { id, status: decision, lessonId: lesson.id };
     }
 

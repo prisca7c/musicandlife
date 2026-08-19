@@ -75,7 +75,9 @@ export default function BookLessonPage() {
   // Optional last date for a recurring series (studio-local YYYY-MM-DD); '' = open-ended.
   const [recurringEnd, setRecurringEnd] = useState('');
   const [endMode, setEndMode] = useState<'ongoing' | 'term' | 'custom'>('ongoing');
-  // Ranked time picks (1st = booked now, 2nd/3rd = fallbacks). All must belong
+  // Ranked time picks (1st = the teacher's first option to confirm, 2nd/3rd =
+  // fallbacks — none of these book anything until the teacher confirms one).
+  // All must belong
   // to the same teacher+duration calendar — you book one lesson at one length,
   // not a mix of teachers or lesson lengths.
   const [picks, setPicks] = useState<Slot[]>([]);
@@ -262,7 +264,7 @@ export default function BookLessonPage() {
   async function book() {
     const first = picks[0];
     if (!first || !chosen) return;
-    if (recurring && !confirm(`Set up a weekly lesson with ${first.teacherName} every ${fmtDate(first.startsAt, { weekday: 'long' })} at ${fmtTime(first.startsAt)}${recurringEnd ? ` until ${recurringEnd}` : ', with no end date'}? This books an ongoing series, not a one-off lesson.`)) return;
+    if (recurring && !confirm(`Request a weekly lesson with ${first.teacherName} every ${fmtDate(first.startsAt, { weekday: 'long' })} at ${fmtTime(first.startsAt)}${recurringEnd ? ` until ${recurringEnd}` : ', with no end date'}? This asks for an ongoing series, not a one-off lesson — your teacher confirms the first time before the series is set up.`)) return;
     setBooking(true);
     try {
       await apiFetch('/family/lessons', {
@@ -291,12 +293,12 @@ export default function BookLessonPage() {
         <Check size={32} className="text-[var(--sage-dk)]" />
       </div>
       <h2 className="text-xl font-black mb-2" style={{ color: 'var(--txt)' }}>
-        {done.recurring ? 'Weekly lesson set up!' : 'Lesson booked!'}
+        Request sent!
       </h2>
       <p className="text-sm mb-6 max-w-md" style={{ color: 'var(--txt3)' }}>
         {done.recurring
-          ? 'Your weekly lesson is now on the calendar. Your teacher will confirm it or suggest another time.'
-          : 'Your first-choice time is booked. Your teacher will confirm it, or move it to one of your other choices if they need to.'}
+          ? 'Your teacher will confirm your first weekly time before the series goes on the calendar. You’ll get an email once it’s confirmed.'
+          : 'Nothing is booked yet — your teacher will confirm your first-choice time, or pick one of your back-ups if that one doesn’t work. You’ll get an email once it’s confirmed.'}
       </p>
       <div className="flex gap-3">
         <button onClick={() => { setDone(null); setPicks([]); setChosenEnrollmentId(null); setRecurring(false); setRecurringEnd(''); setEndMode('ongoing'); }}
@@ -319,7 +321,7 @@ export default function BookLessonPage() {
         title={
           <span className="inline-flex items-center gap-2">
             Book a lesson
-            <InfoTooltip text="Pick your best time and up to two back-ups. Your first choice is booked straight away; your teacher confirms it or moves it to a back-up if that time doesn't work. You'll only ever see times the teacher is genuinely free." />
+            <InfoTooltip text="Pick your best time and up to two back-ups. Your teacher reviews these and confirms whichever works — nothing is booked until they do. You'll only ever see times the teacher is genuinely free." />
           </span>
         }
         subtitle="Choose who it's for, then tap your preferred times on the calendar"
@@ -497,7 +499,7 @@ export default function BookLessonPage() {
 
             {picks.length === 0 ? (
               <p className="text-sm" style={{ color: 'var(--txt3)' }}>
-                Tap a time on the calendar. Your <strong>1st</strong> choice is booked right away; add up to two back-ups your teacher can move it to.
+                Tap a time on the calendar. Your <strong>1st</strong> choice is what your teacher reviews first; add up to two back-ups in case that one doesn&rsquo;t work for them.
               </p>
             ) : (
               <>
@@ -549,7 +551,7 @@ export default function BookLessonPage() {
                             could show a different day than the column the parent
                             actually clicked. */}
                         {fmtDate(p.startsAt, { weekday: 'short', day: 'numeric', month: 'short' })} · {fmtTime(p.startsAt)}
-                        {i === 0 && <span className="ml-1.5 text-[10px] font-bold uppercase" style={{ color: 'var(--sage-dk)' }}>booked now</span>}
+                        {i === 0 && <span className="ml-1.5 text-[10px] font-bold uppercase" style={{ color: 'var(--sage-dk)' }}>1st choice</span>}
                       </span>
                       <button onClick={() => setPicks(picks.filter((_, j) => j !== i))} className="text-[var(--txt4)] hover:text-[var(--txt)]" aria-label="Remove">
                         <X size={14} />
@@ -622,7 +624,7 @@ export default function BookLessonPage() {
                 <button onClick={book} disabled={booking || !chosen}
                   className="w-full bg-[var(--sage)] text-white font-bold text-sm py-2.5 rounded-xl hover:bg-[var(--sage-dk)] disabled:opacity-50 flex items-center justify-center gap-2">
                   {booking ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-                  {recurring ? 'Set up weekly lesson' : 'Book & send to teacher'}
+                  {recurring ? 'Request weekly lesson' : 'Send request to teacher'}
                 </button>
               </>
             )}

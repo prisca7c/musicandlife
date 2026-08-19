@@ -14,6 +14,7 @@ import { UserPlus, Search, Mail, Phone, Home } from 'lucide-react';
 import { AddStudentModal } from '@/components/add-student-modal';
 import { EditStudentModal } from '@/components/edit-student-modal';
 import { useRole } from '@/lib/use-role';
+import { useIntakeBadges } from '@/lib/use-intake-badges';
 import IntakePage from '@/app/app/intake/page';
 import { Pencil, Trash2 } from 'lucide-react';
 
@@ -339,6 +340,7 @@ function StudentRoster({ status }: { status: 'active' | 'trial' }) {
 // just gets the active roster with no tab bar at all.
 export default function StudentsPage() {
   const role = useRole();
+  const { total: pendingTotal } = useIntakeBadges();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -361,12 +363,18 @@ export default function StudentsPage() {
       <div className="flex gap-1 mb-5 border-b" style={{ borderColor: 'var(--bd)' }}>
         {(['active', 'trial', 'pending'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className="px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px capitalize transition-colors"
+            className="px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px capitalize transition-colors flex items-center gap-1.5"
             style={{
               borderColor: tab === t ? 'var(--sage)' : 'transparent',
               color: tab === t ? 'var(--sage)' : 'var(--txt3)',
             }}>
             {t}
+            {t === 'pending' && pendingTotal > 0 && (
+              <span className="text-[10px] font-bold rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center"
+                style={{ background: 'var(--coral)', color: '#fff' }}>
+                {pendingTotal > 99 ? '99+' : pendingTotal}
+              </span>
+            )}
           </button>
         ))}
       </div>
