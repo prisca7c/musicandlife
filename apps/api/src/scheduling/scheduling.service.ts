@@ -477,7 +477,14 @@ export class SchedulingService {
         );
       }
     }
-    return { created, skippedExisting, skippedConflicts, through: windowEnd.toISOString(), weeks };
+    // Report the actual last date this series can reach, not just the rolling
+    // generation window — the generation loop above already stops early at
+    // endCap (a term end or custom "until" date), so a series capped short of
+    // the window correctly stopped on the calendar, but this summary kept
+    // reporting the full windowEnd regardless, telling the booker their
+    // series ran weeks further than it actually does.
+    const through = endCap && endCap.getTime() < windowEnd.getTime() ? endCap : windowEnd;
+    return { created, skippedExisting, skippedConflicts, through: through.toISOString(), weeks };
   }
 
   /**
