@@ -305,6 +305,7 @@ export class StaffService {
           eq(teacherAssignments.organizationId, orgId),
         ),
       );
+    return { deleted: true };
   }
 
   // ─── Availability windows ─────────────────────────────────────────────────

@@ -31,6 +31,8 @@ export function AddStudentModal({ open, onClose, onCreated }: {
   const [families, setFamilies] = useState<Family[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [familyId, setFamilyId] = useState('');
+  const [newFamily, setNewFamily] = useState(false);
+  const [newFamilyName, setNewFamilyName] = useState('');
   const [status, setStatus] = useState('active');
   const [lessonType, setLessonType] = useState<'private' | 'group'>('private');
   const [instrument, setInstrument] = useState('');
@@ -48,18 +50,29 @@ export function AddStudentModal({ open, onClose, onCreated }: {
       apiFetch<Family[]>('/families', { token: t }).then(setFamilies).catch(() => {});
       apiFetch<StaffMember[]>('/staff', { token: t }).then(setStaff).catch(() => {});
       setFamilyId(''); setStatus('active'); setError('');
+      setNewFamily(false); setNewFamilyName('');
       setLessonType('private'); setInstrument(''); setTeacherId(''); setDuration(30);
     }
   }, [open]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!familyId) { setError('Please select a family'); return; }
+    if (newFamily) {
+      if (!newFamilyName.trim()) { setError('Please enter a family name'); return; }
+    } else if (!familyId) { setError('Please select a family'); return; }
     setSaving(true); setError('');
     const f = new FormData(e.currentTarget);
     try {
+      let resolvedFamilyId = familyId;
+      if (newFamily) {
+        const fam = await apiFetch<{ id: string }>('/families', { method: 'POST', token: tok(), body: JSON.stringify({
+          name: newFamilyName, contactName: f.get('familyContactName') || undefined,
+          email: f.get('familyEmail') || undefined, phone: f.get('familyPhone') || undefined,
+        })});
+        resolvedFamilyId = fam.id;
+      }
       const created = await apiFetch<{ id: string }>('/students', { method: 'POST', token: tok(), body: JSON.stringify({
-        familyId, firstName: f.get('firstName'), lastName: f.get('lastName'),
+        familyId: resolvedFamilyId, firstName: f.get('firstName'), lastName: f.get('lastName'),
         dob: f.get('dob') || undefined, email: f.get('email') || undefined, status,
         notes: f.get('notes') || undefined,
       })});
@@ -88,11 +101,40 @@ export function AddStudentModal({ open, onClose, onCreated }: {
       )}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="ui-label">Family <span style={{ color: 'var(--coral)' }}>*</span></label>
-          <SearchableSelect
-            options={families.map(f => ({ value: f.id, label: f.name }))}
-            value={familyId} onChange={setFamilyId} placeholder="Select a family…"
-          />
+          <div className="flex items-center justify-between mb-1">
+            <label className="ui-label !mb-0">Family <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <button type="button" onClick={() => { setNewFamily(v => !v); setFamilyId(''); setNewFamilyName(''); }}
+              className="text-xs font-semibold" style={{ color: 'var(--sage-dk)' }}>
+              {newFamily ? 'Choose an existing family instead' : '+ New family'}
+            </button>
+          </div>
+          {newFamily ? (
+            <div className="space-y-3 rounded-xl border p-3" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+              <div>
+                <label className="ui-label">Family name <span style={{ color: 'var(--coral)' }}>*</span></label>
+                <input value={newFamilyName} onChange={e => setNewFamilyName(e.target.value)} required className="ui-input" />
+              </div>
+              <div>
+                <label className="ui-label">Primary contact name</label>
+                <input name="familyContactName" className="ui-input" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="ui-label">Email</label>
+                  <input name="familyEmail" type="email" className="ui-input" />
+                </div>
+                <div>
+                  <label className="ui-label">Phone</label>
+                  <input name="familyPhone" className="ui-input" />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <SearchableSelect
+              options={families.map(f => ({ value: f.id, label: f.name }))}
+              value={familyId} onChange={setFamilyId} placeholder="Select a family…"
+            />
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
