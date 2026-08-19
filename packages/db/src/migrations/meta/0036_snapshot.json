@@ -1,6 +1,6 @@
 {
-  "id": "4a603973-c646-46da-b4b1-d8417b070f0f",
-  "prevId": "f689bef0-1414-46ea-b665-1773e10aed3b",
+  "id": "f0116c8b-fdf1-4b69-b3b4-96bf88683c66",
+  "prevId": "2d2a3339-66b2-4e0c-8a3c-2ec0726fe4b1",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1105,8 +1105,7 @@
           "name": "invoice_mode",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'monthly_statement'"
+          "notNull": false
         },
         "custom_interval_value": {
           "name": "custom_interval_value",
@@ -2905,6 +2904,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "recurring_end_date": {
+          "name": "recurring_end_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {

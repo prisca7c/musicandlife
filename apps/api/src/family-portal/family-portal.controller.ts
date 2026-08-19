@@ -83,14 +83,15 @@ class BookLessonDto {
   @IsUUID() teacherId!: string;
   @IsUUID() studentId!: string;
   @IsUUID() enrollmentId!: string;
-  // 1st choice (booked immediately) + up to two ranked fallbacks the teacher may
-  // move the lesson to instead of declining it.
+  // 1st choice + up to two ranked fallbacks — a teacher or admin confirms one
+  // of these (Requests page) before anything is actually booked.
   @IsDateString() startsAt!: string;
   @IsOptional() @IsDateString() startsAt2?: string;
   @IsOptional() @IsDateString() startsAt3?: string;
   @IsInt() @Min(15) @Max(240) duration!: number;
   // Accepted for backward compatibility but IGNORED: trial pricing is decided
-  // server-side from the enrolment's status (see bookLesson), never the client.
+  // server-side from the enrolment's status at confirmation time (see
+  // decideLessonRequest), never the client.
   @IsOptional() @IsBoolean() @Type(() => Boolean) isTrialLesson?: boolean;
   // Set up a weekly recurring series from this slot (autobooks going forward)
   // rather than a one-off lesson.
@@ -661,43 +662,37 @@ export class FamilyPortalController {
       with: { family: { columns: { email: true, name: true } } },
     });
 
-    // Trial pricing is decided by the ENROLMENT's state, never the client. The
-    // portal used to pass dto.isTrialLesson straight through, so a crafted
-    // booking request could flag ANY lesson as a trial and be billed the flat
-    // (often free or discounted) trialRate from effectiveLessonAmount instead of
-    // the real rate — an unlimited cheap-lessons bypass. A self-booked lesson is
-    // a trial only while the enrolment itself is still a trial; once the studio
-    // converts it to 'active', bookings are priced normally.
-    const isTrialLesson = enrollment.status === 'trial';
-
-    // Book the 1st choice immediately (under the shared lock + conflict checks)
-    // and open a teacher-veto review holding the ranked fallbacks. The ≥48h lead
-    // time and the "future only" guard live in the scheduling service so every
-    // booking surface enforces them identically. Z-suffixed ISO instants
-    // round-trip through the service's zoned parse unchanged.
-    const { lesson } = await this.scheduling.createFamilyBooking(
+    // Nothing is booked yet — this only records the request. A teacher or
+    // admin must confirm one of the ranked times (Requests page) before
+    // anything creates a real lesson or appears on any calendar; trial
+    // pricing and the enrolment's term are decided fresh from the enrolment's
+    // own state at THAT point, not carried on the request (see
+    // decideLessonRequest) — the same "never trust the client" reasoning
+    // that used to guard the isTrialLesson flag here.
+    const { request } = await this.scheduling.createFamilyBooking(
       user.orgId,
       {
         studentId: dto.studentId,
         teacherId: dto.teacherId,
         enrollmentId: dto.enrollmentId,
-        termId: enrollment.termId ?? undefined,
         startsAt: dto.startsAt,
         startsAt2: dto.startsAt2,
         startsAt3: dto.startsAt3,
         duration: dto.duration,
-        isTrialLesson,
         recurring: dto.recurring ?? false,
         recurringEndDate: dto.recurringEndDate,
       },
       user.userId,
     );
 
-    // Send confirmation emails (non-blocking)
-    this.sendBookingConfirmations(user.orgId, lesson, teacher, student!, enrollment.instrument, isTrialLesson)
-      .catch(err => console.warn('Booking email failed:', err));
+    // Let the teacher know a request is waiting on them — front-desk-created
+    // requests rely on the Requests page/badge alone, but a family has no
+    // reason to know to check there, so this is the one place that does need
+    // its own notification.
+    this.notifyRequestPending(user.orgId, request, teacher, student!, enrollment.instrument)
+      .catch(err => console.warn('Booking request notify failed:', err));
 
-    return lesson;
+    return request;
   }
 
   // ─── Cancel a lesson (family portal) ─────────────────────────────────────
@@ -831,56 +826,56 @@ export class FamilyPortalController {
     return out.sort((a, b) => a.weekday === b.weekday ? a.startTime.localeCompare(b.startTime) : a.weekday.localeCompare(b.weekday));
   }
 
-  // ─── Confirmation emails ──────────────────────────────────────────────────
-  private async sendBookingConfirmations(
+  // ─── Booking request email ────────────────────────────────────────────────
+  // Nothing is booked yet at this point — a teacher or admin still has to
+  // confirm one of the ranked times before anything lands on a calendar
+  // (createFamilyBooking). Front-desk-created requests rely on the Requests
+  // page/badge alone to surface to a teacher; a family has no reason to know
+  // to check there, so this is the one booking-request path that emails
+  // proactively.
+  private async notifyRequestPending(
     orgId: string,
-    lesson: { id: string; startsAt: Date; duration: number },
+    request: { proposedStartsAt: Date; proposedStartsAt2: Date | null; proposedStartsAt3: Date | null; duration: number },
     teacher: { firstName: string; lastName: string; user?: { email: string } | null },
     student: { firstName: string; lastName: string; family?: { email: string | null; name: string } | null },
     instrument: string,
-    isTrial: boolean,
   ) {
     const tz = await getOrgTimezone(this.db.db, orgId);
-    const dateStr = formatInZone(lesson.startsAt, tz, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    const timeStr = formatInZone(lesson.startsAt, tz, { hour: '2-digit', minute: '2-digit' });
-    const endStr = formatInZone(new Date(lesson.startsAt.getTime() + lesson.duration * 60000), tz, { hour: '2-digit', minute: '2-digit' });
+    const fmt = (d: Date) => formatInZone(d, tz, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
     const teacherName = `${teacher.firstName} ${teacher.lastName}`;
     const studentName = `${student.firstName} ${student.lastName}`;
 
     // The student name (and instrument) are family/guardian-supplied and this
     // body is sent as raw HTML to the teacher AND every org admin, so escape
-    // them to prevent stored HTML injection into a staff inbox. dateStr/timeStr
-    // come from formatInZone — no user content there.
+    // them to prevent stored HTML injection into a staff inbox. fmt(...) output
+    // has no user content in it.
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-    const trialNote = isTrial
-      ? '<p style="margin:0 0 14px"><strong>This is a trial lesson.</strong></p>'
-      : '';
+    const choices = [request.proposedStartsAt, request.proposedStartsAt2, request.proposedStartsAt3]
+      .filter((d): d is Date => !!d)
+      .map((d, i) => ({ label: i === 0 ? '1st choice' : i === 1 ? '2nd choice' : '3rd choice', value: fmt(d) }));
+
     const bodyHtml = `<p style="margin:0 0 4px">Hi there,</p>` +
-      `<p style="margin:0 0 4px">A ${isTrial ? 'trial ' : ''}lesson has been booked and confirmed. Here are the details:</p>` +
-      trialNote +
+      `<p style="margin:0 0 14px">A family has requested a lesson — nothing is booked yet, please review and confirm a time.</p>` +
       detailsBlock([
         { label: 'Student', value: esc(studentName) },
         { label: 'Teacher', value: esc(teacherName) },
         { label: 'Instrument', value: `<span style="text-transform:capitalize">${esc(instrument)}</span>` },
-        { label: 'Date', value: dateStr },
-        { label: 'Time', value: `${timeStr}&ndash;${endStr}` },
+        { label: 'Duration', value: `${request.duration} min` },
+        ...choices,
       ]);
 
     const html = brandedEmail({
-      previewText: `${studentName}'s lesson with ${teacherName} on ${dateStr}`,
-      heading: 'Lesson confirmed',
+      previewText: `${studentName} requested a lesson with ${teacherName}`,
+      heading: 'New lesson request',
       bodyHtml,
-      footnote: 'Need to change anything? Just reply to this email and we will help.',
+      footnote: 'Review and confirm this request from the Requests page in the studio portal.',
     });
 
-    const subject = `Lesson confirmed: ${studentName} with ${teacherName} on ${dateStr}`;
+    const subject = `New lesson request: ${studentName} with ${teacherName}`;
     const recipients: string[] = [];
-
-    if (student.family?.email) recipients.push(student.family.email);
     if (teacher.user?.email) recipients.push(teacher.user.email);
 
-    // Also notify org admins
     const admins = await this.db.db.query.memberships.findMany({
       where: and(eq(memberships.organizationId, orgId), eq(memberships.baseRole, 'admin')),
       with: { user: { columns: { email: true } } },

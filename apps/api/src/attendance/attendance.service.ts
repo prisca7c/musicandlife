@@ -6,7 +6,7 @@ import { DbService } from '../db/db.service';
 
 // The pooled db or an open transaction — the billing side-effects run on
 // whichever is passed so they share the mark-attendance transaction.
-type Executor = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
+export type Executor = Db | Parameters<Parameters<Db['transaction']>[0]>[0];
 import type { MarkAttendanceDto } from './dto/mark-attendance.dto';
 import { effectiveLessonAmount } from '../billing/billing.service';
 import type { Actor } from '../scheduling/scheduling.service';
@@ -266,6 +266,20 @@ export class AttendanceService {
 
     // …and, when no prepaid credit covered it, charge the family (PAYG).
     if (enrollment) await this.postAutoCharge(tx, orgId, lesson);
+  }
+
+  // Admin-only escape hatch for scheduling.service.ts's deleteLesson: fully
+  // reverse whatever billing effect a marked attendance applied (release a
+  // consumed credit, void an unused makeup credit, refund a posted charge —
+  // same reversal markAttendance itself uses on a status correction) and
+  // remove the attendance row, so the lesson can then actually be deleted
+  // instead of just permanently blocked. Never touches a lesson that's
+  // already been invoiced — that guard lives in deleteLesson, checked before
+  // this is ever called, since reversing a ledger charge that's already on an
+  // issued invoice would desync the invoice total from the ledger.
+  async reverseAndClearAttendance(orgId: string, lessonId: string, tx: Executor) {
+    await this.reverseLessonBilling(tx, orgId, { id: lessonId });
+    await tx.delete(attendance).where(and(eq(attendance.organizationId, orgId), eq(attendance.lessonId, lessonId)));
   }
 
   // Undo the credit/charge effects a previous attendance status applied to this

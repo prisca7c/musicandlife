@@ -1,6 +1,6 @@
 {
-  "id": "4a603973-c646-46da-b4b1-d8417b070f0f",
-  "prevId": "f689bef0-1414-46ea-b665-1773e10aed3b",
+  "id": "2d2a3339-66b2-4e0c-8a3c-2ec0726fe4b1",
+  "prevId": "4a603973-c646-46da-b4b1-d8417b070f0f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1105,8 +1105,7 @@
           "name": "invoice_mode",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'monthly_statement'"
+          "notNull": false
         },
         "custom_interval_value": {
           "name": "custom_interval_value",

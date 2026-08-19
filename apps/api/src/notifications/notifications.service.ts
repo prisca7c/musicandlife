@@ -97,10 +97,9 @@ export const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: strin
       footnote: "Can't make it? Please let us know as soon as possible so we can offer the slot to someone else.",
     }),
   }),
-  // A staff member (not the family) put a lesson straight onto the calendar —
-  // e.g. the admin "Add lesson" dialog. Family self-booking already emails via
-  // sendBookingConfirmations; this covers the staff-initiated path, which
-  // previously notified no one at all.
+  // Fires whenever createLesson creates a lesson with its default notify —
+  // the admin "Add lesson" dialog, and confirming any lesson request
+  // (front-desk-proposed or family-requested alike) via decideLessonRequest.
   'lesson.booked': (ctx) => ({
     subject: 'A lesson has been booked for you',
     html: brandedEmail({

@@ -129,6 +129,11 @@ export const lessonRequests = pgTable(
     // so the nightly generator stops materialising the series, not just the one
     // instant-booked occurrence.
     isRecurring: boolean('is_recurring').notNull().default(false),
+    // Only meaningful when isRecurring — the family's chosen end date for the
+    // series (null = ongoing, matching the "no end" default elsewhere). Held
+    // here until the request is confirmed, since nothing about a pending
+    // family booking touches the enrollment's own scheduleRule anymore.
+    recurringEndDate: date('recurring_end_date'),
     requestedBy: uuid('requested_by').notNull().references(() => users.id),
     decidedBy: uuid('decided_by').references(() => users.id),
     decidedAt: timestamp('decided_at', { withTimezone: true }),
