@@ -178,6 +178,33 @@ export class EnrollmentsService {
     // Clear the diary of lessons that will never happen now the enrolment has ended.
     if (isWithdrawing) await this.cancelFutureLessons(orgId, id);
 
+    // A trial student graduates to 'active' on their own once every one of
+    // their (non-withdrawn) enrolments has been switched to active — staff
+    // otherwise had to remember a separate step to flip students.status after
+    // approving the last trial enrolment, and a student sitting on "trial"
+    // with fully active enrolments doesn't show up in the Active list. Only
+    // fires on the transition INTO active, and only for a student currently
+    // on trial — an already-active or paused/waiting student's status isn't
+    // ours to reinterpret here.
+    if (effectiveStatus === 'active' && existing.status !== 'active') {
+      const student = await this.db.db.query.students.findFirst({
+        where: and(eq(students.id, existing.studentId), eq(students.organizationId, orgId)),
+        columns: { id: true, status: true },
+      });
+      if (student?.status === 'trial') {
+        const siblings = await this.db.db.query.enrollments.findMany({
+          where: eq(enrollments.studentId, existing.studentId),
+          columns: { status: true },
+        });
+        const live = siblings.filter(e => e.status !== 'withdrawn');
+        if (live.length > 0 && live.every(e => e.status === 'active')) {
+          await this.db.db.update(students)
+            .set({ status: 'active', updatedAt: new Date() })
+            .where(eq(students.id, existing.studentId));
+        }
+      }
+    }
+
     return updated!;
   }
 

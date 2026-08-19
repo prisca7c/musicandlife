@@ -6,17 +6,17 @@ import { useApi } from '@/lib/swr';
 import { fmtTime, fmtTimeEnd, fmtDate, studioMinutesFromMidnight, studioDayString } from '@/lib/datetime';
 import { lessonStatusLabel, attendanceStatusLabel } from '@/lib/lesson-status';
 import { useRole } from '@/lib/use-role';
+import { usePendingBadges } from '@/lib/use-pending-badges';
 import { Modal } from '@/components/modal';
 import { Badge } from '@/components/badge';
 import { SearchableSelect } from '@/components/searchable-select';
 import { InstrumentIcon } from '@/components/instrument-icons';
 import { InfoTooltip } from '@/components/info-tooltip';
-import { AddStudentModal } from '@/components/add-student-modal';
 import { AssignStudentsModal } from '@/components/assign-students-modal';
 import { SectionTabs } from '@/components/section-tabs';
 import { lessonRate } from '@music-life/types';
 import { useInstruments } from '@/lib/use-instruments';
-import { ChevronDown, ChevronLeft, ChevronRight, UserPlus, Users, Check, X, Repeat, PoundSterling, Shuffle, Clock, Pencil, Copy, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Users, Check, X, Repeat, PoundSterling, Shuffle, Clock, Pencil, Copy, Trash2, ListFilter } from 'lucide-react';
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string; notes: string | null;
@@ -37,7 +37,7 @@ interface StudentDetail { id: string; enrollments: Enrollment[]; }
 interface Availability { id: string; staffId: string; weekday: string; startTime: string; endTime: string; }
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
-const PX_PER_HOUR = 100;         // pixel height per 1 hour band
+const PX_PER_HOUR = 72;          // pixel height per 1 hour band — smaller means more of the day fits on screen before scrolling
 const DAY_START   = 8;           // 08:00
 const DAY_END     = 21;          // 21:00
 const HOURS       = Array.from({ length: DAY_END - DAY_START }, (_, i) => i + DAY_START);
@@ -1131,11 +1131,16 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
   const [cloneDate, setCloneDate] = useState('');
   const [cloneTime, setCloneTime] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleteSeries, setDeleteSeries] = useState(false);
+  const [deleteScope, setDeleteScope] = useState<'all' | 'until'>('all');
+  const [deleteUntilDate, setDeleteUntilDate] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   useEffect(() => {
     setShowReschedule(false); setActionError(''); setShowSub(false); setSubTeacherId(''); setShowClone(false);
     setApplyToSeries(false); setSeriesFromMode('now'); setSeriesFromDate('');
+    setShowDelete(false); setDeleteSeries(false); setDeleteScope('all'); setDeleteUntilDate('');
     if (lesson) {
       // Prefill date + time in the studio zone so they match what's shown elsewhere
       // and round-trip correctly (the backend interprets the naive value as studio-local).
@@ -1250,6 +1255,26 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
     } finally { setDeleting(false); }
   }
 
+  async function deleteLessonSeriesAction() {
+    if (deleteScope === 'until' && !deleteUntilDate) {
+      setActionError('Pick an end date, or choose "All future lessons" instead.');
+      return;
+    }
+    const who = lesson!.student ? `${lesson!.student.firstName} ${lesson!.student.lastName}'s` : 'this';
+    const scopeLabel = deleteScope === 'all'
+      ? 'this lesson and every future lesson in the series'
+      : `this lesson and every future lesson in the series up to ${deleteUntilDate}`;
+    if (!confirm(`Permanently delete ${scopeLabel} for ${who} enrolment? This also ends the recurring series there — no more lessons will be generated for it. There's no undo.`)) return;
+    setDeleting(true); setActionError('');
+    try {
+      const qs = deleteScope === 'until' ? `?until=${deleteUntilDate}` : '';
+      await apiFetch<{ deleted: number; skipped: number }>(`/lessons/${lesson!.id}/series${qs}`, { method: 'DELETE', token: tok() });
+      onUpdated(); onClose();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not delete series');
+    } finally { setDeleting(false); }
+  }
+
   const instr = lesson.enrollment?.instrument;
   const isGrp = lesson.enrollment?.lessonType === 'group';
   const actions = isGrp ? GROUP_ATTENDANCE : PRIVATE_ATTENDANCE;
@@ -1267,24 +1292,125 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
             bill) actually depends on the row. */}
         {!readOnly && (
           <div className="flex items-center gap-1 -mt-1 -mb-1">
-            <button onClick={() => { setShowClone(false); setShowReschedule(v => !v); }} disabled={saving || deleting}
+            <button onClick={() => { setShowClone(false); setShowDelete(false); setShowReschedule(v => !v); }} disabled={saving || deleting}
               title="Edit date & time" aria-label="Edit date & time"
               className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--surf)] disabled:opacity-40"
               style={{ color: showReschedule ? 'var(--sage)' : 'var(--txt3)' }}>
               <Pencil size={15} />
             </button>
-            <button onClick={() => { setShowReschedule(false); setShowClone(v => !v); }} disabled={saving || deleting}
+            <button onClick={() => { setShowReschedule(false); setShowDelete(false); setShowClone(v => !v); }} disabled={saving || deleting}
               title="Clone to another date" aria-label="Clone to another date"
               className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--surf)] disabled:opacity-40"
               style={{ color: showClone ? 'var(--sage)' : 'var(--txt3)' }}>
               <Copy size={15} />
             </button>
-            <button onClick={deleteLessonHard} disabled={saving || deleting}
+            <button onClick={() => { setShowReschedule(false); setShowClone(false); setShowDelete(v => !v); }} disabled={saving || deleting}
               title="Delete permanently" aria-label="Delete permanently"
               className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--coral-lt)] disabled:opacity-40"
-              style={{ color: 'var(--coral)' }}>
+              style={{ color: showDelete ? 'var(--coral)' : 'var(--txt3)' }}>
               <Trash2 size={15} />
             </button>
+          </div>
+        )}
+
+        {!readOnly && showReschedule && (
+          <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
+            <p className="text-sm font-semibold flex items-center gap-1.5" style={{ color: 'var(--txt2)' }}>
+              Reschedule to
+              <InfoTooltip text="We'll check the new time is free and inside the teacher's working hours — so you can't accidentally double-book a teacher, or pick a time they're unavailable." />
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} className="ui-input" />
+              <input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} className="ui-input" />
+            </div>
+            {lesson.enrollmentId && (
+              <div className="space-y-2 pt-1 border-t" style={{ borderColor: 'var(--bd)' }}>
+                <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--txt2)' }}>
+                  <input type="checkbox" checked={applyToSeries} onChange={e => setApplyToSeries(e.target.checked)} />
+                  Apply this day/time to all future lessons in this series too
+                </label>
+                {applyToSeries && (
+                  <div className="pl-6 space-y-2">
+                    <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--txt3)' }}>
+                      <input type="radio" checked={seriesFromMode === 'now'} onChange={() => setSeriesFromMode('now')} />
+                      From now
+                    </label>
+                    <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--txt3)' }}>
+                      <input type="radio" checked={seriesFromMode === 'custom'} onChange={() => setSeriesFromMode('custom')} />
+                      From a custom date
+                    </label>
+                    {seriesFromMode === 'custom' && (
+                      <input type="date" value={seriesFromDate} onChange={e => setSeriesFromDate(e.target.value)} className="ui-input" style={{ width: 160 }} />
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button onClick={rescheduleLesson} disabled={saving} className="ui-btn-primary text-sm">
+                {saving ? 'Saving…' : 'Confirm reschedule'}
+              </button>
+              <button onClick={() => setShowReschedule(false)} className="ui-btn-ghost text-sm">Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {!readOnly && showClone && (
+          <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
+            <p className="text-sm font-semibold" style={{ color: 'var(--txt2)' }}>Clone to</p>
+            <div className="grid grid-cols-2 gap-3">
+              <input type="date" value={cloneDate} onChange={e => setCloneDate(e.target.value)} className="ui-input" />
+              <input type="time" value={cloneTime} onChange={e => setCloneTime(e.target.value)} className="ui-input" />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={cloneLessonToDate} disabled={saving} className="ui-btn-primary text-sm">
+                {saving ? 'Cloning…' : 'Create clone'}
+              </button>
+              <button onClick={() => setShowClone(false)} className="ui-btn-ghost text-sm">Cancel</button>
+            </div>
+            <p className="text-[11px]" style={{ color: 'var(--txt4)' }}>
+              Creates a new lesson with the same student, teacher and duration — this one is untouched.
+            </p>
+          </div>
+        )}
+
+        {!readOnly && showDelete && (
+          <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--coral-lt)', border: '1px solid #FCA5A5' }}>
+            <p className="text-sm font-semibold" style={{ color: 'var(--txt2)' }}>Delete permanently</p>
+            {lesson.enrollmentId && (
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--txt2)' }}>
+                  <input type="checkbox" checked={deleteSeries} onChange={e => setDeleteSeries(e.target.checked)} />
+                  Also delete future lessons in this series
+                </label>
+                {deleteSeries && (
+                  <div className="pl-6 space-y-2">
+                    <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--txt3)' }}>
+                      <input type="radio" checked={deleteScope === 'all'} onChange={() => setDeleteScope('all')} />
+                      All future lessons
+                    </label>
+                    <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--txt3)' }}>
+                      <input type="radio" checked={deleteScope === 'until'} onChange={() => setDeleteScope('until')} />
+                      Until a custom date
+                    </label>
+                    {deleteScope === 'until' && (
+                      <input type="date" value={deleteUntilDate} onChange={e => setDeleteUntilDate(e.target.value)} className="ui-input" style={{ width: 160 }} />
+                    )}
+                    <p className="text-[11px]" style={{ color: 'var(--txt3)' }}>
+                      This ends the recurring series {deleteScope === 'all' ? 'at this lesson' : 'on that date'} — it won&apos;t keep generating new lessons past that point.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button onClick={deleteSeries ? deleteLessonSeriesAction : deleteLessonHard} disabled={saving || deleting}
+                className="text-sm rounded-[9px] px-3 py-2 font-semibold transition-colors disabled:opacity-50"
+                style={{ border: '1.5px solid var(--coral)', color: '#fff', background: 'var(--coral)' }}>
+                {deleting ? 'Deleting…' : deleteSeries ? 'Delete series' : 'Delete just this lesson'}
+              </button>
+              <button onClick={() => setShowDelete(false)} className="ui-btn-ghost text-sm">Cancel</button>
+            </div>
           </div>
         )}
 
@@ -1415,68 +1541,7 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
           </div>
         )}
 
-        {!readOnly && showReschedule && (
-          <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
-            <p className="text-sm font-semibold flex items-center gap-1.5" style={{ color: 'var(--txt2)' }}>
-              Reschedule to
-              <InfoTooltip text="We'll check the new time is free and inside the teacher's working hours — so you can't accidentally double-book a teacher, or pick a time they're unavailable." />
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} className="ui-input" />
-              <input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} className="ui-input" />
-            </div>
-            {lesson.enrollmentId && (
-              <div className="space-y-2 pt-1 border-t" style={{ borderColor: 'var(--bd)' }}>
-                <label className="flex items-center gap-2 text-sm" style={{ color: 'var(--txt2)' }}>
-                  <input type="checkbox" checked={applyToSeries} onChange={e => setApplyToSeries(e.target.checked)} />
-                  Apply this day/time to all future lessons in this series too
-                </label>
-                {applyToSeries && (
-                  <div className="pl-6 space-y-2">
-                    <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--txt3)' }}>
-                      <input type="radio" checked={seriesFromMode === 'now'} onChange={() => setSeriesFromMode('now')} />
-                      From now
-                    </label>
-                    <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--txt3)' }}>
-                      <input type="radio" checked={seriesFromMode === 'custom'} onChange={() => setSeriesFromMode('custom')} />
-                      From a custom date
-                    </label>
-                    {seriesFromMode === 'custom' && (
-                      <input type="date" value={seriesFromDate} onChange={e => setSeriesFromDate(e.target.value)} className="ui-input" style={{ width: 160 }} />
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="flex gap-2">
-              <button onClick={rescheduleLesson} disabled={saving} className="ui-btn-primary text-sm">
-                {saving ? 'Saving…' : 'Confirm reschedule'}
-              </button>
-              <button onClick={() => setShowReschedule(false)} className="ui-btn-ghost text-sm">Cancel</button>
-            </div>
-          </div>
-        )}
-
-        {!readOnly && showClone && (
-          <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
-            <p className="text-sm font-semibold" style={{ color: 'var(--txt2)' }}>Clone to</p>
-            <div className="grid grid-cols-2 gap-3">
-              <input type="date" value={cloneDate} onChange={e => setCloneDate(e.target.value)} className="ui-input" />
-              <input type="time" value={cloneTime} onChange={e => setCloneTime(e.target.value)} className="ui-input" />
-            </div>
-            <div className="flex gap-2">
-              <button onClick={cloneLessonToDate} disabled={saving} className="ui-btn-primary text-sm">
-                {saving ? 'Cloning…' : 'Create clone'}
-              </button>
-              <button onClick={() => setShowClone(false)} className="ui-btn-ghost text-sm">Cancel</button>
-            </div>
-            <p className="text-[11px]" style={{ color: 'var(--txt4)' }}>
-              Creates a new lesson with the same student, teacher and duration — this one is untouched.
-            </p>
-          </div>
-        )}
-
-        {!readOnly && !showReschedule && !showClone && lesson.status === 'scheduled' && (
+        {!readOnly && !showReschedule && !showClone && !showDelete && lesson.status === 'scheduled' && (
           <div className="flex gap-2">
             <button onClick={() => setShowReschedule(true)} disabled={saving}
               className="ui-btn-ghost text-sm flex-1 disabled:opacity-50">
@@ -1527,7 +1592,6 @@ export default function CalendarPage() {
   const [anchorDate, setAnchorDate] = useState(() => new Date());
   const [showAdd, setShowAdd] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
-  const [showAddStudent, setShowAddStudent] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
   const [slotDate, setSlotDate] = useState<string | undefined>();
   const [slotTime, setSlotTime] = useState<string | undefined>();
@@ -1549,6 +1613,11 @@ export default function CalendarPage() {
   // rather than collapsing to whatever is currently selected.
   const [filterTeacherId, setFilterTeacherId] = useState<string>('');
   const [filterStudentId, setFilterStudentId] = useState<string>('');
+  const [filterInstrument, setFilterInstrument] = useState<string>('');
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
+  const sortMenuRef = useRef<HTMLDivElement>(null);
+  const orgInstruments = useInstruments();
+  const pendingBadges = usePendingBadges();
 
   // The visible date range: week/day both page by week; month spans the whole
   // 6-week grid so lessons that fall on the leading/trailing days still show.
@@ -1632,11 +1701,13 @@ export default function CalendarPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterStudentId, filterStudentLessons]);
 
-  // Apply the teacher/student filters once, up front — everything downstream
-  // (day columns, week grid, month cells, counts) reads this narrowed set.
+  // Apply the teacher/student/instrument filters once, up front — everything
+  // downstream (day columns, week grid, month cells, counts) reads this
+  // narrowed set.
   const lessons = lessonsRaw.filter(l =>
     (!filterTeacherId || (l.teacher?.id ?? '') === filterTeacherId) &&
-    (!filterStudentId || (l.student?.id ?? '') === filterStudentId),
+    (!filterStudentId || (l.student?.id ?? '') === filterStudentId) &&
+    (!filterInstrument || (l.enrollment?.instrument ?? '') === filterInstrument),
   );
 
   // Student options for the filter — the full roster, not just whoever has a
@@ -1665,6 +1736,7 @@ export default function CalendarPage() {
   useEffect(() => {
     function onDown(e: MouseEvent) {
       if (viewMenuRef.current && !viewMenuRef.current.contains(e.target as Node)) setViewMenuOpen(false);
+      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) setSortMenuOpen(false);
     }
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
@@ -1801,15 +1873,14 @@ export default function CalendarPage() {
         canManage={isManagement}
         staffOptions={staff}
       />
-      <AddStudentModal open={showAddStudent} onClose={() => setShowAddStudent(false)} onCreated={load} />
       <AssignStudentsModal open={showAssign} onClose={() => setShowAssign(false)} teachers={staff} onChanged={load} />
 
       {/* Attendance and Requests no longer have their own sidebar entries — reached from here instead */}
       <div className="shrink-0 px-4 md:px-7 pt-4 md:pt-3">
         <SectionTabs items={[
           { label: 'Calendar', href: '/app/calendar' },
-          { label: 'Attendance', href: '/app/attendance' },
-          { label: 'Requests', href: '/app/lesson-requests' },
+          { label: 'Attendance', href: '/app/attendance', badge: pendingBadges.unmarkedToday },
+          { label: 'Requests', href: '/app/lesson-requests', badge: pendingBadges.pendingRequests },
         ]} />
       </div>
 
@@ -1868,50 +1939,70 @@ export default function CalendarPage() {
             </button>
           )}
 
-          {/* Teacher + student filters. Applied on the client, so the option
-              lists stay complete regardless of what's currently selected.
-              Searchable — a plain <select> was unusable once the roster grew
-              past a couple dozen names, since scrolling a native dropdown to
-              find one name among hundreds is painfully slow. */}
-          {showFilters && (
-            <>
-              <div className="ml-1" style={{ width: 150 }}>
-                <SearchableSelect
-                  value={filterTeacherId}
-                  onChange={setFilterTeacherId}
-                  emptyLabel="All teachers"
-                  placeholder="All teachers"
-                  options={staff.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
-                />
-              </div>
-              <div style={{ width: 150 }}>
-                <SearchableSelect
-                  value={filterStudentId}
-                  onChange={setFilterStudentId}
-                  emptyLabel="All students"
-                  placeholder="All students"
-                  options={studentOptions.map(s => ({ value: s.id, label: s.name }))}
-                />
-              </div>
-              {(filterTeacherId || filterStudentId) && (
-                <button onClick={() => { setFilterTeacherId(''); setFilterStudentId(''); }}
-                  className="ui-btn-ghost text-xs px-2 py-1.5" title="Clear filters">
-                  Clear
+          {/* Sort/filter — one button covering teacher, student and instrument,
+              each independently combinable. Was two always-visible dropdowns
+              (teacher, student); consolidated behind one trigger so the
+              toolbar doesn't grow every time another filter dimension is
+              added, and to make room for the new instrument filter. */}
+          {showFilters && (() => {
+            const activeCount = [filterTeacherId, filterStudentId, filterInstrument].filter(Boolean).length;
+            return (
+              <div ref={sortMenuRef} className="relative ml-1">
+                <button onClick={() => setSortMenuOpen(o => !o)}
+                  className="ui-btn-ghost text-sm px-3 py-1.5 flex items-center gap-1.5"
+                  style={activeCount ? { background: 'var(--sage-lt)', color: 'var(--sage-dk)', borderColor: 'var(--sage-md)' } : undefined}>
+                  <ListFilter size={14} /> Sort
+                  {activeCount > 0 && (
+                    <span className="text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center"
+                      style={{ background: 'var(--sage)', color: '#fff' }}>
+                      {activeCount}
+                    </span>
+                  )}
+                  <ChevronDown size={13} />
                 </button>
-              )}
-            </>
-          )}
+                {sortMenuOpen && (
+                  <div className="absolute top-full left-0 mt-1 w-56 rounded-xl border border-[var(--bd)] bg-white shadow-lg p-3 space-y-3 z-30">
+                    <div>
+                      <label className="ui-label">Teacher</label>
+                      <SearchableSelect
+                        value={filterTeacherId} onChange={setFilterTeacherId}
+                        emptyLabel="All teachers" placeholder="All teachers"
+                        options={staff.map(s => ({ value: s.id, label: `${s.firstName} ${s.lastName}` }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="ui-label">Student</label>
+                      <SearchableSelect
+                        value={filterStudentId} onChange={setFilterStudentId}
+                        emptyLabel="All students" placeholder="All students"
+                        options={studentOptions.map(s => ({ value: s.id, label: s.name }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="ui-label">Instrument</label>
+                      <SearchableSelect
+                        value={filterInstrument} onChange={setFilterInstrument}
+                        emptyLabel="All instruments" placeholder="All instruments"
+                        options={orgInstruments.all.map(i => ({ value: i, label: i.charAt(0).toUpperCase() + i.slice(1) }))}
+                      />
+                    </div>
+                    {activeCount > 0 && (
+                      <button onClick={() => { setFilterTeacherId(''); setFilterStudentId(''); setFilterInstrument(''); }}
+                        className="ui-btn-ghost text-xs w-full">
+                        Clear all
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
         <div className="flex items-center gap-2">
           {isManagement && (
-            <>
-              <button onClick={() => setShowAssign(true)} className="ui-btn-ghost">
-                <Users size={15} /> Assign students
-              </button>
-              <button onClick={() => setShowAddStudent(true)} className="ui-btn-ghost">
-                <UserPlus size={15} /> Add student
-              </button>
-            </>
+            <button onClick={() => setShowAssign(true)} className="ui-btn-ghost">
+              <Users size={15} /> Assign students
+            </button>
           )}
           <button onClick={() => setShowAdd(true)} className="ui-btn-primary">+ Add lesson</button>
           <InfoTooltip text="You don't have to add each week's lesson by hand — tick 'Repeat weekly' when booking and the studio creates the whole run of lessons for you. Families are also reminded 24 hours before every lesson automatically." />

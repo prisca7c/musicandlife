@@ -4,10 +4,11 @@ import { useState, useEffect, FormEvent } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { Modal } from '@/components/modal';
+import { SearchableSelect } from '@/components/searchable-select';
 
 interface EditableStudent {
   id: string; firstName: string; lastName: string;
-  dob: string | null; email: string | null; notes: string | null;
+  dob: string | null; email: string | null; notes: string | null; status: string;
 }
 
 // Self-fetching by id (via the same `/students/:id` SWR key the detail page
@@ -23,6 +24,7 @@ export function EditStudentModal({ open, onClose, studentId, onSaved }: {
   const [dob, setDob] = useState('');
   const [email, setEmail] = useState('');
   const [notes, setNotes] = useState('');
+  const [status, setStatus] = useState('active');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
@@ -31,6 +33,7 @@ export function EditStudentModal({ open, onClose, studentId, onSaved }: {
     if (!student) return;
     setFirstName(student.firstName); setLastName(student.lastName);
     setDob(student.dob ?? ''); setEmail(student.email ?? ''); setNotes(student.notes ?? '');
+    setStatus(student.status);
     setError('');
   }, [student, open]);
 
@@ -41,7 +44,7 @@ export function EditStudentModal({ open, onClose, studentId, onSaved }: {
     try {
       await apiFetch(`/students/${studentId}`, {
         method: 'PATCH', token: tok(), body: JSON.stringify({
-          firstName, lastName, dob: dob || undefined, email: email || undefined, notes: notes || undefined,
+          firstName, lastName, dob: dob || undefined, email: email || undefined, notes: notes || undefined, status,
         }),
       });
       onSaved(); onClose();
@@ -80,6 +83,18 @@ export function EditStudentModal({ open, onClose, studentId, onSaved }: {
               <label className="ui-label">Email</label>
               <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="ui-input" />
             </div>
+          </div>
+          <div>
+            <label className="ui-label">Status</label>
+            <SearchableSelect
+              options={[
+                { value: 'waiting', label: 'Waiting — not yet scheduled a trial' },
+                { value: 'trial', label: 'Trial' },
+                { value: 'active', label: 'Active' },
+                { value: 'paused', label: 'Paused' },
+              ]}
+              value={status} onChange={setStatus}
+            />
           </div>
           <div>
             <label className="ui-label">Notes</label>
