@@ -16,7 +16,7 @@ interface StaffMember {
   phone: string | null; address: string | null;
   instruments: string[]; status: string;
   hourlyRate: number | null; payrollBalance: number | null; defaultDuration: number;
-  user: { email: string } | null; assignments: { id: string }[];
+  user: { email: string } | null; assignedStudentCount: number;
 }
 
 type SortKey = 'name' | 'balance' | 'assigned';
@@ -24,7 +24,7 @@ const SORTERS: Record<SortKey, (a: StaffMember, b: StaffMember) => number> = {
   // 'name' uses whatever order the API already returns (its default sort).
   name: () => 0,
   balance: (a, b) => (b.payrollBalance ?? 0) - (a.payrollBalance ?? 0),
-  assigned: (a, b) => b.assignments.length - a.assignments.length,
+  assigned: (a, b) => b.assignedStudentCount - a.assignedStudentCount,
 };
 
 interface Colleague { id: string; firstName: string; lastName: string; title: string | null; phone: string | null; instruments: string[]; user: { email: string } | null; }
@@ -319,7 +319,7 @@ export default function StaffPage() {
                 </td>
                 <td className="capitalize" style={{ color: 'var(--txt3)' }}>{s.instruments.join(', ') || '—'}</td>
                 <td style={{ color: 'var(--txt3)' }}>{s.defaultDuration} min</td>
-                <td style={{ color: 'var(--txt3)' }}>{s.assignments.length}</td>
+                <td style={{ color: 'var(--txt3)' }}>{s.assignedStudentCount}</td>
                 <td style={{ color: 'var(--txt3)' }}>
                   {s.hourlyRate === null ? <span style={{ color: 'var(--txt4)' }}>—</span> : `${formatMoney(s.hourlyRate)}/hr`}
                 </td>

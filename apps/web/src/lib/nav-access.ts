@@ -35,6 +35,7 @@ export const ROUTE_ACCESS: RouteAccess[] = [
   { href: '/app/students',              roles: ['admin', 'teacher'] },
   { href: '/app/families',              roles: ['admin'] },
   { href: '/app/staff/payroll',         roles: ['admin'] },
+  { href: '/app/staff/me',              roles: ['teacher'] },
   // One page, two views: admins get the full staff record, teachers get the
   // read-only colleagues directory (StaffPage branches by role).
   { href: '/app/staff',                 roles: ['admin', 'teacher'] },

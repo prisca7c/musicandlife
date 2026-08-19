@@ -2,12 +2,15 @@
 
 import { useState } from 'react';
 import { useApi } from '@/lib/swr';
-import { fmtTime, studioDayString } from '@/lib/datetime';
+import { fmtTime, fmtTimeEnd, fmtDate, studioMinutesFromMidnight, studioDayString } from '@/lib/datetime';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { InstrumentIcon } from '@/components/instrument-icons';
+import { Modal } from '@/components/modal';
+import { CancelLessonModal } from '@/components/cancel-lesson-modal';
+import { RescheduleLessonModal } from '@/components/reschedule-lesson-modal';
 import { lessonStatusLabel } from '@/lib/lesson-status';
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, CalendarClock, X } from 'lucide-react';
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string; isTrialLesson: boolean;
@@ -52,22 +55,124 @@ function formatDateLabel(d: Date, opts: Intl.DateTimeFormatOptions) {
   return new Date(`${studioDayString(d)}T12:00:00Z`).toLocaleDateString('en-GB', { ...opts, timeZone: 'UTC' });
 }
 
+// ─── Hour grid geometry ─────────────────────────────────────────────────────
+const PX_PER_HOUR = 56;
+const DAY_START = 8;   // 08:00
+const DAY_END = 21;    // 21:00
+const HOURS = Array.from({ length: DAY_END - DAY_START }, (_, i) => i + DAY_START);
+const GRID_H = HOURS.length * PX_PER_HOUR;
+
+interface Positioned { lesson: Lesson; top: number; height: number; col: number; cols: number; }
+
+// Greedy interval-column packing, same idea as the staff calendar's day
+// view — a family rarely has more than two lessons truly overlapping (e.g.
+// siblings booked at the same time with different teachers), so no need for
+// the staff calendar's row-wrapping fallback for a busy studio.
+function layoutDay(dayLessons: Lesson[]): Positioned[] {
+  const sorted = [...dayLessons].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+  const colEnds: number[] = [];
+  const withCol = sorted.map((l) => {
+    const start = new Date(l.startsAt).getTime();
+    const end = start + l.duration * 60000;
+    let col = colEnds.findIndex((e) => e <= start);
+    if (col === -1) { col = colEnds.length; colEnds.push(end); } else { colEnds[col] = end; }
+    return { lesson: l, col, start, end };
+  });
+  // Peak concurrent overlap determines how many columns to actually split
+  // into — most lessons in a lightly-loaded family week never share a
+  // column at all, so this rarely narrows further than full width.
+  const cols = Math.max(1, colEnds.length);
+  return withCol.map(({ lesson, col, start, end }) => {
+    const startMin = studioMinutesFromMidnight(new Date(start).toISOString()) - DAY_START * 60;
+    const endMin = studioMinutesFromMidnight(new Date(end).toISOString()) - DAY_START * 60;
+    const top = Math.max(0, (startMin / 60) * PX_PER_HOUR);
+    const height = Math.max(((endMin - startMin) / 60) * PX_PER_HOUR, 20);
+    return { lesson, top, height, col, cols };
+  });
+}
+
+function LessonDetailModal({ lesson, onClose, onReschedule, onCancel }: {
+  lesson: Lesson | null; onClose: () => void;
+  onReschedule: (id: string) => void; onCancel: (id: string, hoursUntil: number) => void;
+}) {
+  if (!lesson) return null;
+  const cancelled = lesson.status.startsWith('cancelled');
+  const hoursUntil = (new Date(lesson.startsAt).getTime() - Date.now()) / 3600000;
+  const c = studentColor(lesson.student?.id);
+  const instr = lesson.enrollment?.instrument;
+
+  return (
+    <Modal open={!!lesson} onClose={onClose} title="Lesson details">
+      <div className="space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-bold text-lg" style={{ color: c }}>
+              {lesson.student?.firstName} {lesson.student?.lastName}
+            </p>
+            {instr && (
+              <span className="flex items-center gap-1.5 mt-0.5 text-sm capitalize font-semibold" style={{ color: instrColor(instr) }}>
+                <InstrumentIcon name={instr} size={13} /> {instr}
+              </span>
+            )}
+          </div>
+          {lesson.isTrialLesson && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--amber-lt)] text-[var(--amber)] font-semibold">Trial</span>
+          )}
+        </div>
+
+        <div className="space-y-2 text-sm" style={{ color: 'var(--txt3)' }}>
+          <p className="flex items-center gap-1.5">
+            <CalendarIcon size={14} /> {fmtDate(lesson.startsAt, { weekday: 'long', day: 'numeric', month: 'long' })}
+          </p>
+          <p className="flex items-center gap-1.5">
+            <Clock size={14} /> {fmtTime(lesson.startsAt)}&ndash;{fmtTimeEnd(lesson.startsAt, lesson.duration)} ({lesson.duration} min)
+          </p>
+          <p>with {lesson.teacher ? `${lesson.teacher.firstName} ${lesson.teacher.lastName}` : 'no teacher assigned'}</p>
+          {cancelled && <p style={{ color: 'var(--coral)' }}>{lessonStatusLabel(lesson.status)}</p>}
+          {!cancelled && lesson.attendance && <p>Attendance: {lesson.attendance.status}</p>}
+        </div>
+
+        {!cancelled && hoursUntil > 0 && (
+          <div className="flex gap-2 flex-wrap pt-1">
+            {hoursUntil >= 24 && (
+              <button
+                onClick={() => onReschedule(lesson.id)}
+                className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-xl border font-medium hover:bg-[var(--surf)]"
+                style={{ borderColor: 'var(--bd2)', color: 'var(--txt)' }}>
+                <CalendarClock size={13} /> Request reschedule
+              </button>
+            )}
+            <button
+              onClick={() => onCancel(lesson.id, hoursUntil)}
+              className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-xl border font-medium hover:bg-[var(--coral-lt)]"
+              style={{ borderColor: 'var(--bd2)', color: 'var(--coral)' }}>
+              <X size={13} /> Cancel lesson
+            </button>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 /**
- * A read-only weekly calendar for guardians/students — their own children's
- * lessons and who's teaching them, grouped by day. Deliberately simpler than
- * the staff calendar (no hour grid, no editing): a family's own lesson count
- * is small enough that a plain per-day list reads better than a dense pixel
- * grid, and there's nothing here for a parent or student to click into edit.
+ * A real hour-grid weekly calendar for guardians/students, positioned by
+ * actual lesson time (not just grouped per day) — clicking a lesson opens
+ * its details, with reschedule/cancel actions where the lesson is still
+ * eligible (mirrors the dashboard's "next lesson" card policy).
  */
 export default function FamilySchedulePage() {
   const [anchor, setAnchor] = useState(() => new Date());
+  const [selected, setSelected] = useState<Lesson | null>(null);
+  const [reschedModal, setReschedModal] = useState<{ lessonId: string } | null>(null);
+  const [cancelModal, setCancelModal] = useState<{ lessonId: string; hoursUntil: number } | null>(null);
   const weekStart = getWeekStart(anchor);
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 6);
 
   const from = studioDayString(weekStart);
   const to = studioDayString(weekEnd);
-  const { data: lessonsRaw = [], isLoading } = useApi<Lesson[]>(`/family/lessons?from=${from}&to=${to}`);
+  const { data: lessonsRaw = [], isLoading, mutate } = useApi<Lesson[]>(`/family/lessons?from=${from}&to=${to}`);
 
   const todayStr = studioDayString(new Date());
   const weekLabel = `${formatDateLabel(weekStart, { day: 'numeric', month: 'short' })} – ${formatDateLabel(weekEnd, { day: 'numeric', month: 'short', year: 'numeric' })}`;
@@ -76,9 +181,7 @@ export default function FamilySchedulePage() {
     const d = new Date(weekStart);
     d.setDate(d.getDate() + dayIndex);
     const dayStr = studioDayString(d);
-    return lessonsRaw
-      .filter(l => studioDayString(l.startsAt) === dayStr)
-      .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+    return lessonsRaw.filter(l => studioDayString(l.startsAt) === dayStr);
   }
 
   return (
@@ -87,7 +190,7 @@ export default function FamilySchedulePage() {
         title={
           <span className="inline-flex items-center gap-2">
             Calendar
-            <InfoTooltip text="Your family's lessons for the week, with each student's teacher. Cancelled lessons show struck through." />
+            <InfoTooltip text="Your family's lessons for the week, with each student's teacher. Click a lesson to see details, request a reschedule, or cancel it." />
           </span>
         }
         subtitle="Your lessons and teachers, week by week"
@@ -113,56 +216,78 @@ export default function FamilySchedulePage() {
           Loading…
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3">
-          {DAYS.map((day, di) => {
-            const d = new Date(weekStart);
-            d.setDate(d.getDate() + di);
-            const dStr = studioDayString(d);
-            const isToday = dStr === todayStr;
-            const dayList = dayLessons(di);
-            return (
-              <div key={day} className="bg-white rounded-2xl border overflow-hidden flex flex-col"
-                style={{ borderColor: isToday ? 'var(--sage)' : 'var(--bd)', borderWidth: isToday ? 1.5 : 1 }}>
-                <div className="px-3 py-2 text-center border-b" style={{ borderColor: 'var(--bd)', background: isToday ? 'var(--sage-lt)' : 'var(--surf)' }}>
+        <div className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: 'var(--bd)' }}>
+          {/* Day header row */}
+          <div className="grid" style={{ gridTemplateColumns: '48px repeat(7, 1fr)' }}>
+            <div className="border-b border-r" style={{ borderColor: 'var(--bd)' }} />
+            {DAYS.map((day, di) => {
+              const d = new Date(weekStart);
+              d.setDate(d.getDate() + di);
+              const dStr = studioDayString(d);
+              const isToday = dStr === todayStr;
+              return (
+                <div key={day} className="text-center py-2 border-b border-r last:border-r-0"
+                  style={{ borderColor: 'var(--bd)', background: isToday ? 'var(--sage-lt)' : 'var(--surf)' }}>
                   <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: isToday ? 'var(--sage)' : 'var(--txt4)' }}>{day}</div>
                   <div className="text-lg font-bold" style={{ color: isToday ? 'var(--sage)' : 'var(--txt)' }}>{Number(dStr.slice(8, 10))}</div>
                 </div>
-                <div className="p-2 space-y-1.5 flex-1 min-h-[80px]">
-                  {dayList.length === 0 ? (
-                    <p className="text-center text-[11px] py-4" style={{ color: 'var(--txt4)' }}>No lessons</p>
-                  ) : dayList.map(l => {
+              );
+            })}
+          </div>
+
+          {/* Hour grid body */}
+          <div className="grid overflow-x-auto" style={{ gridTemplateColumns: '48px repeat(7, minmax(110px, 1fr))' }}>
+            {/* Hour labels */}
+            <div className="relative border-r" style={{ borderColor: 'var(--bd)', height: GRID_H }}>
+              {HOURS.map((h, i) => (
+                <div key={h} className="absolute left-0 right-0 text-[10px] text-right pr-1.5 -translate-y-1/2"
+                  style={{ top: i * PX_PER_HOUR, color: 'var(--txt4)' }}>
+                  {h % 12 === 0 ? 12 : h % 12}{h < 12 ? 'am' : 'pm'}
+                </div>
+              ))}
+            </div>
+
+            {DAYS.map((day, di) => {
+              const positioned = layoutDay(dayLessons(di));
+              return (
+                <div key={day} className="relative border-r last:border-r-0" style={{ borderColor: 'var(--bd)', height: GRID_H }}>
+                  {HOURS.map((h, i) => (
+                    <div key={h} className="absolute left-0 right-0 border-t"
+                      style={{ top: i * PX_PER_HOUR, borderColor: 'var(--bd)', opacity: 0.6 }} />
+                  ))}
+                  {positioned.length === 0 && (
+                    <p className="absolute inset-x-0 top-3 text-center text-[11px]" style={{ color: 'var(--txt4)' }}>—</p>
+                  )}
+                  {positioned.map(({ lesson: l, top, height, col, cols }) => {
                     const cancelled = l.status.startsWith('cancelled');
                     const c = studentColor(l.student?.id);
-                    const instr = l.enrollment?.instrument;
                     return (
-                      <div key={l.id} className="rounded-lg px-2 py-1.5 text-xs"
-                        style={{ background: hexToRgba(c, cancelled ? 0.06 : 0.12), border: `1px solid ${hexToRgba(c, cancelled ? 0.25 : 0.5)}`, opacity: cancelled ? 0.65 : 1 }}>
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="font-bold tabular-nums" style={{ color: c, opacity: 0.75 }}>{fmtTime(l.startsAt)}</span>
-                          {l.isTrialLesson && <span className="text-[9px] px-1 rounded bg-[var(--amber-lt)] text-[var(--amber)] font-semibold">trial</span>}
-                        </div>
-                        <p className="font-bold truncate" style={{ color: c, textDecoration: cancelled ? 'line-through' : undefined }}>
-                          {l.student?.firstName} {l.student?.lastName}
-                        </p>
-                        {instr && (
-                          <span className="flex items-center gap-1 truncate" style={{ color: instrColor(instr) }}>
-                            <InstrumentIcon name={instr} size={10} />
-                            <span className="capitalize font-semibold">{instr}</span>
+                      <button
+                        key={l.id}
+                        onClick={() => setSelected(l)}
+                        className="absolute rounded-lg px-1.5 py-1 text-left text-[11px] leading-tight overflow-hidden hover:brightness-95 transition"
+                        style={{
+                          top, height, left: `${(col * 100) / cols}%`, width: `calc(${100 / cols}% - 3px)`,
+                          background: hexToRgba(c, cancelled ? 0.06 : 0.14), border: `1px solid ${hexToRgba(c, cancelled ? 0.25 : 0.55)}`,
+                          opacity: cancelled ? 0.6 : 1,
+                        }}
+                      >
+                        <span className="font-bold tabular-nums block" style={{ color: c }}>{fmtTime(l.startsAt)}</span>
+                        <span className="font-bold block truncate" style={{ color: c, textDecoration: cancelled ? 'line-through' : undefined }}>
+                          {l.student?.firstName}
+                        </span>
+                        {l.enrollment?.instrument && (
+                          <span className="capitalize block truncate" style={{ color: instrColor(l.enrollment.instrument) }}>
+                            {l.enrollment.instrument}
                           </span>
                         )}
-                        <p className="truncate" style={{ color: c, opacity: 0.7 }}>
-                          {l.teacher ? `${l.teacher.firstName} ${l.teacher.lastName}` : 'No teacher assigned'}
-                        </p>
-                        {cancelled && (
-                          <p className="text-[10px] mt-0.5" style={{ color: 'var(--txt4)' }}>{lessonStatusLabel(l.status)}</p>
-                        )}
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -171,6 +296,22 @@ export default function FamilySchedulePage() {
           <CalendarIcon size={14} /> No lessons scheduled this week.
         </div>
       )}
+
+      <LessonDetailModal
+        lesson={selected}
+        onClose={() => setSelected(null)}
+        onReschedule={(id) => { setSelected(null); setReschedModal({ lessonId: id }); }}
+        onCancel={(id, hoursUntil) => { setSelected(null); setCancelModal({ lessonId: id, hoursUntil }); }}
+      />
+      <RescheduleLessonModal
+        open={!!reschedModal} onClose={() => setReschedModal(null)}
+        lessonId={reschedModal?.lessonId ?? null} onSent={() => {}}
+      />
+      <CancelLessonModal
+        open={!!cancelModal} onClose={() => setCancelModal(null)}
+        lessonId={cancelModal?.lessonId ?? null} hoursUntil={cancelModal?.hoursUntil ?? 0}
+        onCancelled={() => mutate()}
+      />
     </div>
   );
 }
