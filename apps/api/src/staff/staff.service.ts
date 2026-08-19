@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException, Logger } from '@nestjs/common';
-import { eq, and, gte } from 'drizzle-orm';
+import { eq, and, gte, inArray } from 'drizzle-orm';
 import {
   staffMembers, staffPrivileges, teacherAssignments,
-  users, memberships, passwordResetTokens, availability, blockedTime, students, lessons,
+  users, memberships, passwordResetTokens, availability, blockedTime, students, lessons, enrollments,
 } from '@music-life/db';
 import { DEFAULT_TEACHER_PRIVILEGES } from '@music-life/types';
 import { randomBytes, createHash } from 'crypto';
@@ -83,7 +83,34 @@ export class StaffService {
       },
     });
     if (!member) throw new NotFoundException('Staff member not found');
-    return member;
+
+    // A student can also be linked to this teacher purely through an enrolment
+    // (enrollments.teacherId), set from the student's own page rather than
+    // through this teacher's "Assign students" picker. getAssignedStudentIds()
+    // already unions both sources for a teacher's own "my students" scoping —
+    // this view only ever read the teacherAssignments table, so a student
+    // assigned via their enrolment never appeared here even though the write
+    // itself succeeded (looked like the assignment silently didn't save).
+    const linkedStudentIds = new Set(member.assignments.map((a) => a.student.id));
+    const enrolled = await this.db.db.query.enrollments.findMany({
+      where: and(eq(enrollments.organizationId, orgId), eq(enrollments.teacherId, id)),
+      columns: { studentId: true },
+    });
+    const extraIds = [...new Set(enrolled.map((e) => e.studentId))].filter((sid) => !linkedStudentIds.has(sid));
+    const extraStudents = extraIds.length > 0
+      ? await this.db.db.query.students.findMany({
+          where: and(eq(students.organizationId, orgId), inArray(students.id, extraIds)),
+          columns: { id: true, firstName: true, lastName: true, status: true },
+        })
+      : [];
+
+    return {
+      ...member,
+      assignments: [
+        ...member.assignments,
+        ...extraStudents.map((student) => ({ id: `enrollment-${student.id}`, role: 'primary' as const, student })),
+      ],
+    };
   }
 
   async create(orgId: string, dto: CreateStaffDto) {

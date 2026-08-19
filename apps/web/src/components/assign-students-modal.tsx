@@ -33,8 +33,13 @@ export function AssignStudentsModal({ open, onClose, onChanged, teachers, defaul
   useEffect(() => {
     if (!open) return;
     setTeacherId(defaultTeacherId ?? ''); setSearch(''); setError('');
-    apiFetch<{ data: Student[] } | Student[]>('/students?limit=500', { token: tok() })
-      .then(r => setStudents(Array.isArray(r) ? r : r.data))
+    // No pagination params → the API returns the full roster in one array
+    // (studios/students.service.ts:findAll). A `?limit=500` here used to get
+    // silently clamped to the API's 200-row page cap and switched into the
+    // paginated {data,total} shape, so any studio with more than 200 students
+    // lost everyone past the 200th from this picker with no error shown.
+    apiFetch<Student[]>('/students', { token: tok() })
+      .then(setStudents)
       .catch(() => {});
   }, [open, defaultTeacherId]);
 

@@ -130,17 +130,19 @@ function minutesFromDayStart(iso: string): number {
 }
 
 // ─── Overlap-aware stacked layout ──────────────────────────────────────────────
-// Overlapping lessons used to be split into narrow side-by-side columns, which
-// made the box too small to read with more than two or three at once. Instead,
-// every block keeps full width and overlapping lessons stack top-to-bottom,
-// ordered chronologically (then alphabetically by student for exact ties) —
-// same ordering `sorted` below already produces, so a cluster's array order
-// *is* its stack order.
+// Overlapping lessons stack into rows, ordered chronologically (then
+// alphabetically by student for exact ties) — same ordering `sorted` below
+// already produces, so a cluster's array order *is* its row order. Each row
+// holds up to MAX_PER_ROW lessons side by side (a studio with several
+// teachers can easily have 5-6 lessons at the exact same time; one row per
+// lesson made the day view absurdly tall), and once a row is full the next
+// lesson wraps to a new row below, growing that hour's elastic height.
 const STACK_ROW_H = 45;  // px per row once a slot is stacked — sized for the compact 2-line block
 const STACK_GAP    = 1;  // gap between rows sharing the same/overlapping time — they're one moment, keep them tight
 const CLUSTER_GAP  = 5;  // gap between separate time clusters — visually distinct from the same-time gap above
+const MAX_PER_ROW  = 3;  // most lessons allowed side by side in one stacked row before wrapping
 
-type LessonLayout = Lesson & { stackIndex: number; stackSize: number; clusterTop: number; clusterHeight: number };
+type LessonLayout = Lesson & { rowIndex: number; colIndex: number; colsInRow: number; stackSize: number; clusterTop: number; clusterHeight: number };
 
 // ─── Elastic hour rows ────────────────────────────────────────────────────────
 // An hour with several simultaneous lessons stacked in it used to keep the same
@@ -244,12 +246,16 @@ function computeLayout(dayLessons: Lesson[], hourHeights: number[] = BASELINE_HO
     const hourIdx = Math.min(hourHeights.length - 1, Math.max(0, Math.floor(startMinutes / 60)));
     const naturalTop = elasticY(startMinutes, hourHeights, offsets);
     const clusterTop = Math.max(naturalTop, cursorBottom);
+    const numRows = Math.ceil(cluster.length / MAX_PER_ROW);
     const clusterHeight = cluster.length > 1
-      ? cluster.length * STACK_ROW_H
+      ? numRows * STACK_ROW_H
       : Math.max((cluster[0]!.duration / 60) * hourHeights[hourIdx]!, STACK_ROW_H);
     cursorBottom = clusterTop + clusterHeight + CLUSTER_GAP;
     cluster.forEach((l, i) => {
-      result.push({ ...l, stackIndex: i, stackSize: cluster.length, clusterTop, clusterHeight });
+      const rowIndex = Math.floor(i / MAX_PER_ROW);
+      const rowStart = rowIndex * MAX_PER_ROW;
+      const colsInRow = Math.min(MAX_PER_ROW, cluster.length - rowStart);
+      result.push({ ...l, rowIndex, colIndex: i - rowStart, colsInRow, stackSize: cluster.length, clusterTop, clusterHeight });
     });
   }
   return result;
@@ -345,10 +351,12 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
   // clusters down past any earlier cluster's real rendered bottom so boxes
   // never overlap — stacked rows are ordered, not clock-accurate past the
   // first one, since a block genuinely can't show both "which slot" and
-  // "exactly when" at once once several lessons share the same moment.
-  const top    = stacked ? lesson.clusterTop + lesson.stackIndex * STACK_ROW_H : lesson.clusterTop;
+  // "exactly when" at once once several lessons share the same moment. Up to
+  // MAX_PER_ROW lessons share one row side by side before wrapping below.
+  const top    = stacked ? lesson.clusterTop + lesson.rowIndex * STACK_ROW_H : lesson.clusterTop;
   const height = stacked ? STACK_ROW_H - STACK_GAP : lesson.clusterHeight - STACK_GAP;
-  const width  = 'calc(100% - 3px)';
+  const left   = stacked ? `${(lesson.colIndex * 100) / lesson.colsInRow}%` : 0;
+  const width  = stacked ? `calc(${100 / lesson.colsInRow}% - 3px)` : 'calc(100% - 3px)';
 
   const instr    = lesson.enrollment?.instrument;
   const isGrp    = lesson.enrollment?.lessonType === 'group';
@@ -372,7 +380,7 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
     <button
       onClick={onClick}
       style={{
-        top, height, left: 0, width,
+        top, height, left, width,
         background: hexToRgba(tColor, cancelled ? 0.06 : 0.14),
         borderColor: hexToRgba(tColor, cancelled ? 0.3 : 0.55),
         opacity: cancelled ? 0.65 : 1,
