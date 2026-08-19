@@ -135,6 +135,7 @@ export function SearchableSelect({
       {open && mounted && createPortal(
         <div
           ref={menuRef}
+          data-searchable-select-menu
           className="fixed rounded-xl border border-[var(--bd)] shadow-xl overflow-hidden"
           style={{
             background: 'white', maxHeight: 288, zIndex: MENU_Z_INDEX, left: pos.left, top: pos.top,

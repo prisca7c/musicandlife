@@ -13,6 +13,8 @@ import { BackButton } from '@/components/back-button';
 import { Mail, Phone, Home } from 'lucide-react';
 import { InvoicingSettingsFields, readInvoicingSettingsForm } from '@/components/invoicing-settings-fields';
 import { invoiceStatusLabel, invoiceStatusColor } from '@/lib/invoice-status';
+import { EditFamilyModal } from '@/components/edit-family-modal';
+import { EditStudentModal } from '@/components/edit-student-modal';
 
 interface FamilyDetail {
   id: string; name: string; contactName: string | null; address: string | null;
@@ -24,88 +26,14 @@ interface FamilyDetail {
   invoiceFormat: 'condensed' | 'normal' | 'expanded'; includePreviousBalance: boolean;
   autoEmailInvoice: boolean; invoiceFooterNote: string | null;
   resourceAccessPaidUntil: string | null;
-  students: { id: string; firstName: string; lastName: string; status: string }[];
+  students: {
+    id: string; firstName: string; lastName: string; status: string; unpaidBilled: number;
+    enrollments: {
+      id: string; instrument: string; status: string;
+      teacher: { id: string; firstName: string; lastName: string } | null;
+    }[];
+  }[];
   guardians: { id: string; relationship: string; user: { id: string; email: string } }[];
-}
-
-// Core identity fields (name/contact/address) had no edit UI at all — PATCH
-// /families/:id already supported them, but the page only ever let you edit
-// billing settings and resource access, never the family's own details.
-function EditFamilyModal({ open, onClose, family, onSaved }: {
-  open: boolean; onClose: () => void;
-  family: { id: string; name: string; contactName: string | null; phone: string | null; email: string | null; address: string | null } | null;
-  onSaved: () => void;
-}) {
-  const [name, setName] = useState('');
-  const [contactName, setContactName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [address, setAddress] = useState('');
-  const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
-
-  useEffect(() => {
-    if (!family) return;
-    setName(family.name); setContactName(family.contactName ?? '');
-    setPhone(family.phone ?? ''); setEmail(family.email ?? ''); setAddress(family.address ?? '');
-    setError('');
-  }, [family, open]);
-
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!family) return;
-    setSaving(true); setError('');
-    try {
-      await apiFetch(`/families/${family.id}`, {
-        method: 'PATCH', token: tok(), body: JSON.stringify({
-          name, contactName: contactName || undefined, phone: phone || undefined,
-          email: email || undefined, address: address || undefined,
-        }),
-      });
-      onSaved(); onClose();
-    } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
-    finally { setSaving(false); }
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title="Edit family">
-      {error && (
-        <div className="mb-4 text-sm rounded-xl px-4 py-3"
-          style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
-          {error}
-        </div>
-      )}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="ui-label">Family name <span style={{ color: 'var(--coral)' }}>*</span></label>
-          <input value={name} onChange={e => setName(e.target.value)} required autoFocus className="ui-input" />
-        </div>
-        <div>
-          <label className="ui-label">Contact name</label>
-          <input value={contactName} onChange={e => setContactName(e.target.value)} className="ui-input" />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="ui-label">Phone</label>
-            <input value={phone} onChange={e => setPhone(e.target.value)} className="ui-input" />
-          </div>
-          <div>
-            <label className="ui-label">Email</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="ui-input" />
-          </div>
-        </div>
-        <div>
-          <label className="ui-label">Address</label>
-          <textarea value={address} onChange={e => setAddress(e.target.value)} rows={2} className="ui-input" />
-        </div>
-        <div className="flex gap-3 pt-1">
-          <button type="submit" disabled={saving} className="ui-btn-primary">{saving ? 'Saving…' : 'Save'}</button>
-          <button type="button" onClick={onClose} className="ui-btn-ghost">Cancel</button>
-        </div>
-      </form>
-    </Modal>
-  );
 }
 
 // Resource-access subscription — separate from lesson billing. Inline date editor.
@@ -434,7 +362,15 @@ export default function FamilyDetailPage() {
   const [showInvoicingSettings, setShowInvoicingSettings] = useState(false);
   const [showMerge, setShowMerge] = useState(false);
   const [showEditFamily, setShowEditFamily] = useState(false);
+  const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  async function changeStudentStatus(studentId: string, status: string) {
+    try {
+      await apiFetch(`/students/${studentId}`, { method: 'PATCH', token: tok(), body: JSON.stringify({ status }) });
+      load();
+    } catch (e) { alert(e instanceof Error ? e.message : 'Could not update student'); }
+  }
 
   // Merge is destructive → managers and above only (mirrors the API's @Roles).
   const [canMerge, setCanMerge] = useState(false);
@@ -462,7 +398,8 @@ export default function FamilyDetailPage() {
         family={family} onSaved={load} />}
       {family && <MergeFamilyModal open={showMerge} onClose={() => setShowMerge(false)}
         targetId={family.id} targetName={family.name} onMerged={load} />}
-      <EditFamilyModal open={showEditFamily} onClose={() => setShowEditFamily(false)} family={family} onSaved={load} />
+      <EditFamilyModal open={showEditFamily} onClose={() => setShowEditFamily(false)} familyId={family.id} onSaved={load} />
+      <EditStudentModal open={!!editingStudentId} onClose={() => setEditingStudentId(null)} studentId={editingStudentId} onSaved={load} />
 
       <div className="mb-5">
         <BackButton label="Families" fallbackHref="/app/families" />
@@ -586,27 +523,62 @@ export default function FamilyDetailPage() {
               <thead>
                 <tr>
                   <th>Name</th>
+                  <th>Instruments</th>
+                  <th>Teacher(s)</th>
+                  <th>Billed, unpaid</th>
                   <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {family.students.length === 0 && (
-                  <tr><td colSpan={2} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+                  <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
                     No students yet.
                   </td></tr>
                 )}
-                {family.students.map(s => (
-                  <tr key={s.id}>
-                    <td>
-                      <Link href={`/app/students/${s.id}`}
-                        className="font-semibold hover:underline"
-                        style={{ color: 'var(--sage-dk)' }}>
-                        {s.firstName} {s.lastName}
-                      </Link>
-                    </td>
-                    <td><Badge variant={s.status}>{s.status}</Badge></td>
-                  </tr>
-                ))}
+                {family.students.map(s => {
+                  const live = s.enrollments.filter(e => e.status !== 'withdrawn');
+                  const teacherNames = Array.from(new Set(
+                    live.filter(e => e.teacher).map(e => `${e.teacher!.firstName} ${e.teacher!.lastName}`),
+                  ));
+                  return (
+                    <tr key={s.id}>
+                      <td>
+                        <Link href={`/app/students/${s.id}`}
+                          className="font-semibold hover:underline"
+                          style={{ color: 'var(--sage-dk)' }}>
+                          {s.firstName} {s.lastName}
+                        </Link>
+                      </td>
+                      <td className="capitalize" style={{ color: 'var(--txt3)' }}>
+                        {live.length > 0 ? live.map(e => e.instrument).join(', ') : '—'}
+                      </td>
+                      <td style={{ color: 'var(--txt3)' }}>
+                        {teacherNames.length > 0 ? teacherNames.join(', ') : '—'}
+                      </td>
+                      <td className="font-medium" style={s.unpaidBilled > 0 ? { color: 'var(--coral)' } : { color: 'var(--txt4)' }}>
+                        {s.unpaidBilled > 0 ? formatMoney(s.unpaidBilled) : '—'}
+                      </td>
+                      <td>
+                        <select value={s.status} onChange={e => changeStudentStatus(s.id, e.target.value)}
+                          className="text-xs border rounded-lg px-2 py-1" style={{ borderColor: 'var(--bd2)' }}
+                          title="Change student status">
+                          <option value="waiting">Waiting</option>
+                          <option value="trial">Trial</option>
+                          <option value="active">Active</option>
+                          <option value="paused">Paused</option>
+                          <option value="withdrawn">Withdrawn</option>
+                        </select>
+                      </td>
+                      <td>
+                        <button onClick={() => setEditingStudentId(s.id)}
+                          className="text-xs font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}>
+                          Edit
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

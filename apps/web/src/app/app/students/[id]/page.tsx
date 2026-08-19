@@ -14,6 +14,7 @@ import { WEEKDAYS, lessonRate } from '@music-life/types';
 import { useInstruments } from '@/lib/use-instruments';
 import { SearchableSelect } from '@/components/searchable-select';
 import { EditStudentModal } from '@/components/edit-student-modal';
+import { EditFamilyModal } from '@/components/edit-family-modal';
 import { BackButton } from '@/components/back-button';
 import { Mail, Phone } from 'lucide-react';
 import { useRole } from '@/lib/use-role';
@@ -637,6 +638,7 @@ export default function StudentDetailPage() {
   const [editEnrollment, setEditEnrollment] = useState<EnrollmentRow | null>(null);
   const [rescheduleEnrollment, setRescheduleEnrollment] = useState<EnrollmentRow | null>(null);
   const [showEditStudent, setShowEditStudent] = useState(false);
+  const [showEditFamily, setShowEditFamily] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const role = useRole();
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
@@ -681,6 +683,17 @@ export default function StudentDetailPage() {
     catch (e) { alert(e instanceof Error ? e.message : 'Could not update enrollment'); }
   }
 
+  // A genuine mistake (wrong student, duplicate click, never actually ran) has
+  // no history worth keeping — unlike withdraw, this actually removes the
+  // row. The server only allows it when nothing (a lesson, credit, or
+  // request) references the enrolment yet; anything with real history 409s
+  // with a message pointing back to withdraw instead.
+  async function deleteEnrollment(enrollmentId: string, instrument: string) {
+    if (!confirm(`Delete this ${instrument} enrolment? This only works if it has no lesson history — if it does, withdraw it instead. This cannot be undone.`)) return;
+    try { await apiFetch(`/enrollments/${enrollmentId}`, { method: 'DELETE', token: tok() }); load(); }
+    catch (e) { alert(e instanceof Error ? e.message : 'Could not delete this enrollment'); }
+  }
+
   async function stopWeekly(enrollmentId: string) {
     if (!confirm('Stop the weekly lessons for this enrollment? Future scheduled lessons will be cancelled at no charge. Past lessons are unaffected.')) return;
     try {
@@ -698,6 +711,9 @@ export default function StudentDetailPage() {
       <EditEnrollmentModal open={!!editEnrollment} onClose={() => setEditEnrollment(null)} enrollment={editEnrollment} onSaved={load} />
       <RescheduleWeeklyModal open={!!rescheduleEnrollment} onClose={() => setRescheduleEnrollment(null)} enrollment={rescheduleEnrollment} onSaved={load} />
       <EditStudentModal open={showEditStudent} onClose={() => setShowEditStudent(false)} studentId={id} onSaved={load} />
+      {student.family && (
+        <EditFamilyModal open={showEditFamily} onClose={() => setShowEditFamily(false)} familyId={student.family.id} onSaved={load} />
+      )}
 
       <div className="mb-5">
         <BackButton label="Students" fallbackHref="/app/students" />
@@ -750,7 +766,15 @@ export default function StudentDetailPage() {
           </div>
           {student.family && (
             <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
-              <h2 className="font-bold mb-4 text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Family</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-bold text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Family</h2>
+                {role !== 'teacher' && (
+                  <button onClick={() => setShowEditFamily(true)}
+                    className="text-[11px] font-semibold hover:underline" style={{ color: 'var(--sage)' }}>
+                    Edit
+                  </button>
+                )}
+              </div>
               <dl className="space-y-3 text-sm">
                 <div className="flex justify-between gap-3">
                   <dt style={{ color: 'var(--txt3)' }}>Name</dt>
@@ -778,12 +802,22 @@ export default function StudentDetailPage() {
               </dl>
             </div>
           )}
-          {student.notes && (
-            <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
-              <h2 className="font-bold mb-3 text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Profile notes</h2>
-              <p className="text-sm whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--txt2)' }}>{student.notes}</p>
+          <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-bold text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Profile notes</h2>
+              {role !== 'teacher' && (
+                <button onClick={() => setShowEditStudent(true)}
+                  className="text-[11px] font-semibold hover:underline" style={{ color: 'var(--sage)' }}>
+                  Edit
+                </button>
+              )}
             </div>
-          )}
+            {student.notes ? (
+              <p className="text-sm whitespace-pre-wrap leading-relaxed" style={{ color: 'var(--txt2)' }}>{student.notes}</p>
+            ) : (
+              <p className="text-sm" style={{ color: 'var(--txt4)' }}>No notes yet.</p>
+            )}
+          </div>
           <LessonNotes studentId={id} />
         </div>
 
@@ -863,6 +897,13 @@ export default function StudentDetailPage() {
                               Stop weekly
                             </button>
                           </>
+                        )}
+                        {role === 'admin' && (
+                          <button onClick={() => deleteEnrollment(e.id, e.instrument)}
+                            className="text-xs font-semibold hover:underline" style={{ color: 'var(--coral)' }}
+                            title="Permanently delete — only works if this enrolment has no lesson history">
+                            Delete
+                          </button>
                         )}
                       </div>
                     </td>

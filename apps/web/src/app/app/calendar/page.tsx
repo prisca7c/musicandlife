@@ -142,7 +142,7 @@ const STACK_GAP    = 1;  // gap between rows sharing the same/overlapping time �
 const CLUSTER_GAP  = 5;  // gap between separate time clusters — visually distinct from the same-time gap above
 const MAX_PER_ROW  = 3;  // most lessons allowed side by side in one stacked row before wrapping
 
-type LessonLayout = Lesson & { rowIndex: number; colIndex: number; colsInRow: number; stackSize: number; clusterTop: number; clusterHeight: number };
+type LessonLayout = Lesson & { rowIndex: number; colIndex: number; colsInRow: number; stackSize: number; clusterTop: number; clusterHeight: number; ownTop: number; ownHeight: number };
 
 // ─── Elastic hour rows ────────────────────────────────────────────────────────
 // An hour with several simultaneous lessons stacked in it used to keep the same
@@ -200,6 +200,40 @@ function computeElasticHourHeights(columns: Lesson[][]): number[] {
   return needed;
 }
 
+// How many lessons in a cluster are simultaneously "live" at their busiest
+// instant — a sweep over start/end events, processing an end before a start
+// at the same instant so two back-to-back lessons that just touch don't
+// count as overlapping (matches the clustering sweep below).
+function peakOverlap(cluster: Lesson[]): number {
+  const events: { t: number; delta: number }[] = [];
+  for (const l of cluster) {
+    const start = new Date(l.startsAt).getTime();
+    events.push({ t: start, delta: 1 }, { t: start + l.duration * 60000, delta: -1 });
+  }
+  events.sort((a, b) => a.t - b.t || a.delta - b.delta);
+  let cur = 0, peak = 0;
+  for (const e of events) { cur += e.delta; peak = Math.max(peak, cur); }
+  return peak;
+}
+
+// Greedy interval-column packing (the standard "day view" calendar layout):
+// walk lessons in start order, drop each into the first column whose last
+// lesson has already ended by this one's start, opening a new column only
+// when none are free. Two lessons that don't directly overlap can end up
+// sharing a column even if a third lesson links them into the same cluster.
+function assignColumns(cluster: Lesson[]): { colIndex: number; numColumns: number }[] {
+  const colEnds: number[] = [];
+  const colIndexes = cluster.map(l => {
+    const start = new Date(l.startsAt).getTime();
+    const end = start + l.duration * 60000;
+    let col = colEnds.findIndex(e => e <= start);
+    if (col === -1) { col = colEnds.length; colEnds.push(end); } else { colEnds[col] = end; }
+    return col;
+  });
+  const numColumns = colEnds.length;
+  return colIndexes.map(colIndex => ({ colIndex, numColumns }));
+}
+
 function computeLayout(dayLessons: Lesson[], hourHeights: number[] = BASELINE_HOURS): LessonLayout[] {
   const sorted = [...dayLessons].sort((a, b) => {
     const byTime = new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime();
@@ -229,10 +263,10 @@ function computeLayout(dayLessons: Lesson[], hourHeights: number[] = BASELINE_HO
   }
   if (current.length > 0) clusters.push(current);
 
-  // A stacked cluster's rendered height (stackSize * STACK_ROW_H) is an
-  // artificial "however many rows it takes to read", not the real elapsed
-  // time the cluster spans — so on a busy day a big cluster can render taller
-  // than the clock gap before the next cluster starts, and the two visually
+  // A stacked cluster's rendered height is, in the worst case, an artificial
+  // "however many rows it takes to read", not the real elapsed time the
+  // cluster spans — so on a busy day a big cluster can render taller than
+  // the clock gap before the next cluster starts, and the two visually
   // collide even though neither is time-overlapping. Walk clusters in order
   // and push each one's top down past the previous cluster's actual rendered
   // bottom (never earlier than its own real start time) so rendered boxes
@@ -241,21 +275,64 @@ function computeLayout(dayLessons: Lesson[], hourHeights: number[] = BASELINE_HO
   const offsets = cumulativeOffsets(hourHeights);
   let cursorBottom = -Infinity;
   const result: LessonLayout[] = [];
+  const MIN_BOX_H = STACK_ROW_H * 0.6; // a very short lesson still needs to be tappable/readable
+
   for (const cluster of clusters) {
     const startMinutes = minutesFromDayStart(cluster[0]!.startsAt);
     const hourIdx = Math.min(hourHeights.length - 1, Math.max(0, Math.floor(startMinutes / 60)));
     const naturalTop = elasticY(startMinutes, hourHeights, offsets);
     const clusterTop = Math.max(naturalTop, cursorBottom);
+    const pushDown = clusterTop - naturalTop;
+
+    if (cluster.length === 1) {
+      const clusterHeight = Math.max((cluster[0]!.duration / 60) * hourHeights[hourIdx]!, STACK_ROW_H);
+      cursorBottom = clusterTop + clusterHeight + CLUSTER_GAP;
+      result.push({
+        ...cluster[0]!, rowIndex: 0, colIndex: 0, colsInRow: 1, stackSize: 1,
+        clusterTop, clusterHeight, ownTop: clusterTop, ownHeight: clusterHeight - STACK_GAP,
+      });
+      continue;
+    }
+
+    // Few enough lessons overlapping at once to lay them out side by side at
+    // their true, duration-accurate height (like a normal day-view calendar) —
+    // this is the common case (2-3 lessons whose times only partly overlap).
+    // Only when MORE than MAX_PER_ROW are genuinely simultaneous (several
+    // teachers double-booked at the exact same moment) does true-height
+    // side-by-side layout stop being readable, so that case falls back to
+    // fixed-height compact rows below instead.
+    if (peakOverlap(cluster) <= MAX_PER_ROW) {
+      const assigned = assignColumns(cluster);
+      const boxes = cluster.map((l, i) => {
+        const start = minutesFromDayStart(l.startsAt);
+        const top = elasticY(start, hourHeights, offsets) + pushDown;
+        const bottom = elasticY(start + l.duration, hourHeights, offsets) + pushDown;
+        return { l, top, height: Math.max(bottom - top, MIN_BOX_H), ...assigned[i]! };
+      });
+      const clusterBottom = Math.max(...boxes.map(b => b.top + b.height));
+      const clusterHeight = clusterBottom - clusterTop;
+      cursorBottom = clusterBottom + CLUSTER_GAP;
+      boxes.forEach(b => {
+        result.push({
+          ...b.l, rowIndex: 0, colIndex: b.colIndex, colsInRow: b.numColumns, stackSize: cluster.length,
+          clusterTop, clusterHeight, ownTop: b.top, ownHeight: b.height - STACK_GAP,
+        });
+      });
+      continue;
+    }
+
     const numRows = Math.ceil(cluster.length / MAX_PER_ROW);
-    const clusterHeight = cluster.length > 1
-      ? numRows * STACK_ROW_H
-      : Math.max((cluster[0]!.duration / 60) * hourHeights[hourIdx]!, STACK_ROW_H);
+    const clusterHeight = numRows * STACK_ROW_H;
     cursorBottom = clusterTop + clusterHeight + CLUSTER_GAP;
     cluster.forEach((l, i) => {
       const rowIndex = Math.floor(i / MAX_PER_ROW);
       const rowStart = rowIndex * MAX_PER_ROW;
       const colsInRow = Math.min(MAX_PER_ROW, cluster.length - rowStart);
-      result.push({ ...l, rowIndex, colIndex: i - rowStart, colsInRow, stackSize: cluster.length, clusterTop, clusterHeight });
+      const ownTop = clusterTop + rowIndex * STACK_ROW_H;
+      result.push({
+        ...l, rowIndex, colIndex: i - rowStart, colsInRow, stackSize: cluster.length,
+        clusterTop, clusterHeight, ownTop, ownHeight: STACK_ROW_H - STACK_GAP,
+      });
     });
   }
   return result;
@@ -347,14 +424,14 @@ function paymentIcon(lesson: Pick<Lesson, 'paymentStatus' | 'status'>): { color:
 // ─── Lesson block ─────────────────────────────────────────────────────────────
 function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () => void }) {
   const stacked = lesson.stackSize > 1;
-  // clusterTop/clusterHeight are precomputed by computeLayout, which pushes
-  // clusters down past any earlier cluster's real rendered bottom so boxes
-  // never overlap — stacked rows are ordered, not clock-accurate past the
-  // first one, since a block genuinely can't show both "which slot" and
-  // "exactly when" at once once several lessons share the same moment. Up to
-  // MAX_PER_ROW lessons share one row side by side before wrapping below.
-  const top    = stacked ? lesson.clusterTop + lesson.rowIndex * STACK_ROW_H : lesson.clusterTop;
-  const height = stacked ? STACK_ROW_H - STACK_GAP : lesson.clusterHeight - STACK_GAP;
+  // ownTop/ownHeight are precomputed by computeLayout: for lessons whose
+  // cluster stayed within MAX_PER_ROW simultaneous overlaps, these are real
+  // duration-accurate pixel positions (side by side, each box its own true
+  // length) — only a cluster busier than that falls back to fixed-height
+  // compact rows, where a block can't show both "which slot" and "exactly
+  // when" at once.
+  const top    = lesson.ownTop;
+  const height = lesson.ownHeight;
   const left   = stacked ? `${(lesson.colIndex * 100) / lesson.colsInRow}%` : 0;
   const width  = stacked ? `calc(${100 / lesson.colsInRow}% - 3px)` : 'calc(100% - 3px)';
 
@@ -1743,8 +1820,17 @@ export default function CalendarPage() {
 
   useEffect(() => {
     function onDown(e: MouseEvent) {
-      if (viewMenuRef.current && !viewMenuRef.current.contains(e.target as Node)) setViewMenuOpen(false);
-      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) setSortMenuOpen(false);
+      const target = e.target as Node;
+      // The Teacher/Student/Instrument selects inside the Sort panel portal
+      // their dropdown to document.body (see searchable-select.tsx), so a
+      // click on one of their options lands OUTSIDE sortMenuRef's DOM
+      // subtree even though it's visually inside the panel — without this
+      // check the click closed (and unmounted) the whole Sort panel on
+      // mousedown, before the option's onClick ever fired, so picking a
+      // filter silently did nothing.
+      if ((target as Element).closest?.('[data-searchable-select-menu]')) return;
+      if (viewMenuRef.current && !viewMenuRef.current.contains(target)) setViewMenuOpen(false);
+      if (sortMenuRef.current && !sortMenuRef.current.contains(target)) setSortMenuOpen(false);
     }
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);

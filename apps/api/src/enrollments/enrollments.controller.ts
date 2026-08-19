@@ -1,4 +1,4 @@
-import { Controller, Patch, Post, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Patch, Post, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { EnrollmentsService } from './enrollments.service';
 import { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -23,5 +23,11 @@ export class EnrollmentsController {
   @Roles('admin')
   stopRecurring(@CurrentUser() user: RequestUser, @Param('id') id: string) {
     return this.enrollments.stopRecurring(user.orgId, id);
+  }
+
+  @Delete(':id')
+  @Roles('admin')
+  remove(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.enrollments.remove(user.orgId, id);
   }
 }

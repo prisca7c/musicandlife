@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { eq, and, gte } from 'drizzle-orm';
-import { enrollments, students, staffMembers, terms, lessons } from '@music-life/db';
+import { enrollments, students, staffMembers, terms, lessons, lessonCredits, lessonRequests } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateEnrollmentDto } from './dto/create-enrollment.dto';
 import type { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
@@ -242,5 +242,39 @@ export class EnrollmentsService {
 
     const cancelledLessons = await this.cancelFutureLessons(orgId, id);
     return { stopped: true, cancelledLessons };
+  }
+
+  // A genuine hard delete, distinct from withdraw: withdraw is the right tool
+  // for an enrolment that ran for real (it keeps the record + lesson history
+  // for the audit trail), but an enrolment created by pure mistake — wrong
+  // student, duplicate click, never actually happened — has no history worth
+  // keeping and clutters the list forever since withdrawn rows stay visible.
+  // Only allowed when nothing downstream references it yet: any lesson (past
+  // or future), lesson credit, or lesson request tied to this enrolment means
+  // it has real history, and this must be withdrawn instead so that record
+  // survives.
+  async remove(orgId: string, id: string) {
+    const existing = await this.db.db.query.enrollments.findFirst({
+      where: and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)),
+    });
+    if (!existing) throw new NotFoundException('Enrollment not found');
+
+    const [anyLesson] = await this.db.db.query.lessons.findMany({
+      where: eq(lessons.enrollmentId, id), columns: { id: true }, limit: 1,
+    });
+    const [anyCredit] = await this.db.db.query.lessonCredits.findMany({
+      where: eq(lessonCredits.enrollmentId, id), columns: { id: true }, limit: 1,
+    });
+    const [anyRequest] = await this.db.db.query.lessonRequests.findMany({
+      where: eq(lessonRequests.enrollmentId, id), columns: { id: true }, limit: 1,
+    });
+    if (anyLesson || anyCredit || anyRequest) {
+      throw new ConflictException(
+        'This enrolment has lesson history and can’t be deleted — withdraw it instead to end it while keeping the record.',
+      );
+    }
+
+    await this.db.db.delete(enrollments).where(and(eq(enrollments.id, id), eq(enrollments.organizationId, orgId)));
+    return { deleted: true };
   }
 }
