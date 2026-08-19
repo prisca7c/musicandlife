@@ -460,6 +460,11 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
   // so there was never a real reason to force picking a stop point up front.
   const [repeatWeeks, setRepeatWeeks] = useState('ongoing');
   const [customEndDate, setCustomEndDate] = useState('');
+  // For the "Termly" repeat option — not every student is on a term (adult
+  // learners in particular often aren't), so this is offered only when an
+  // active term actually exists rather than forced on everyone.
+  const { data: terms = [] } = useApi<{ id: string; name: string; status: string; endsOn: string }[]>(open ? '/terms' : null);
+  const activeTerm = terms.find(t => t.status === 'active');
   const [result, setResult] = useState<AddResult | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -608,19 +613,25 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
         // A finite pick needs its own endDate on the rule — without it the
         // daily recurrence worker has no way to know to stop, and would just
         // keep extending the series forever regardless of what was chosen here.
-        const endDate = repeatWeeks === 'ongoing'
-          ? undefined
-          : repeatWeeks === 'custom'
-          ? customEndDate
-          : studioDayString(new Date(new Date(`${date}T12:00:00Z`).getTime() + (parseInt(repeatWeeks) || 12) * 7 * 86400000));
-        // How many weeks to materialise up front — for 'custom' that's however
-        // many weeks actually fall between the start date and the chosen end
-        // date (the daily worker tops up the rest going forward regardless,
-        // this only sizes the initial visible batch so a near end date doesn't
-        // over-generate and a far one doesn't under-generate).
-        const customWeeks = repeatWeeks === 'custom' && customEndDate
-          ? Math.max(1, Math.ceil((new Date(`${customEndDate}T12:00:00Z`).getTime() - new Date(`${date}T12:00:00Z`).getTime()) / (7 * 86400000)) + 1)
-          : undefined;
+        // 'weekly'/'monthly' are just fixed week counts (1 / 4); 'termly' ends
+        // at the active term's own end date, when one exists.
+        const weeksFromEndDate = (end: string) =>
+          Math.max(1, Math.ceil((new Date(`${end}T12:00:00Z`).getTime() - new Date(`${date}T12:00:00Z`).getTime()) / (7 * 86400000)) + 1);
+        let endDate: string | undefined;
+        let weeksToBook: number | undefined;
+        if (repeatWeeks === 'ongoing') {
+          endDate = undefined; weeksToBook = undefined;
+        } else if (repeatWeeks === 'custom') {
+          endDate = customEndDate || undefined;
+          weeksToBook = customEndDate ? weeksFromEndDate(customEndDate) : undefined;
+        } else if (repeatWeeks === 'termly') {
+          endDate = activeTerm?.endsOn;
+          weeksToBook = endDate ? weeksFromEndDate(endDate) : undefined;
+        } else {
+          const n = parseInt(repeatWeeks) || 1;
+          endDate = studioDayString(new Date(new Date(`${date}T12:00:00Z`).getTime() + n * 7 * 86400000));
+          weeksToBook = n;
+        }
         await apiFetch(`/enrollments/${enrollmentId}`, {
           method: 'PATCH', token: t, body: JSON.stringify({ scheduleRule: { weekday, startTime: times[0], endDate } }),
         });
@@ -631,7 +642,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
             // 'ongoing': omit weeks entirely so the API's own default window
             // applies — the series doesn't stop there, the daily worker keeps
             // extending it for as long as the enrolment stays active.
-            weeks: repeatWeeks === 'ongoing' ? undefined : repeatWeeks === 'custom' ? customWeeks : parseInt(repeatWeeks) || undefined,
+            weeks: weeksToBook,
             startFrom: date,
           }),
         });
@@ -884,8 +895,13 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
                   <SearchableSelect
                     options={[
                       { value: 'ongoing', label: 'Ongoing (no end date)' },
+                      { value: '1', label: 'Weekly (stop after 1 week)' },
+                      { value: '4', label: 'Monthly (stop after 4 weeks)' },
+                      // Not every student is on a term (adult learners often
+                      // aren't) — only offered when there's an active term to
+                      // reference, rather than forcing everyone through one.
+                      ...(activeTerm ? [{ value: 'termly', label: `Termly (until ${activeTerm.name} ends)` }] : []),
                       { value: 'custom', label: 'Until a custom date' },
-                      ...[4, 8, 12, 16, 24, 36, 52].map(w => ({ value: String(w), label: `${w} weeks, then stop` })),
                     ]}
                     value={repeatWeeks} onChange={setRepeatWeeks}
                   />
@@ -901,7 +917,11 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
                   ? 'Keeps booking every week automatically until someone cancels it.'
                   : repeatWeeks === 'custom'
                   ? (customEndDate ? `Books every week through ${customEndDate}, then stops on its own.` : 'Pick the last date this should book through.')
-                  : `Books every week for ${repeatWeeks} weeks, then stops on its own.`}
+                  : repeatWeeks === 'termly'
+                  ? (activeTerm ? `Books every week through ${activeTerm.endsOn} (end of ${activeTerm.name}), then stops on its own.` : 'No active term to book through.')
+                  : repeatWeeks === '1'
+                  ? 'Books just this one lesson, then stops on its own.'
+                  : 'Books every week for the next 4 weeks, then stops on its own.'}
               </p>
             </div>
           )}
