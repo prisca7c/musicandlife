@@ -23,13 +23,19 @@ export const BRAND = {
   pine: '#1e3a2e',   // brand wordmark, headings, primary button, emphasised values
   moss: '#2f6a4d',   // links
   ink: '#33372f',    // body copy
-  paper: '#f6f4ec',  // page + header/footer background (warm cream)
+  paper: '#f6f4ec',  // page background (warm cream)
   panel: '#f1efe6',  // detail block background
   line: '#e5e2d5',   // hairline borders
-  muted: '#8a887c',  // labels, footer, fine print
+  muted: '#8a887c',  // labels, fine print
+  sageLt: '#eaf3ee', // footer background — a soft, low-opacity wash of the brand green
+  // Wood tone for the top/bottom border bands — an instrument-body walnut brown.
+  wood: '#8b5a2b',
 } as const;
 
 const FONT = "'Lexend', 'Helvetica Neue', Helvetica, Arial, sans-serif";
+
+// A thin solid wood-tone band bookending the card — a nod to the instrument bodies.
+const WOOD_BAND = `<tr><td height="7" style="height:7px;font-size:0;line-height:0;background:${BRAND.wood}">&nbsp;</td></tr>`;
 
 export interface BrandedEmailOptions {
   /** Hidden preview/snippet text shown in the inbox list. */
@@ -71,6 +77,12 @@ export function brandedEmail(opts: BrandedEmailOptions): string {
 
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light">
+<!-- Best-effort custom font: Gmail webmail and Apple/iOS Mail load this; clients
+     that don't (Outlook desktop, most Android mail apps) silently fall through
+     to the Helvetica/Arial stack in FONT below, so this is additive, not required. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;600;700&display=swap" rel="stylesheet">
 <!--[if mso]><style>table,td{border-collapse:collapse}</style><![endif]--></head>
 <body style="margin:0;padding:0;background:${BRAND.paper}">
 ${preview}
@@ -81,6 +93,8 @@ ${preview}
   <tr><td align="center" style="text-align:center">
     <!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" align="center"><tr><td><![endif]-->
     <table role="presentation" width="600" align="center" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;margin:0 auto;background:#ffffff;border:1px solid ${BRAND.line};border-radius:16px;overflow:hidden;text-align:left">
+      <!-- wood-grain band — a nod to the instrument bodies, bookending the card -->
+      ${WOOD_BAND}
       <!-- header: the real wordmark, centred. The alt text carries the studio
            name for the many clients that block images by default. -->
       <tr><td align="center" style="background:#ffffff;padding:30px 24px 22px;text-align:center">
@@ -99,10 +113,10 @@ ${preview}
       </td></tr>
       <!-- hairline rule separating body from footer -->
       <tr><td style="padding:0 36px"><div style="height:1px;background:${BRAND.line}"></div></td></tr>
-      <!-- footer: same warm cream as the header instead of a solid dark
-           block, with pine text/links — same brand, lighter close to the
-           page. -->
-      <tr><td align="center" style="background:${BRAND.paper};padding:22px 24px 26px;text-align:center">
+      <!-- footer: a soft sage-green wash (matches the portal's own light-sage
+           tint) instead of a solid dark block, with pine text/links — same
+           brand, lighter close to the page. -->
+      <tr><td align="center" style="background:${BRAND.sageLt};padding:22px 24px 26px;text-align:center">
         <p style="margin:0 0 8px;font-family:${FONT};font-size:14px;line-height:20px;font-weight:700;letter-spacing:.3px;color:${BRAND.pine}">
           Music &amp; Life London
         </p>
@@ -119,6 +133,7 @@ ${preview}
           <a href="${BRAND.portalUrl}" style="color:${BRAND.moss};text-decoration:underline">Your portal</a>
         </p>
       </td></tr>
+      ${WOOD_BAND}
     </table>
     <!--[if mso]></td></tr></table><![endif]-->
   </td></tr>
