@@ -9,16 +9,31 @@ import { RolesGuard } from './guards/roles.guard';
   imports: [
     JwtModule.register({
       secret: process.env.JWT_SECRET,
-      // Short-lived (900s / 15min by .env.example) with a rotating, reuse-
-      // detected refresh token carrying the real 30-day session — see
-      // AuthService.refresh(). The fallback here MUST match that documented
-      // default, not the refresh token's magnitude: if JWT_ACCESS_TTL is ever
-      // missing in some environment (a fresh deploy, a misconfigured preview
-      // env), falling back to 30 days would silently mint month-long access
-      // tokens with none of the revocation/rotation protection the refresh
-      // token has — a suspended or removed user's token would stay valid for
-      // up to 30 days instead of ~15 minutes, invisibly.
-      signOptions: { expiresIn: parseInt(process.env.JWT_ACCESS_TTL ?? '900', 10) },
+      // Matches the refresh token's own 30-day lifetime (JWT_REFRESH_TTL) —
+      // deliberately, not a fallback that drifted out of sync. Access tokens
+      // used to expire every 15 minutes, silently refreshed in the
+      // background via a rotating, reuse-detected refresh token (see
+      // AuthService.refresh()). That refresh round-trip was the actual
+      // source of a real production bug: a slow network moment (a cold
+      // start, a backgrounded tab) could make the client miss the refresh
+      // response and retry with an already-used token, which read
+      // identically to a stolen token being replayed and killed the whole
+      // session — every list on every page silently went blank until a full
+      // log-out/log-in. Matching the access token to the refresh token's own
+      // lifetime means that refresh round-trip almost never has to happen
+      // during normal use, which removes the bug's actual trigger rather
+      // than only mitigating it.
+      //
+      // The trade-off: JwtAuthGuard verifies a token's signature and expiry
+      // only, no per-request DB lookup — so deactivating a user, removing
+      // their org membership, or an admin-triggered logout doesn't
+      // invalidate an access token already out in the wild until it expires
+      // on its own. That gap existed before this change too (a 15-minute
+      // token already outlives an admin action taken 30 seconds earlier);
+      // this widens it from ~15 minutes to up to 30 days. Accepted
+      // deliberately for this deployment (small, trusted user base) — revisit
+      // if that ever changes.
+      signOptions: { expiresIn: parseInt(process.env.JWT_ACCESS_TTL ?? '2592000', 10) },
     }),
   ],
   controllers: [AuthController],

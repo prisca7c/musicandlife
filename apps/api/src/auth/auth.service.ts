@@ -28,12 +28,12 @@ import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
 import { brandedEmail } from '../email/branding';
 
-// Access token: short-lived (900s / 15min by .env.example). Refresh token:
-// the real 30-day session, rotated with reuse detection — see refresh() below.
-// The ACCESS_TTL fallback must match the documented default, not the refresh
-// token's magnitude (see auth.module.ts, which signs the token this value is
-// only used to compare cookie/response metadata against).
-const ACCESS_TTL = parseInt(process.env.JWT_ACCESS_TTL ?? '900', 10);
+// Access token: matches the refresh token's own 30-day lifetime (see the
+// reasoning in auth.module.ts, which actually signs the token — this value
+// is only used elsewhere to compare cookie/response metadata against).
+// Refresh token: the real session boundary, rotated with reuse detection —
+// see refresh() below.
+const ACCESS_TTL = parseInt(process.env.JWT_ACCESS_TTL ?? '2592000', 10);
 const REFRESH_TTL = parseInt(process.env.JWT_REFRESH_TTL ?? '2592000', 10);
 
 // How long a just-rotated refresh token's response stays replayable if the
