@@ -10,7 +10,7 @@ import { Modal } from '@/components/modal';
 import { CancelLessonModal } from '@/components/cancel-lesson-modal';
 import { RescheduleLessonModal } from '@/components/reschedule-lesson-modal';
 import { lessonStatusLabel } from '@/lib/lesson-status';
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, CalendarClock, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, CalendarClock, Check, X } from 'lucide-react';
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string; isTrialLesson: boolean;
@@ -28,6 +28,14 @@ const INSTR_HUE: Record<string, string> = {
   ukulele: '#D69E2E', 'susuki violin': '#2B6CB0', ensemble: '#718096',
 };
 function instrColor(name?: string | null) { return INSTR_HUE[(name ?? '').toLowerCase()] ?? '#4A5568'; }
+
+// Only the landmark states — present (green) or absent/cancelled (red) — earn an
+// icon; a lesson that's merely scheduled and hasn't happened yet shows none.
+function attendanceIcon(status: string): { Icon: typeof Check; color: string; title: string } | null {
+  if (status === 'completed') return { Icon: Check, color: '#22543D', title: 'Present' };
+  if (status.startsWith('cancelled')) return { Icon: X, color: '#9B2C2C', title: 'Absent / cancelled' };
+  return null;
+}
 
 // Deterministic per-student colour so a family with several kids can tell
 // whose lesson is whose at a glance without a legend.
@@ -261,26 +269,43 @@ export default function FamilySchedulePage() {
                   {positioned.map(({ lesson: l, top, height, col, cols }) => {
                     const cancelled = l.status.startsWith('cancelled');
                     const c = studentColor(l.student?.id);
+                    const present = attendanceIcon(l.status);
                     return (
                       <button
                         key={l.id}
                         onClick={() => setSelected(l)}
-                        className="absolute rounded-lg px-1.5 py-1 text-left text-[11px] leading-tight overflow-hidden hover:brightness-95 transition"
+                        className="absolute rounded-lg text-left text-[11px] leading-tight overflow-hidden hover:brightness-95 transition flex items-stretch gap-0.5 px-1 py-0.5"
                         style={{
                           top, height, left: `${(col * 100) / cols}%`, width: `calc(${100 / cols}% - 3px)`,
                           background: hexToRgba(c, cancelled ? 0.06 : 0.14), border: `1px solid ${hexToRgba(c, cancelled ? 0.25 : 0.55)}`,
                           opacity: cancelled ? 0.6 : 1,
                         }}
                       >
-                        <span className="font-bold tabular-nums block" style={{ color: c }}>{fmtTime(l.startsAt)}</span>
-                        <span className="font-bold block truncate" style={{ color: c, textDecoration: cancelled ? 'line-through' : undefined }}>
-                          {l.student?.firstName}
-                        </span>
-                        {l.enrollment?.instrument && (
-                          <span className="capitalize block truncate" style={{ color: instrColor(l.enrollment.instrument) }}>
-                            {l.enrollment.instrument}
+                        {present && (
+                          <span className="flex flex-col items-center justify-center shrink-0 w-3" title={present.title}>
+                            <present.Icon size={10} style={{ color: present.color }} aria-label={present.title} />
                           </span>
                         )}
+                        <span className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
+                          <span className="flex items-baseline gap-1 min-w-0">
+                            <span className="font-bold tabular-nums shrink-0" style={{ color: c }}>{fmtTime(l.startsAt)}</span>
+                            <span className="font-bold truncate" style={{ color: c, textDecoration: cancelled ? 'line-through' : undefined }}>
+                              {l.student?.firstName}
+                            </span>
+                          </span>
+                          <span className="flex items-center gap-1 min-w-0">
+                            {l.enrollment?.instrument && (
+                              <span className="capitalize shrink-0 whitespace-nowrap font-semibold" style={{ color: instrColor(l.enrollment.instrument) }}>
+                                {l.enrollment.instrument}
+                              </span>
+                            )}
+                            {l.teacher && (
+                              <span className="truncate min-w-0 flex-1" style={{ color: c, opacity: 0.7 }}>
+                                · {l.teacher.firstName} {l.teacher.lastName}
+                              </span>
+                            )}
+                          </span>
+                        </span>
                       </button>
                     );
                   })}

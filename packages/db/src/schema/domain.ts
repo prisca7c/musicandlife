@@ -25,6 +25,11 @@ export const terms = pgTable(
     status: text('status', { enum: ['planned', 'active', 'closed'] })
       .notNull()
       .default('planned'),
+    // Weeks inside the term with zero classes (half-term, holiday) — an inclusive
+    // date range per exception. materializeEnrollment skips any occurrence whose
+    // date falls in one of these when generating a term's recurring lessons, so
+    // "book term" doesn't schedule lessons the studio never runs.
+    exceptionWeeks: jsonb('exception_weeks').$type<{ start: string; end: string }[]>().notNull().default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

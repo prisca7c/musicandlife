@@ -10,13 +10,12 @@ import { usePendingBadges } from '@/lib/use-pending-badges';
 import { Modal } from '@/components/modal';
 import { Badge } from '@/components/badge';
 import { SearchableSelect } from '@/components/searchable-select';
-import { InstrumentIcon } from '@/components/instrument-icons';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { AssignStudentsModal } from '@/components/assign-students-modal';
 import { SectionTabs } from '@/components/section-tabs';
 import { lessonRate } from '@music-life/types';
 import { useInstruments } from '@/lib/use-instruments';
-import { ChevronDown, ChevronLeft, ChevronRight, Users, Check, X, Repeat, PoundSterling, Shuffle, Clock, Pencil, Copy, Trash2, ListFilter } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Users, Check, X, Repeat, PoundSterling, Shuffle, Pencil, Copy, Trash2, ListFilter } from 'lucide-react';
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string; notes: string | null;
@@ -399,10 +398,10 @@ function teacherColor(teacherId?: string | null) {
 // ─── Attendance landmark — one icon standing in for "what happened", shown in
 // the block's left rail. Detail (which cancellation reason, etc.) lives one
 // click away in the lesson modal; the calendar grid only needs the headline.
-function attendanceIcon(status: string): { Icon: typeof Check; color: string; title: string } {
+function attendanceIcon(status: string): { Icon: typeof Check; color: string; title: string } | null {
   if (status === 'completed') return { Icon: Check, color: '#22543D', title: 'Present' };
   if (status.startsWith('cancelled')) return { Icon: X, color: '#9B2C2C', title: 'Absent / cancelled' };
-  return { Icon: Clock, color: '#718096', title: 'Attendance not yet taken' };
+  return null;
 }
 const PAID_COLOR = '#22543D';
 const UNPAID_COLOR = '#9B2C2C';
@@ -466,9 +465,11 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
     >
       {/* Left rail: attendance status, paid status stacked underneath */}
       <span className="flex flex-col items-center justify-center shrink-0 w-4 gap-0.5">
-        <span title={present.title}>
-          <present.Icon size={11} style={{ color: present.color }} aria-label={present.title} />
-        </span>
+        {present && (
+          <span title={present.title}>
+            <present.Icon size={11} style={{ color: present.color }} aria-label={present.title} />
+          </span>
+        )}
         {paid && (
           <span title={paid.title}>
             <PoundSterling size={10} style={{ color: paid.color }} aria-label={paid.title} />
@@ -487,7 +488,6 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
           </span>
         </span>
         <span className="flex items-center gap-1 min-w-0">
-          {instr && <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={10} /></span>}
           {secondaryLabel && (
             <span className="text-[10px] font-semibold capitalize shrink-0 whitespace-nowrap" style={{ color: iColor }}>
               {secondaryLabel}
@@ -2401,8 +2401,12 @@ export default function CalendarPage() {
                             opacity: cancelled ? 0.65 : 1,
                           }}
                         >
-                          <span className="flex flex-col items-center justify-center shrink-0 w-3 gap-0.5" title={present.title}>
-                            <present.Icon size={9} style={{ color: present.color }} />
+                          <span className="flex flex-col items-center justify-center shrink-0 w-3 gap-0.5">
+                            {present && (
+                              <span title={present.title}>
+                                <present.Icon size={9} style={{ color: present.color }} />
+                              </span>
+                            )}
                             {paid && <span title={paid.title}><PoundSterling size={8} style={{ color: paid.color }} /></span>}
                           </span>
                           <span className="flex-1 min-w-0 flex flex-col gap-0.5">
@@ -2413,7 +2417,6 @@ export default function CalendarPage() {
                               </span>
                             </span>
                             <span className="flex items-center gap-1 min-w-0">
-                              {instr && <span className="shrink-0" style={{ color: iColor }}><InstrumentIcon name={instr} size={8} /></span>}
                               {secondaryLabel && (
                                 <span className="text-[8px] font-semibold capitalize truncate" style={{ color: iColor }}>{secondaryLabel}</span>
                               )}

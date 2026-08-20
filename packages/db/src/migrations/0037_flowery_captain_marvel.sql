@@ -1,0 +1,1 @@
+ALTER TABLE "terms" ADD COLUMN "exception_weeks" jsonb DEFAULT '[]'::jsonb NOT NULL;
