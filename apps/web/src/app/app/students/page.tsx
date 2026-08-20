@@ -24,6 +24,7 @@ interface Student {
   enrollments?: { instrument: string; status: string; teacher: { id: string; firstName: string; lastName: string } | null }[];
   nextLessonAt: string | null;
   creditsAvailable: number;
+  creditsUsed: number;
 }
 
 // Instruments/teachers are stored with inconsistent casing ("Piano" vs "piano"),
@@ -207,7 +208,7 @@ function StudentRoster({ status }: { status: 'active' | 'trial' }) {
               <th>Instruments</th>
               <th>Teachers</th>
               <th>Next lesson</th>
-              <th>Credits</th>
+              <th>Credits <InfoTooltip text="Available lesson credits · lessons already booked with credits" /></th>
               {role === 'admin' && <th></th>}
             </tr>
           </thead>
@@ -285,8 +286,13 @@ function StudentRoster({ status }: { status: 'active' | 'trial' }) {
                 <td style={{ color: 'var(--txt3)' }}>
                   {s.nextLessonAt ? fmtDate(s.nextLessonAt, { day: 'numeric', month: 'short' }) : '—'}
                 </td>
-                <td className="font-medium" style={{ color: s.creditsAvailable > 0 ? 'var(--sage-dk)' : 'var(--txt3)' }}>
-                  {s.creditsAvailable}
+                <td>
+                  <span className="font-medium" style={{ color: s.creditsAvailable > 0 ? 'var(--sage-dk)' : 'var(--txt3)' }}>
+                    {s.creditsAvailable} available
+                  </span>
+                  {s.creditsUsed > 0 && (
+                    <span className="block text-[11px] mt-0.5" style={{ color: 'var(--txt4)' }}>{s.creditsUsed} booked</span>
+                  )}
                 </td>
                 {role === 'admin' && (
                   <td>

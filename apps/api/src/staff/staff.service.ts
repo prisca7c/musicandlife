@@ -3,7 +3,7 @@ import { eq, and, gte, inArray, sql } from 'drizzle-orm';
 import {
   staffMembers, staffPrivileges, teacherAssignments,
   users, memberships, passwordResetTokens, availability, blockedTime, students, lessons, enrollments,
-  invoiceLineItems, invoices,
+  invoiceLineItems, invoices, lessonCredits,
 } from '@music-life/db';
 import { DEFAULT_TEACHER_PRIVILEGES } from '@music-life/types';
 import { randomBytes, createHash } from 'crypto';
@@ -150,7 +150,10 @@ export class StaffService {
       if (!byStudent.has(e.studentId)) byStudent.set(e.studentId, []);
       byStudent.get(e.studentId)!.push({ id: e.id, instrument: e.instrument, status: e.status });
     }
-    const unpaidByStudent = await this.unpaidBilledByStudent(orgId, [...linkedStudentIds, ...extraIds], id);
+    const [unpaidByStudent, creditsByStudent] = await Promise.all([
+      this.unpaidBilledByStudent(orgId, [...linkedStudentIds, ...extraIds], id),
+      this.availableCreditsByStudent(orgId, [...linkedStudentIds, ...extraIds]),
+    ]);
 
     function enrichRow(student: { id: string; firstName: string; lastName: string; status: string }) {
       const rows = byStudent.get(student.id) ?? [];
@@ -167,6 +170,10 @@ export class StaffService {
         // first; the rest stay reachable from the student's own profile.
         enrollmentId: relevant.length > 0 ? relevant[0]!.id : null,
         unpaidBilled: unpaidByStudent.get(student.id) ?? 0,
+        // The student's whole credit pool, not scoped to this teacher — a
+        // credit isn't earned against a specific teacher, so this matches
+        // what the student's own profile shows.
+        creditsAvailable: creditsByStudent.get(student.id) ?? 0,
       };
     }
 
@@ -198,6 +205,20 @@ export class StaffService {
       ))
       .groupBy(lessons.studentId);
     return new Map(rows.map((r) => [r.studentId, Number(r.total)]));
+  }
+
+  private async availableCreditsByStudent(orgId: string, studentIds: string[]) {
+    if (studentIds.length === 0) return new Map<string, number>();
+    const rows = await this.db.db
+      .select({ studentId: lessonCredits.studentId, n: sql<number>`count(*)::int` })
+      .from(lessonCredits)
+      .where(and(
+        eq(lessonCredits.organizationId, orgId),
+        inArray(lessonCredits.studentId, studentIds),
+        eq(lessonCredits.status, 'available'),
+      ))
+      .groupBy(lessonCredits.studentId);
+    return new Map(rows.map((r) => [r.studentId, r.n]));
   }
 
   async create(orgId: string, dto: CreateStaffDto) {

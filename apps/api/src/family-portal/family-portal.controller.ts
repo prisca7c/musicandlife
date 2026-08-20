@@ -263,8 +263,8 @@ export class FamilyPortalController {
     // Per-student lesson credit balances
     const studentsWithCredits = await Promise.all(
       visibleStudents.map(async s => {
-        const { total, prepaid, makeup } = await this.attendance.getLessonCreditBalance(user.orgId, s.id);
-        return { ...s, lessons: { total, prepaid, makeup } };
+        const { total, prepaid, makeup, used } = await this.attendance.getLessonCreditBalance(user.orgId, s.id);
+        return { ...s, lessons: { total, prepaid, makeup, used } };
       }),
     );
 
