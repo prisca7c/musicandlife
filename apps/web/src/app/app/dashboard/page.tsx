@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { useMe } from '@/lib/use-me';
 import { formatMoney } from '@/lib/money';
+import { SubmitPayCard } from '@/components/submit-pay-card';
 import { fmtTime, studioDayString } from '@/lib/datetime';
 import { Badge } from '@/components/badge';
 import { PaidDot } from '@/components/paid-dot';
@@ -249,7 +250,12 @@ function AdminDashboard() {
     mutateLessons(prev => prev?.filter(l => l.id !== lessonId), { revalidate: false });
   }
   const { data: pendingRequests = [] } = useApi<LessonRequest[]>('/lesson-requests?status=pending');
-  const { data: pendingSignups = [] } = useApi<PendingRegistration[]>('/registrations?status=pending');
+  // Registrations are admin-only server-side (GET /registrations 403s for a
+  // teacher) — this card and its "All signups →" link (/app/intake, also
+  // admin-only) were rendering for every role regardless, always showing
+  // "No pending signups" for a teacher since the fetch never actually
+  // succeeded. Skip the fetch entirely once we know the viewer is scoped.
+  const { data: pendingSignups = [] } = useApi<PendingRegistration[]>(kpis?.scoped ? null : '/registrations?status=pending');
   const { firstName } = useMe();
 
   // "Today" in the studio zone (matches how the calendar buckets lessons), and
@@ -332,7 +338,9 @@ function AdminDashboard() {
             they're approved). */}
         <div className="lg:col-span-2 flex flex-col gap-4">
 
-        {/* Pending registrations — new-family signups waiting for admin review/approval. */}
+        {/* Pending registrations — new-family signups waiting for admin
+            review/approval. Admin-only, matching /app/intake's own access. */}
+        {!kpis?.scoped && (
         <div className="bg-white rounded-2xl border border-[var(--bd)] overflow-hidden flex flex-col">
           <div className="px-5 py-3.5 border-b border-[var(--bd)] flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
@@ -368,6 +376,7 @@ function AdminDashboard() {
             </div>
           )}
         </div>
+        )}
 
         {/* Pending lesson requests — reschedules/bookings waiting on someone's
             decision, easy to lose track of once they're not the page you're on. */}
@@ -502,6 +511,13 @@ function AdminDashboard() {
           )}
         </div>
       </div>
+
+      {/* Submit pay — teachers only, quick access to the same form on My pay */}
+      {kpis?.scoped && (
+        <div className="mb-4">
+          <SubmitPayCard compact />
+        </div>
+      )}
 
       {/* My availability — teachers only */}
       {kpis?.scoped && myAvailability.length > 0 && (

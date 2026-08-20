@@ -36,9 +36,43 @@ import { brandedEmail } from '../email/branding';
 const ACCESS_TTL = parseInt(process.env.JWT_ACCESS_TTL ?? '900', 10);
 const REFRESH_TTL = parseInt(process.env.JWT_REFRESH_TTL ?? '2592000', 10);
 
+// How long a just-rotated refresh token's response stays replayable if the
+// SAME token is presented again — see the grace-window cache below.
+const REUSE_GRACE_MS = 15_000;
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+
+  // A refresh token is single-use, rotated on every call, with reuse treated
+  // as a theft signal that revokes the whole session (see refresh() below) —
+  // correct against an attacker replaying a stolen token, but a legitimate
+  // client can also "reuse" its own already-consumed token: the server
+  // rotates it successfully, but the client never sees the response (a
+  // dropped connection, a backgrounded tab throttling the fetch, the Render
+  // free-tier cold-start delay outrunning the client's own timeout) and
+  // retries with the same (now-consumed) token on its next request. Without
+  // this, that ordinary network hiccup reads identically to theft and kills
+  // the session — everything in the app goes empty until a full log-out/
+  // log-in, reported as students/families "randomly disappearing." Caching
+  // the just-issued response for a short window and replaying it verbatim on
+  // a reuse within that window absorbs exactly the lost-response case while
+  // leaving real theft detection intact for anything beyond a few seconds —
+  // an attacker replaying a genuinely stolen token days or weeks later still
+  // hits the reuse-detected/revoke path exactly as before. Single-process
+  // in-memory cache: fine for this deployment (one API instance); would need
+  // a shared store (Redis) behind a load balancer.
+  private readonly refreshReplayCache = new Map<string, { response: { accessToken: string; refreshToken: string }; expiresAt: number }>();
+
+  private cacheRefreshReplay(tokenHash: string, response: { accessToken: string; refreshToken: string }) {
+    const now = Date.now();
+    // Opportunistic sweep — the cache is tiny and short-lived, so this is
+    // cheap and keeps it from growing unbounded over a long-running process.
+    for (const [key, entry] of this.refreshReplayCache) {
+      if (entry.expiresAt <= now) this.refreshReplayCache.delete(key);
+    }
+    this.refreshReplayCache.set(tokenHash, { response, expiresAt: now + REUSE_GRACE_MS });
+  }
 
   constructor(
     private readonly db: DbService,
@@ -147,6 +181,14 @@ export class AuthService {
       .returning();
 
     if (!claimed) {
+      // Reuse of an already-consumed token — within the grace window this is
+      // almost certainly the client's own retry after losing the first
+      // response (see refreshReplayCache above), not theft. Replay the exact
+      // same tokens rather than minting a second pair or revoking.
+      const replay = this.refreshReplayCache.get(tokenHash);
+      if (replay && replay.expiresAt > Date.now()) {
+        return replay.response;
+      }
       // Reuse detected — revoke whole session
       await this.revokeSession(token.sessionId);
       throw new UnauthorizedException('Refresh token reuse detected');
@@ -162,7 +204,9 @@ export class AuthService {
     );
     if (!membership) throw new UnauthorizedException('No active membership');
 
-    return this.issueAccessAndRefresh(token.userId, membership.id, membership.organizationId, membership.baseRole as BaseRole, token.sessionId, token.id);
+    const result = await this.issueAccessAndRefresh(token.userId, membership.id, membership.organizationId, membership.baseRole as BaseRole, token.sessionId, token.id);
+    this.cacheRefreshReplay(tokenHash, result);
+    return result;
   }
 
   // ─── Logout ──────────────────────────────────────────────────────────────

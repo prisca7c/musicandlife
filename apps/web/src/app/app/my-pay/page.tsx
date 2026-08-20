@@ -6,6 +6,7 @@ import { formatMoney } from '@/lib/money';
 import { PageHeader } from '@/components/page-header';
 import { InfoTooltip } from '@/components/info-tooltip';
 import { LoadState } from '@/components/load-state';
+import { SubmitPayCard } from '@/components/submit-pay-card';
 import { fmtDate, fmtTime } from '@/lib/datetime';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
@@ -45,6 +46,10 @@ export default function MyPayPage() {
         }
         subtitle="Approved pay periods, most recent first"
       />
+
+      <div className="mb-4">
+        <SubmitPayCard />
+      </div>
 
       {(error || isLoading) && (
         <div className="bg-white rounded-2xl border p-6" style={{ borderColor: 'var(--bd)' }}>

@@ -683,12 +683,28 @@ export class SchedulingService {
       }
       return this.db.db.transaction(async (tx) => {
         await this.attendance.reverseAndClearAttendance(orgId, id, tx);
+        await this.detachLessonRequest(tx, id);
         await tx.delete(lessons).where(eq(lessons.id, id));
         return { id };
       });
     }
-    await this.db.db.delete(lessons).where(eq(lessons.id, id));
+    await this.db.db.transaction(async (tx) => {
+      await this.detachLessonRequest(tx, id);
+      await tx.delete(lessons).where(eq(lessons.id, id));
+    });
     return { id };
+  }
+
+  // A lesson created by confirming a lesson request (front-desk or a
+  // confirmed family booking) is referenced by that request's
+  // createdLessonId — deleting the lesson without clearing that reference
+  // first hit the FK constraint and surfaced as a raw 500 (Postgres error,
+  // not a clean 400) instead of actually deleting anything. The request row
+  // itself is worth keeping (it's the original proposed times/who asked),
+  // so this only detaches the now-gone lesson from it, never deletes the
+  // request.
+  private async detachLessonRequest(tx: Executor, id: string) {
+    await tx.update(lessonRequests).set({ createdLessonId: null }).where(eq(lessonRequests.createdLessonId, id));
   }
 
   /**
@@ -736,7 +752,10 @@ export class SchedulingService {
         columns: { id: true },
       });
       if (billed) { skipped++; continue; }
-      await this.db.db.delete(lessons).where(eq(lessons.id, l.id));
+      await this.db.db.transaction(async (tx) => {
+        await this.detachLessonRequest(tx, l.id);
+        await tx.delete(lessons).where(eq(lessons.id, l.id));
+      });
       deleted++;
     }
 
