@@ -68,6 +68,20 @@ function readAccessToken(): string | undefined {
   return document.cookie.match(/access_token=([^;]+)/)?.[1];
 }
 
+// A refresh that genuinely fails (not the grace-window replay case the API
+// now handles — see auth.service.ts — but an actually-dead session: expired,
+// revoked, or real reuse past the grace window) used to just let the
+// triggering request throw, which every list-fetching component quietly
+// swallows into "no data" via its own `data ?? []` fallback. The whole app
+// looked wiped rather than logged out, and the fix was always the same
+// (log out, log back in) — so just do that automatically instead of leaving
+// the user staring at empty pages with no explanation.
+function forceLogout() {
+  if (!isBrowser()) return;
+  document.cookie = 'access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+  window.location.href = '/login';
+}
+
 function writeAccessToken(token: string) {
   if (!isBrowser()) return;
   // SameSite=Lax (not Strict) so following a link into the app from an email
@@ -121,6 +135,11 @@ export async function apiFetch<T>(
     const fresh = await refreshAccessToken();
     if (fresh) {
       res = await doFetch(fresh);
+    } else {
+      // Refresh itself failed — the session is actually gone, not just this
+      // one request. Log out cleanly rather than letting every open page
+      // quietly render as if there's no data.
+      forceLogout();
     }
   }
 
