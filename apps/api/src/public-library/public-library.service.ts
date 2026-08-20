@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { and, eq, desc } from 'drizzle-orm';
-import { organizations, resources, resourceSubscribers } from '@music-life/db';
+import { and, eq, desc, isNotNull } from 'drizzle-orm';
+import { organizations, resources, resourceSubscribers, families } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { EmailPort } from '../email/ports/email.port';
 import { FilesService } from '../files/files.service';
@@ -160,6 +160,31 @@ export class PublicLibraryService {
       // The shareable magic link, so staff can copy it to a subscriber whose
       // activation email bounced. Only exposed to staff (this route is guarded).
       accessLink: this.accessLink(accessToken),
+    }));
+  }
+
+  // Separate from the public list above: these are the studio's OWN enrolled
+  // families who bought resource-library access from inside their portal
+  // (family-portal.controller.ts's resource-subscription/subscribe), tracked
+  // on families.resourceAccessPaidUntil rather than the resourceSubscribers
+  // table. Staff had no page showing these at all — only a family's own
+  // profile did — so a family could clearly have access (granted the moment
+  // their invoice is issued, paid later) while this page's "Library
+  // subscribers" list still showed zero people, reading as if no one had
+  // subscribed yet.
+  async listFamilySubscriptions(orgId: string) {
+    const rows = await this.db.db.query.families.findMany({
+      where: and(eq(families.organizationId, orgId), isNotNull(families.resourceAccessPaidUntil)),
+      columns: { id: true, name: true, contactName: true, email: true, resourceAccessPaidUntil: true },
+      orderBy: (f, { desc: d }) => [d(f.resourceAccessPaidUntil)],
+    });
+    const today = this.today();
+    return rows.map((f) => ({
+      id: f.id,
+      name: f.contactName || f.name,
+      email: f.email,
+      paidUntil: f.resourceAccessPaidUntil,
+      active: !!f.resourceAccessPaidUntil && f.resourceAccessPaidUntil >= today,
     }));
   }
 

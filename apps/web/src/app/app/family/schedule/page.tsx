@@ -64,7 +64,10 @@ function formatDateLabel(d: Date, opts: Intl.DateTimeFormatOptions) {
 }
 
 // ─── Hour grid geometry ─────────────────────────────────────────────────────
-const PX_PER_HOUR = 56;
+// Matches the admin/teacher calendar's own PX_PER_HOUR (calendar/page.tsx) —
+// this used to be 56, giving lesson blocks roughly half the vertical room and
+// making the same lesson look cramped here versus roomy there.
+const PX_PER_HOUR = 100;
 const DAY_START = 8;   // 08:00
 const DAY_END = 21;    // 21:00
 const HOURS = Array.from({ length: DAY_END - DAY_START }, (_, i) => i + DAY_START);
@@ -274,7 +277,7 @@ export default function FamilySchedulePage() {
                       <button
                         key={l.id}
                         onClick={() => setSelected(l)}
-                        className="absolute rounded-lg text-left text-[11px] leading-tight overflow-hidden hover:brightness-95 transition flex items-stretch gap-0.5 px-1 py-0.5"
+                        className="absolute rounded-lg text-left leading-tight overflow-hidden hover:brightness-95 transition flex items-stretch gap-0.5 px-1"
                         style={{
                           top, height, left: `${(col * 100) / cols}%`, width: `calc(${100 / cols}% - 3px)`,
                           background: hexToRgba(c, cancelled ? 0.06 : 0.14), border: `1px solid ${hexToRgba(c, cancelled ? 0.25 : 0.55)}`,
@@ -286,21 +289,21 @@ export default function FamilySchedulePage() {
                             <present.Icon size={10} style={{ color: present.color }} aria-label={present.title} />
                           </span>
                         )}
-                        <span className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
+                        <span className="flex-1 min-w-0 flex flex-col justify-center gap-0.5 py-0.5">
                           <span className="flex items-baseline gap-1 min-w-0">
-                            <span className="font-bold tabular-nums shrink-0" style={{ color: c }}>{fmtTime(l.startsAt)}</span>
-                            <span className="font-bold truncate" style={{ color: c, textDecoration: cancelled ? 'line-through' : undefined }}>
+                            <span className="text-[10px] font-bold leading-none tabular-nums shrink-0" style={{ color: c, opacity: 0.7 }}>{fmtTime(l.startsAt)}</span>
+                            <span className="text-[13px] font-bold leading-tight truncate" style={{ color: c, textDecoration: cancelled ? 'line-through' : undefined }}>
                               {l.student?.firstName}
                             </span>
                           </span>
                           <span className="flex items-center gap-1 min-w-0">
                             {l.enrollment?.instrument && (
-                              <span className="capitalize shrink-0 whitespace-nowrap font-semibold" style={{ color: instrColor(l.enrollment.instrument) }}>
+                              <span className="text-[10px] capitalize font-semibold shrink-0 whitespace-nowrap" style={{ color: instrColor(l.enrollment.instrument) }}>
                                 {l.enrollment.instrument}
                               </span>
                             )}
                             {l.teacher && (
-                              <span className="truncate min-w-0 flex-1" style={{ color: c, opacity: 0.7 }}>
+                              <span className="text-[10px] leading-tight truncate min-w-0 flex-1" style={{ color: c, opacity: 0.7 }}>
                                 · {l.teacher.firstName} {l.teacher.lastName}
                               </span>
                             )}

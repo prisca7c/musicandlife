@@ -42,6 +42,13 @@ export class PublicLibraryController {
     return this.library.list(user.orgId);
   }
 
+  @Get('resource-subscribers/families')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('admin')
+  listFamilySubscriptions(@CurrentUser() user: RequestUser) {
+    return this.library.listFamilySubscriptions(user.orgId);
+  }
+
   @Post('resource-subscribers/:id/activate')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('admin')

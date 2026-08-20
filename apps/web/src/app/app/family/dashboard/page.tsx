@@ -49,7 +49,7 @@ export default function FamilyDashboardPage() {
   const { data, mutate: mutateData } = useApi<DashboardData>('/family/dashboard');
   const { firstName } = useMe();
   const { data: teacherAvail = [] } = useApi<AvailWindow[]>('/family/teacher-availability');
-  const { data: teachers = [] } = useApi<{ id: string; firstName: string; lastName: string; phone: string | null; user: { email: string } | null }[]>('/family/teachers');
+  const { data: teachers = [] } = useApi<{ id: string; firstName: string; lastName: string }[]>('/family/teachers');
   const { data: newsRaw = [] } = useApi<NewsPost[]>('/news');
   const news = newsRaw.slice(0, 3);
   const [availTeacherFilter, setAvailTeacherFilter] = useState<string>('all');
@@ -379,8 +379,10 @@ export default function FamilyDashboardPage() {
           </div>
         </div>
 
-        {/* ── Your teacher(s) — name + contact only, scoped to this family's own
-             assigned teachers (never the whole studio roster) by /family/teachers. ── */}
+        {/* ── Your teacher(s) — name only. Contact details aren't shown here on
+             purpose: a family reaching a teacher goes through Messages, not a
+             direct phone/email, which is why this only ever exposed the name
+             even though /family/teachers used to hand back more. ── */}
         {teachers.length > 0 && (
           <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
             <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--txt3)' }}>
@@ -388,13 +390,8 @@ export default function FamilyDashboardPage() {
             </p>
             <div className="space-y-2">
               {teachers.map(t => (
-                <div key={t.id} className="flex items-center justify-between text-sm">
-                  <span className="font-medium">{t.firstName} {t.lastName}</span>
-                  <span className="text-right" style={{ color: 'var(--txt3)' }}>
-                    {t.user?.email && <span className="block">{t.user.email}</span>}
-                    {t.phone && <span className="block">{t.phone}</span>}
-                    {!t.user?.email && !t.phone && '—'}
-                  </span>
+                <div key={t.id} className="text-sm font-medium">
+                  {t.firstName} {t.lastName}
                 </div>
               ))}
             </div>

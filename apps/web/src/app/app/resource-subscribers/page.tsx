@@ -5,6 +5,7 @@ import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
+import Link from 'next/link';
 import { Copy, Check, Play, XCircle } from 'lucide-react';
 
 interface Subscriber {
@@ -13,9 +14,14 @@ interface Subscriber {
   paidUntil: string | null; active: boolean; accessLink: string; createdAt: string;
 }
 
+interface FamilySubscription {
+  id: string; name: string; email: string | null; paidUntil: string | null; active: boolean;
+}
+
 export default function ResourceSubscribersPage() {
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
   const { data: subscribers = [], mutate } = useApi<Subscriber[]>('/resource-subscribers');
+  const { data: familySubs = [] } = useApi<FamilySubscription[]>('/resource-subscribers/families');
   const [busy, setBusy] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -53,6 +59,42 @@ export default function ResourceSubscribersPage() {
 
       {error && <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
 
+      {/* Enrolled families who bought access from inside their own portal —
+          tracked separately from public subscribers below, since it's a
+          different flow (billed to their family account, not a standalone
+          subscription). This page used to show only public subscribers, so a
+          family could clearly have access and this page would still read
+          "no one has subscribed yet". */}
+      {familySubs.length > 0 && (
+        <div className="mb-6">
+          <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--txt3)' }}>
+            Enrolled families with library access ({familySubs.length})
+          </p>
+          <div className="space-y-2">
+            {familySubs.map(f => (
+              <Link key={f.id} href={`/app/families/${f.id}`}
+                className="block bg-white rounded-lg border px-4 py-3 hover:bg-[var(--surf)] transition">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-gray-900">{f.name}</span>
+                      <Badge variant={f.active ? 'active' : 'default'}>{f.active ? 'active' : 'lapsed'}</Badge>
+                    </div>
+                    {f.email && <p className="text-xs text-gray-500">{f.email}</p>}
+                  </div>
+                  <p className="text-xs text-gray-400 shrink-0">
+                    {f.paidUntil ? `Access until ${f.paidUntil}` : 'Not set'}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: 'var(--txt3)' }}>
+        Public subscribers ({subscribers.length})
+      </p>
       <div className="space-y-2">
         {subscribers.length === 0 && (
           <div className="bg-white rounded-lg border px-4 py-12 text-center text-gray-400">

@@ -39,7 +39,6 @@ const NAV: NavItem[] = [
   { label: 'Students',     href: '/app/students',          icon: <UserCheck size={16} /> },
   { label: 'Families',     href: '/app/families',          icon: <Home size={16} /> },
   { label: 'Staff',        href: '/app/staff',             icon: <Briefcase size={16} /> },
-  { label: 'My students',  href: '/app/staff/me',          icon: <UserCheck size={16} /> },
   { label: 'Payroll',      href: '/app/staff/payroll',     icon: <PoundSterling size={16} /> },
   // Separate from Payroll on purpose: "what am I owed" and "run the studio's
   // payroll" are different jobs, and the Payroll page is manager-only.
@@ -67,7 +66,7 @@ const NAV: NavItem[] = [
 const GROUPS = [
   { label: 'Overview', items: ['Dashboard','My lessons','My calendar','Book lesson','History','Lesson notes','Add to calendar'] },
   { label: 'Studio',   items: ['Calendar','My availability','Notes','Messages'] },
-  { label: 'People',   items: ['Students','Families','Staff','My students','My pay'] },
+  { label: 'People',   items: ['Students','Families','Staff','My pay'] },
   { label: 'Finance',  items: ['Billing'] },
   { label: 'Content',  items: ['Resources','Library subscribers','Repertoire','Studio News','Email everyone'] },
   { label: 'Admin',    items: ['Reports','Settings'] },
