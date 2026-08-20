@@ -6,6 +6,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { DbService } from '../db/db.service';
 import { CreateTermDto } from './dto/create-term.dto';
 import { UpdateTermStatusDto } from './dto/update-term-status.dto';
+import { UpdateTermExceptionsDto } from './dto/update-term-exceptions.dto';
 import { eq, and } from 'drizzle-orm';
 import { terms } from '@music-life/db';
 import type { RequestUser } from '@music-life/types';
@@ -51,6 +52,26 @@ export class TermsController {
     // org-scoped where clause made that indistinguishable from success — the
     // update silently no-opped and still returned 200 with an empty body,
     // unlike leads.update/organizations.update which both correctly 404.
+    if (!updated) throw new NotFoundException('Term not found');
+    return updated;
+  }
+
+  @Patch(':id/exceptions')
+  @Roles('admin')
+  async updateExceptions(
+    @CurrentUser() user: RequestUser,
+    @Param('id') id: string,
+    @Body() body: UpdateTermExceptionsDto,
+  ) {
+    for (const ex of body.exceptionWeeks) {
+      if (ex.end < ex.start) {
+        throw new BadRequestException('Each exception week must end on or after its start date');
+      }
+    }
+    const [updated] = await this.db.db.update(terms)
+      .set({ exceptionWeeks: body.exceptionWeeks, updatedAt: new Date() })
+      .where(and(eq(terms.id, id), eq(terms.organizationId, user.orgId)))
+      .returning();
     if (!updated) throw new NotFoundException('Term not found');
     return updated;
   }

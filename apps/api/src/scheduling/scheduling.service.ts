@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and, gte, lte, ne, or, isNull, inArray, sql } from 'drizzle-orm';
-import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, organizations, enrollments, users, invoiceLineItems, invoices } from '@music-life/db';
+import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, organizations, enrollments, users, invoiceLineItems, invoices, terms } from '@music-life/db';
 import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateLessonDto } from './dto/create-lesson.dto';
@@ -393,7 +393,7 @@ export class SchedulingService {
     enrollmentId: string,
     opts?: { weeks?: number; fromDate?: string },
     actor?: Actor,
-  ): Promise<{ created: number; skippedExisting: number; skippedConflicts: number; through: string; weeks: number }> {
+  ): Promise<{ created: number; skippedExisting: number; skippedConflicts: number; skippedExceptions: number; through: string; weeks: number }> {
     const weeks = Math.min(Math.max(opts?.weeks ?? RECURRENCE_WINDOW_WEEKS, 1), 520);
 
     const enrollment = await this.db.db.query.enrollments.findFirst({
@@ -449,6 +449,23 @@ export class SchedulingService {
     const windowEnd = new Date(from.getTime() + weeks * 7 * 86400000);
     const occurrences = weeklyOccurrenceStrings(from, weeks, rule.weekday, rule.startTime, tz);
 
+    // A term can mark whole weeks (half-term, holidays) as having zero classes.
+    // "Book term" must skip generating a lesson on any occurrence that falls in
+    // one of those windows, rather than booking a class the studio never runs.
+    let exceptionWeeks: { start: string; end: string }[] = [];
+    if (enrollment.termId) {
+      const term = await this.db.db.query.terms.findFirst({
+        where: eq(terms.id, enrollment.termId),
+        columns: { exceptionWeeks: true },
+      });
+      exceptionWeeks = term?.exceptionWeeks ?? [];
+    }
+    const inException = (instant: Date) => {
+      if (exceptionWeeks.length === 0) return false;
+      const dayStr = formatInZone(instant, tz, { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-CA');
+      return exceptionWeeks.some((ex) => dayStr >= ex.start && dayStr <= ex.end);
+    };
+
     // Dedup on the canonical SLOT, not the current start time. A lesson occupies
     // its slot via seriesSlotAt, which a reschedule never touches — so moving a
     // recurring lesson off its weekly slot no longer leaves that slot looking
@@ -471,11 +488,15 @@ export class SchedulingService {
       if (!bySlot.has(slot)) bySlot.set(slot, { id: l.id, stamped: !!l.seriesSlotAt });
     }
 
-    let created = 0, skippedExisting = 0, skippedConflicts = 0;
+    let created = 0, skippedExisting = 0, skippedConflicts = 0, skippedExceptions = 0;
     for (const naive of occurrences) {
       const instant = parseZonedDateTime(naive, tz);
       if (endCap && instant.getTime() > endCap.getTime()) break; // occurrences are ascending
       const hit = bySlot.get(instant.getTime());
+      if (!hit && inException(instant)) {
+        skippedExceptions++;
+        continue;
+      }
       if (hit) {
         skippedExisting++;
         // Adopt a legacy/one-off row sitting exactly on this slot (e.g. the first
@@ -511,7 +532,7 @@ export class SchedulingService {
     // reporting the full windowEnd regardless, telling the booker their
     // series ran weeks further than it actually does.
     const through = endCap && endCap.getTime() < windowEnd.getTime() ? endCap : windowEnd;
-    return { created, skippedExisting, skippedConflicts, through: through.toISOString(), weeks };
+    return { created, skippedExisting, skippedConflicts, skippedExceptions, through: through.toISOString(), weeks };
   }
 
   /**

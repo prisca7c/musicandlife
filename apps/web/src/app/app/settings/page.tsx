@@ -7,7 +7,7 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { InfoTooltip } from '@/components/info-tooltip';
-import { Building2, Receipt, Calendar, Plus, Check, Bell, Mail, Music } from 'lucide-react';
+import { Building2, Receipt, Calendar, Plus, Check, Bell, Mail, Music, X, Pencil } from 'lucide-react';
 import { InstrumentsEditor } from '@/components/instruments-editor';
 
 interface NotificationRule {
@@ -44,7 +44,8 @@ interface OrgSettings {
     accountingMode?: 'cash' | 'accrual';
   };
 }
-interface Term { id: string; name: string; startsOn: string; endsOn: string; weekCount: number; status: string; }
+interface TermException { start: string; end: string; }
+interface Term { id: string; name: string; startsOn: string; endsOn: string; weekCount: number; status: string; exceptionWeeks: TermException[]; }
 
 const inputCls = 'w-full border-[1.5px] border-[var(--bd2)] rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-[var(--sage)] focus:shadow-[0_0_0_3px_var(--sage-lt)] transition-all';
 const labelCls = 'block text-xs font-semibold text-[var(--txt2)] mb-1.5 tracking-wide';
@@ -62,20 +63,57 @@ function Section({ title, icon, children }: { title: React.ReactNode; icon: Reac
   );
 }
 
+// Shared editor for a term's "zero classes" weeks (half-term, holidays) — an
+// admin adds a date range here and "book term" (materializeEnrollment) skips
+// any lesson that would otherwise land inside it.
+function ExceptionWeeksEditor({ rows, onChange }: { rows: TermException[]; onChange: (rows: TermException[]) => void }) {
+  function update(i: number, field: 'start' | 'end', value: string) {
+    onChange(rows.map((r, idx) => idx === i ? { ...r, [field]: value } : r));
+  }
+  function remove(i: number) {
+    onChange(rows.filter((_, idx) => idx !== i));
+  }
+  return (
+    <div>
+      <label className={labelCls}>Weeks with no classes (half-term, holidays)</label>
+      <div className="space-y-2">
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input type="date" value={r.start} onChange={(e) => update(i, 'start', e.target.value)} className={inputCls} />
+            <span className="text-xs shrink-0" style={{ color: 'var(--txt4)' }}>to</span>
+            <input type="date" value={r.end} onChange={(e) => update(i, 'end', e.target.value)} className={inputCls} />
+            <button type="button" onClick={() => remove(i)} aria-label="Remove exception week"
+              className="shrink-0 p-1.5 rounded-lg hover:bg-[var(--coral-lt)]" style={{ color: 'var(--txt4)' }}>
+              <X size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <button type="button" onClick={() => onChange([...rows, { start: '', end: '' }])}
+        className="mt-2 flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-[var(--bd2)] hover:bg-[var(--surf)]" style={{ color: 'var(--txt2)' }}>
+        <Plus size={12} /> Add exception week
+      </button>
+    </div>
+  );
+}
+
 function AddTermModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [exceptions, setExceptions] = useState<TermException[]>([]);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSaving(true); setError('');
     const f = new FormData(e.currentTarget);
+    const validExceptions = exceptions.filter(x => x.start && x.end);
     try {
       await apiFetch('/terms', { method: 'POST', token: tok(), body: JSON.stringify({
         name: f.get('name'), startsOn: f.get('startsOn'), endsOn: f.get('endsOn'),
         weekCount: parseInt(f.get('weekCount') as string) || 12, status: 'planned',
+        exceptionWeeks: validExceptions,
       })});
-      onCreated(); onClose();
+      onCreated(); onClose(); setExceptions([]);
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
     finally { setSaving(false); }
   }
@@ -94,6 +132,7 @@ function AddTermModal({ open, onClose, onCreated }: { open: boolean; onClose: ()
         </div>
         <div><label className={labelCls}>Number of lessons</label>
           <input name="weekCount" type="number" min="1" max="52" defaultValue="12" className={inputCls} /></div>
+        <ExceptionWeeksEditor rows={exceptions} onChange={setExceptions} />
         <div className="flex gap-3 pt-2">
           <button type="submit" disabled={saving}
             className="bg-[var(--sage)] text-white rounded-xl px-5 py-2.5 text-sm font-bold hover:bg-[var(--sage-dk)] disabled:opacity-50">
@@ -106,8 +145,55 @@ function AddTermModal({ open, onClose, onCreated }: { open: boolean; onClose: ()
   );
 }
 
+function EditExceptionsModal({ term, onClose, onSaved }: { term: Term | null; onClose: () => void; onSaved: () => void }) {
+  const [rows, setRows] = useState<TermException[]>([]);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  // Re-seed local state whenever a different term is opened.
+  const [openId, setOpenId] = useState<string | null>(null);
+  if (term && term.id !== openId) {
+    setOpenId(term.id);
+    setRows(term.exceptionWeeks ?? []);
+    setError('');
+  }
+
+  async function handleSave() {
+    const validRows = rows.filter(r => r.start && r.end);
+    if (validRows.some(r => r.end < r.start)) {
+      setError('Each exception week must end on or after its start date');
+      return;
+    }
+    setSaving(true); setError('');
+    try {
+      await apiFetch(`/terms/${term!.id}/exceptions`, { method: 'PATCH', token: tok(), body: JSON.stringify({ exceptionWeeks: validRows }) });
+      onSaved(); onClose();
+    } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Modal open={!!term} onClose={onClose} title={`Zero-class weeks — ${term?.name ?? ''}`}>
+      {error && <p className="mb-3 text-sm text-[var(--coral)] bg-[var(--coral-lt)] border border-[var(--coral)] rounded-xl px-3 py-2">{error}</p>}
+      <p className="text-xs mb-3" style={{ color: 'var(--txt4)' }}>
+        Lessons in this term skip these weeks automatically when scheduled.
+      </p>
+      <ExceptionWeeksEditor rows={rows} onChange={setRows} />
+      <div className="flex gap-3 pt-4">
+        <button type="button" onClick={handleSave} disabled={saving}
+          className="bg-[var(--sage)] text-white rounded-xl px-5 py-2.5 text-sm font-bold hover:bg-[var(--sage-dk)] disabled:opacity-50">
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button type="button" onClick={onClose} className="rounded-xl px-5 py-2.5 text-sm border border-[var(--bd2)] hover:bg-[var(--surf)]">Cancel</button>
+      </div>
+    </Modal>
+  );
+}
+
 export default function SettingsPage() {
   const [showAddTerm, setShowAddTerm] = useState(false);
+  const [editingExceptions, setEditingExceptions] = useState<Term | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
@@ -176,6 +262,7 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6 max-w-3xl">
       <AddTermModal open={showAddTerm} onClose={() => setShowAddTerm(false)} onCreated={() => mutateTerms()} />
+      <EditExceptionsModal term={editingExceptions} onClose={() => setEditingExceptions(null)} onSaved={() => mutateTerms()} />
       <PageHeader title="Settings" subtitle="Studio configuration" />
 
       {/* Studio details */}
@@ -373,8 +460,17 @@ export default function SettingsPage() {
                 <p className="text-xs mt-0.5" style={{ color: 'var(--txt3)' }}>
                   {t.startsOn} – {t.endsOn} · {t.weekCount} lessons
                 </p>
+                {t.exceptionWeeks?.length > 0 && (
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--txt4)' }}>
+                    Skips: {t.exceptionWeeks.map(x => `${x.start} – ${x.end}`).join(', ')}
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-2">
+                <button onClick={() => setEditingExceptions(t)} title="Edit zero-class weeks"
+                  className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg border border-[var(--bd2)] hover:bg-[var(--surf)]" style={{ color: 'var(--txt3)' }}>
+                  <Pencil size={12} /> Exceptions
+                </button>
                 <Badge variant={t.status}>{t.status}</Badge>
                 {t.status === 'planned' && (
                   <button onClick={() => setTermStatus(t.id, 'active')}
