@@ -38,7 +38,7 @@ interface DashboardData {
   outstandingInvoice: { id: string; number: string; total: number; dueDate: string } | null;
   students: {
     id: string; firstName: string; lastName: string; status: string;
-    lessons: { total: number; prepaid: number; makeup: number };
+    lessons: { total: number; prepaid: number; makeup: number; used: number };
   }[];
   lastNote: { body: string; student: { firstName: string; lastName: string } | null } | null;
 }
@@ -367,6 +367,9 @@ export default function FamilyDashboardPage() {
                     lessons available
                     {s.lessons.makeup > 0 && ` (${s.lessons.makeup} makeup)`}
                   </p>
+                  {s.lessons.used > 0 && (
+                    <p className="text-[11px]" style={{ color: 'var(--txt4)' }}>{s.lessons.used} already booked</p>
+                  )}
                 </div>
               </div>
             ))}

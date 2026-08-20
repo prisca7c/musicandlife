@@ -16,6 +16,7 @@ import { SearchableSelect } from '@/components/searchable-select';
 import { EditStudentModal } from '@/components/edit-student-modal';
 import { EditFamilyModal } from '@/components/edit-family-modal';
 import { EditEnrollmentModal } from '@/components/edit-enrollment-modal';
+import { StudentCreditsCard } from '@/components/student-credits-card';
 import { BackButton } from '@/components/back-button';
 import { Mail, Phone } from 'lucide-react';
 import { useRole } from '@/lib/use-role';
@@ -645,6 +646,7 @@ export default function StudentDetailPage() {
               </div>
             </dl>
           </div>
+          <StudentCreditsCard studentId={id} role={role} />
           {student.family && (
             <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
               <div className="flex items-center justify-between mb-4">

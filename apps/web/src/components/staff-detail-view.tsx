@@ -43,6 +43,7 @@ interface StaffDetail {
     enrollmentStatus: string | null;
     enrollmentId: string | null;
     unpaidBilled: number;
+    creditsAvailable: number;
   }[];
 }
 
@@ -65,13 +66,14 @@ function AssignedStudentsTable({ assignments, readOnly, onEdit, onUnassign }: {
           <th>Student</th>
           <th>Instruments</th>
           <th>Status</th>
+          <th>Credits</th>
           <th>Billed, unpaid</th>
           {!readOnly && <th>Actions</th>}
         </tr>
       </thead>
       <tbody>
         {assignments.length === 0 && (
-          <tr><td colSpan={readOnly ? 4 : 5} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
+          <tr><td colSpan={readOnly ? 5 : 6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
             No assigned students.
           </td></tr>
         )}
@@ -95,6 +97,9 @@ function AssignedStudentsTable({ assignments, readOnly, onEdit, onUnassign }: {
                   connection with no enrolment behind it at all. */}
               {a.enrollmentStatus ? <Badge variant={a.enrollmentStatus}>{a.enrollmentStatus}</Badge>
                 : <span style={{ color: 'var(--txt4)' }}>—</span>}
+            </td>
+            <td className="font-medium" style={{ color: a.creditsAvailable > 0 ? 'var(--sage-dk)' : 'var(--txt4)' }}>
+              {a.creditsAvailable}
             </td>
             <td className="font-medium" style={a.unpaidBilled > 0 ? { color: 'var(--coral)' } : { color: 'var(--txt4)' }}>
               {a.unpaidBilled > 0 ? formatMoney(a.unpaidBilled) : '—'}

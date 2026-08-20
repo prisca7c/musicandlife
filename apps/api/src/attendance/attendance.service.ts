@@ -440,19 +440,26 @@ export class AttendanceService {
     }) ?? null;
   }
 
-  // Returns total available lesson credits for a student (shown in UI as "X lessons")
+  // Returns total available lesson credits for a student (shown in UI as "X lessons"),
+  // plus how many of the student's credits have already been booked/used — an
+  // "available" count alone can't answer "how many did they actually prepay for
+  // in total", since a used credit no longer shows up as available.
   async getLessonCreditBalance(orgId: string, studentId: string) {
     const credits = await this.db.db.query.lessonCredits.findMany({
       where: and(
         eq(lessonCredits.organizationId, orgId),
         eq(lessonCredits.studentId, studentId),
-        eq(lessonCredits.status, 'available'),
       ),
+      columns: { type: true, status: true },
     });
+    const available = credits.filter(c => c.status === 'available');
+    const used = credits.filter(c => c.status === 'used');
     return {
-      total: credits.length,
-      prepaid: credits.filter(c => c.type === 'prepaid').length,
-      makeup: credits.filter(c => c.type === 'makeup').length,
+      total: available.length,
+      prepaid: available.filter(c => c.type === 'prepaid').length,
+      makeup: available.filter(c => c.type === 'makeup').length,
+      used: used.length,
+      everIssued: credits.length,
     };
   }
 

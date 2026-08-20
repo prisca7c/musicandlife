@@ -463,19 +463,24 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
       }}
       className="absolute rounded-lg border cursor-pointer text-left overflow-hidden transition-all hover:brightness-95 hover:shadow-md group z-10 flex items-stretch gap-0.5 px-1"
     >
-      {/* Left rail: attendance status, paid status stacked underneath */}
-      <span className="flex flex-col items-center justify-center shrink-0 w-4 gap-0.5">
-        {present && (
-          <span title={present.title}>
-            <present.Icon size={11} style={{ color: present.color }} aria-label={present.title} />
-          </span>
-        )}
-        {paid && (
-          <span title={paid.title}>
-            <PoundSterling size={10} style={{ color: paid.color }} aria-label={paid.title} />
-          </span>
-        )}
-      </span>
+      {/* Left rail: attendance status, paid status stacked underneath. Only
+          reserved when there's actually a landmark to show — a lesson with
+          neither (not yet happened, nothing to collect) shouldn't leave a
+          blank gutter; its content starts flush left instead. */}
+      {(present || paid) && (
+        <span className="flex flex-col items-center justify-center shrink-0 w-4 gap-0.5">
+          {present && (
+            <span title={present.title}>
+              <present.Icon size={11} style={{ color: present.color }} aria-label={present.title} />
+            </span>
+          )}
+          {paid && (
+            <span title={paid.title}>
+              <PoundSterling size={10} style={{ color: paid.color }} aria-label={paid.title} />
+            </span>
+          )}
+        </span>
+      )}
 
       {/* Middle: two compact lines — time + name, then instrument/group + teacher */}
       <span className="flex-1 min-w-0 flex flex-col justify-center gap-0.5 py-0.5">
@@ -2401,14 +2406,16 @@ export default function CalendarPage() {
                             opacity: cancelled ? 0.65 : 1,
                           }}
                         >
-                          <span className="flex flex-col items-center justify-center shrink-0 w-3 gap-0.5">
-                            {present && (
-                              <span title={present.title}>
-                                <present.Icon size={9} style={{ color: present.color }} />
-                              </span>
-                            )}
-                            {paid && <span title={paid.title}><PoundSterling size={8} style={{ color: paid.color }} /></span>}
-                          </span>
+                          {(present || paid) && (
+                            <span className="flex flex-col items-center justify-center shrink-0 w-3 gap-0.5">
+                              {present && (
+                                <span title={present.title}>
+                                  <present.Icon size={9} style={{ color: present.color }} />
+                                </span>
+                              )}
+                              {paid && <span title={paid.title}><PoundSterling size={8} style={{ color: paid.color }} /></span>}
+                            </span>
+                          )}
                           <span className="flex-1 min-w-0 flex flex-col gap-0.5">
                             <span className="flex items-baseline gap-1 min-w-0">
                               <span className="text-[8px] font-bold leading-none tabular-nums shrink-0" style={{ color: c, opacity: 0.7 }}>{fmtTime(l.startsAt)}</span>

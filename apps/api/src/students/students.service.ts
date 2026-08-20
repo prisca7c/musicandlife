@@ -121,7 +121,9 @@ export class StudentsService {
   // count) across every student on the current page in two queries total,
   // rather than one round-trip per row.
   private async withNextLessonAndCredits<T extends { id: string }>(rows: T[]) {
-    if (rows.length === 0) return rows as (T & { nextLessonAt: string | null; creditsAvailable: number })[];
+    if (rows.length === 0) {
+      return rows as (T & { nextLessonAt: string | null; creditsAvailable: number; creditsUsed: number })[];
+    }
     const ids = rows.map((r) => r.id);
     const now = new Date();
 
@@ -131,19 +133,28 @@ export class StudentsService {
         .from(lessons)
         .where(and(inArray(lessons.studentId, ids), eq(lessons.status, 'scheduled'), gte(lessons.startsAt, now)))
         .groupBy(lessons.studentId),
+      // One grouped query for both available and used counts, rather than two
+      // round-trips — a student's credit history is never large enough to make
+      // the extra GROUP BY dimension worth splitting.
       this.db.db
-        .select({ studentId: lessonCredits.studentId, n: sql<number>`count(*)::int` })
+        .select({ studentId: lessonCredits.studentId, status: lessonCredits.status, n: sql<number>`count(*)::int` })
         .from(lessonCredits)
-        .where(and(inArray(lessonCredits.studentId, ids), eq(lessonCredits.status, 'available')))
-        .groupBy(lessonCredits.studentId),
+        .where(inArray(lessonCredits.studentId, ids))
+        .groupBy(lessonCredits.studentId, lessonCredits.status),
     ]);
     const nextById = new Map(nextLessons.map((l) => [l.studentId, l.startsAt]));
-    const creditsById = new Map(credits.map((c) => [c.studentId, c.n]));
+    const availableById = new Map<string, number>();
+    const usedById = new Map<string, number>();
+    for (const c of credits) {
+      if (c.status === 'available') availableById.set(c.studentId, c.n);
+      else if (c.status === 'used') usedById.set(c.studentId, c.n);
+    }
 
     return rows.map((r) => ({
       ...r,
       nextLessonAt: nextById.get(r.id) ?? null,
-      creditsAvailable: creditsById.get(r.id) ?? 0,
+      creditsAvailable: availableById.get(r.id) ?? 0,
+      creditsUsed: usedById.get(r.id) ?? 0,
     }));
   }
 
