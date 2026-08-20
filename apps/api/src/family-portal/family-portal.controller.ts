@@ -768,16 +768,16 @@ export class FamilyPortalController {
     const teacherIds = await this.familyTeacherIds(user.orgId, studentIds);
     if (teacherIds.length === 0) return [];
 
+    // No phone/email here, deliberately — a family reaches a teacher through
+    // Messages, not a direct line, so this endpoint doesn't hand out contact
+    // details even scoped to just their own assigned teacher(s).
     return this.db.db.query.staffMembers.findMany({
       where: and(
         eq(staffMembers.organizationId, user.orgId),
         eq(staffMembers.status, 'active'),
         inArray(staffMembers.id, teacherIds),
       ),
-      // Contact info here is scoped to only THIS family's assigned teacher(s) —
-      // never the whole roster — via the teacherIds filter above.
-      columns: { id: true, firstName: true, lastName: true, phone: true, instruments: true, defaultDuration: true },
-      with: { user: { columns: { email: true } } },
+      columns: { id: true, firstName: true, lastName: true, instruments: true, defaultDuration: true },
     });
   }
 
@@ -816,9 +816,16 @@ export class FamilyPortalController {
     const tz = await getOrgTimezone(this.db.db, user.orgId);
     const weekStart = currentStudioWeekMonday(tz);
 
+    // No futureOnly here — this widget shows the teacher's general recurring
+    // weekly pattern ("when are they usually free"), not a literal list of
+    // currently-bookable slots. With futureOnly, every day already passed
+    // this week (e.g. Mon–Wed on a Thursday) showed as a blank, unshaded row —
+    // reading as "not available" when the teacher just hadn't gotten there yet
+    // this week. Actual booking (line 618 above) still filters to the future,
+    // since that one has to be bookable, not just illustrative.
     const out: { id: string; staffId: string; weekday: string; startTime: string; endTime: string; teacherName: string }[] = [];
     await Promise.all(teacherIds.map(async id => {
-      const slots = await this.scheduling.getAvailableSlotsWeek(user.orgId, id, weekStart, 60, { futureOnly: true });
+      const slots = await this.scheduling.getAvailableSlotsWeek(user.orgId, id, weekStart, 60);
       for (const w of mergeSlotsIntoWindows(slots, 60, tz)) {
         out.push({ id: `${id}-${w.weekday}-${w.startTime}`, staffId: id, ...w, teacherName: nameById[id] ?? 'Teacher' });
       }

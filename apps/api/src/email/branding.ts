@@ -27,15 +27,13 @@ export const BRAND = {
   panel: '#f1efe6',  // detail block background
   line: '#e5e2d5',   // hairline borders
   muted: '#8a887c',  // labels, fine print
-  sageLt: '#eaf3ee', // footer background — a soft, low-opacity wash of the brand green
-  // Wood tone for the top/bottom border bands — an instrument-body walnut brown.
-  wood: '#8b5a2b',
+  // Footer background — a warm sage wash, mixed toward the same cream/beige
+  // family as `paper`/`panel` rather than a cool minty green, so it sits
+  // alongside the rest of the email instead of clashing with it.
+  sageLt: '#e9ede0',
 } as const;
 
 const FONT = "'Lexend', 'Helvetica Neue', Helvetica, Arial, sans-serif";
-
-// A thin solid wood-tone band bookending the card — a nod to the instrument bodies.
-const WOOD_BAND = `<tr><td height="7" style="height:7px;font-size:0;line-height:0;background:${BRAND.wood}">&nbsp;</td></tr>`;
 
 export interface BrandedEmailOptions {
   /** Hidden preview/snippet text shown in the inbox list. */
@@ -93,8 +91,6 @@ ${preview}
   <tr><td align="center" style="text-align:center">
     <!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" align="center"><tr><td><![endif]-->
     <table role="presentation" width="600" align="center" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;margin:0 auto;background:#ffffff;border:1px solid ${BRAND.line};border-radius:16px;overflow:hidden;text-align:left">
-      <!-- wood-grain band — a nod to the instrument bodies, bookending the card -->
-      ${WOOD_BAND}
       <!-- header: the real wordmark, centred. The alt text carries the studio
            name for the many clients that block images by default. -->
       <tr><td align="center" style="background:#ffffff;padding:30px 24px 22px;text-align:center">
@@ -133,7 +129,6 @@ ${preview}
           <a href="${BRAND.portalUrl}" style="color:${BRAND.moss};text-decoration:underline">Your portal</a>
         </p>
       </td></tr>
-      ${WOOD_BAND}
     </table>
     <!--[if mso]></td></tr></table><![endif]-->
   </td></tr>
