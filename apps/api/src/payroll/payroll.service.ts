@@ -71,6 +71,26 @@ export class PayrollService {
    * an argument about a number they were shown. Approved and paid runs only,
    * with each run's lesson-by-lesson breakdown so the figure can be checked.
    */
+  // A teacher submitting their own pay for review — mirrors the existing
+  // expense/rate-change pattern (teacher submits, admin approves), just for
+  // the payroll run itself: it's a fully computed figure (real lessons ×
+  // their rate, never manually entered hours), so there's nothing here a
+  // teacher could inflate — reuses createPayrollRun's own checks unchanged
+  // (active status, hourly rate set, no duplicate run for the period).
+  // Deliberately returns no figures — getMyPayrollRuns only ever shows
+  // approved/paid runs so a draft number a teacher was shown never has to
+  // become an argument once admin corrects it; this keeps that same rule
+  // for the moment of submission.
+  async requestMyPayrollRun(orgId: string, userId: string, periodStart: string, periodEnd: string) {
+    const own = await this.db.db.query.staffMembers.findFirst({
+      where: and(eq(staffMembers.userId, userId), eq(staffMembers.organizationId, orgId)),
+      columns: { id: true },
+    });
+    if (!own) throw new NotFoundException('No staff record for this user');
+    await this.createPayrollRun(orgId, { staffId: own.id, periodStart, periodEnd });
+    return { requested: true, periodStart, periodEnd };
+  }
+
   async getMyPayrollRuns(orgId: string, userId: string) {
     const own = await this.db.db.query.staffMembers.findFirst({
       where: and(eq(staffMembers.userId, userId), eq(staffMembers.organizationId, orgId)),

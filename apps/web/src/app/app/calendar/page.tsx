@@ -2353,8 +2353,18 @@ export default function CalendarPage() {
                   key={i}
                   ref={isToday ? todayCellRef : undefined}
                   onClick={() => { setAnchorDate(d); setView('day'); }}
-                  className="text-left border-r border-b border-[var(--bd)] last:border-r-0 p-1.5 align-top transition-colors hover:bg-[var(--sage-lt)]/20"
-                  style={{ minHeight: 148, background: inMonth ? '#fff' : 'var(--surf)' }}
+                  className="text-left border-r border-b border-[var(--bd)] last:border-r-0 p-1.5 transition-colors hover:bg-[var(--sage-lt)]/20"
+                  // A <button> centers its content by default in some browsers
+                  // once it's stretched taller than its content (which every
+                  // cell shorter than the row's tallest neighbour is, since
+                  // the grid stretches every cell to match) — the date number
+                  // and lesson chips floated to the middle of the cell instead
+                  // of sitting at the top where the row's date numbers line
+                  // up. Force block layout, top-anchored explicitly.
+                  style={{
+                    minHeight: 148, background: inMonth ? '#fff' : 'var(--surf)',
+                    display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start',
+                  }}
                   title="Open this day"
                 >
                   <div className="flex items-center justify-between mb-1">

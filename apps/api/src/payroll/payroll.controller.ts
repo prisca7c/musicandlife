@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { PayrollService } from './payroll.service';
 import { CreatePayrollRunDto } from './dto/create-payroll-run.dto';
+import { RequestMyPayrollRunDto } from './dto/request-my-payroll-run.dto';
 import { BatchPayrollRunDto } from './dto/batch-payroll-run.dto';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { CreateRateChangeDto } from './dto/create-rate-change.dto';
@@ -40,6 +41,15 @@ export class PayrollController {
   @Roles('teacher')
   getMyRuns(@CurrentUser() u: RequestUser) {
     return this.payroll.getMyPayrollRuns(u.orgId, u.userId);
+  }
+
+  // A teacher submitting their own hours for review — same "teacher submits,
+  // admin approves" shape as expenses/rate-change requests below, just for
+  // the payroll run itself. Always for the caller's own staffId.
+  @Post('staff/payroll/me')
+  @Roles('teacher')
+  requestMyRun(@CurrentUser() u: RequestUser, @Body() dto: RequestMyPayrollRunDto) {
+    return this.payroll.requestMyPayrollRun(u.orgId, u.userId, dto.periodStart, dto.periodEnd);
   }
 
   @Get('staff/payroll/:id')
