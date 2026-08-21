@@ -182,18 +182,29 @@ function elasticBandBox(startMin: number, endMin: number, hourHeights: number[],
 // One pass at uniform PX_PER_HOUR heights just to find out how tall each hour
 // actually needs to be across every column (day, or teacher, depending on
 // view) — then the real layout pass below uses that per-hour height instead.
+// Two or more SEPARATE clusters (not overlapping each other, just both
+// starting within the same clock hour — e.g. one at :05 and another at :40)
+// each need their own real room; summing them (not just taking whichever one
+// is tallest) is what actually guarantees the real layout pass below never
+// has to push the second one down past its true start time into the next
+// hour's row.
 function computeElasticHourHeights(columns: Lesson[][]): number[] {
   const needed = HOURS.map(() => PX_PER_HOUR);
   for (const col of columns) {
-    const layout = computeLayout(col, BASELINE_HOURS);
-    const seen = new Set<number>();
-    for (const l of layout) {
-      if (seen.has(l.clusterTop)) continue;
-      seen.add(l.clusterTop);
-      if (l.clusterHeight > PX_PER_HOUR) {
-        const hourIdx = Math.min(HOURS.length - 1, Math.max(0, Math.floor(l.clusterTop / PX_PER_HOUR)));
-        needed[hourIdx] = Math.max(needed[hourIdx]!, l.clusterHeight);
-      }
+    const clusters = clusterLessons(col);
+    const perHour = HOURS.map(() => 0);
+    for (const cluster of clusters) {
+      // Laying this one cluster out alone always yields its true, pushdown-free
+      // height — computeLayout never pushes down the very first (only) cluster
+      // it processes in a pass.
+      const solo = computeLayout(cluster, BASELINE_HOURS);
+      const clusterHeight = solo[0]?.clusterHeight ?? 0;
+      const startMin = minutesFromDayStart(cluster[0]!.startsAt);
+      const hourIdx = Math.min(HOURS.length - 1, Math.max(0, Math.floor(startMin / 60)));
+      perHour[hourIdx] += clusterHeight + CLUSTER_GAP;
+    }
+    for (let hi = 0; hi < HOURS.length; hi++) {
+      if (perHour[hi]! > 0) needed[hi] = Math.max(needed[hi]!, perHour[hi]!);
     }
   }
   return needed;
@@ -233,7 +244,11 @@ function assignColumns(cluster: Lesson[]): { colIndex: number; numColumns: numbe
   return colIndexes.map(colIndex => ({ colIndex, numColumns }));
 }
 
-function computeLayout(dayLessons: Lesson[], hourHeights: number[] = BASELINE_HOURS): LessonLayout[] {
+// Split into clusters of transitively-overlapping lessons — a sweep that
+// starts a new cluster whenever a gap opens up. A lesson linked into a
+// busier cluster through an intermediate lesson it doesn't itself overlap
+// still belongs in that cluster, so the whole group stacks together.
+function clusterLessons(dayLessons: Lesson[]): Lesson[][] {
   const sorted = [...dayLessons].sort((a, b) => {
     const byTime = new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime();
     if (byTime !== 0) return byTime;
@@ -242,10 +257,6 @@ function computeLayout(dayLessons: Lesson[], hourHeights: number[] = BASELINE_HO
     return aName.localeCompare(bName);
   });
 
-  // Split into clusters of transitively-overlapping lessons — a sweep that
-  // starts a new cluster whenever a gap opens up. A lesson linked into a
-  // busier cluster through an intermediate lesson it doesn't itself overlap
-  // still belongs in that cluster, so the whole group stacks together.
   const clusters: Lesson[][] = [];
   let current: Lesson[] = [];
   let clusterEnd = -Infinity;
@@ -261,6 +272,11 @@ function computeLayout(dayLessons: Lesson[], hourHeights: number[] = BASELINE_HO
     clusterEnd = Math.max(clusterEnd, end);
   }
   if (current.length > 0) clusters.push(current);
+  return clusters;
+}
+
+function computeLayout(dayLessons: Lesson[], hourHeights: number[] = BASELINE_HOURS): LessonLayout[] {
+  const clusters = clusterLessons(dayLessons);
 
   // A stacked cluster's rendered height is, in the worst case, an artificial
   // "however many rows it takes to read", not the real elapsed time the
@@ -278,13 +294,16 @@ function computeLayout(dayLessons: Lesson[], hourHeights: number[] = BASELINE_HO
 
   for (const cluster of clusters) {
     const startMinutes = minutesFromDayStart(cluster[0]!.startsAt);
-    const hourIdx = Math.min(hourHeights.length - 1, Math.max(0, Math.floor(startMinutes / 60)));
     const naturalTop = elasticY(startMinutes, hourHeights, offsets);
     const clusterTop = Math.max(naturalTop, cursorBottom);
     const pushDown = clusterTop - naturalTop;
 
     if (cluster.length === 1) {
-      const clusterHeight = Math.max((cluster[0]!.duration / 60) * hourHeights[hourIdx]!, STACK_ROW_H);
+      // A lesson's own box height always reflects its true duration at the
+      // fixed baseline rate — never scaled by this hour's elastic size, or a
+      // short lesson would render abnormally tall purely because some other
+      // cluster (in this hour, in this or another column) needed more room.
+      const clusterHeight = Math.max((cluster[0]!.duration / 60) * PX_PER_HOUR, STACK_ROW_H);
       cursorBottom = clusterTop + clusterHeight + CLUSTER_GAP;
       result.push({
         ...cluster[0]!, rowIndex: 0, colIndex: 0, colsInRow: 1, stackSize: 1,
@@ -305,8 +324,12 @@ function computeLayout(dayLessons: Lesson[], hourHeights: number[] = BASELINE_HO
       const boxes = cluster.map((l, i) => {
         const start = minutesFromDayStart(l.startsAt);
         const top = elasticY(start, hourHeights, offsets) + pushDown;
-        const bottom = elasticY(start + l.duration, hourHeights, offsets) + pushDown;
-        return { l, top, height: Math.max(bottom - top, MIN_BOX_H), ...assigned[i]! };
+        // Height is the lesson's true duration at the fixed baseline rate —
+        // elasticY is only for POSITION (so a box still starts in the right
+        // place after however many stretched hours come before it), never for
+        // sizing a box that isn't itself the reason this hour got stretched.
+        const height = Math.max((l.duration / 60) * PX_PER_HOUR, MIN_BOX_H);
+        return { l, top, height, ...assigned[i]! };
       });
       const clusterBottom = Math.max(...boxes.map(b => b.top + b.height));
       const clusterHeight = clusterBottom - clusterTop;
@@ -1890,18 +1913,18 @@ export default function CalendarPage() {
   // to just that one teacher's own windows once the teacher filter is set
   // (previously stayed merged even with one teacher picked, so filtering to
   // e.g. Dunni still showed everyone else's hours blended into hers).
-  function weekAvailabilityBands(dayIndex: number, hourHeights: number[], offsets: number[]): { top: number; height: number }[] {
+  function weekAvailabilityBands(dayIndex: number): { top: number; height: number }[] {
     const key = WEEKDAY_KEYS[dayIndex];
     const wins = filterTeacherId
       ? availability.filter(a => a.staffId === filterTeacherId && a.weekday === key)
       : availability.filter(a => a.weekday === key);
     return mergeWindows(wins)
-      .map(([s, e]) => elasticBandBox(s, e, hourHeights, offsets))
+      .map(([s, e]) => elasticBandBox(s, e, weekHourHeights, weekOffsets))
       .filter((b): b is { top: number; height: number } => b !== null);
   }
 
   // Day view: a single teacher's availability windows for the anchor day's weekday.
-  function teacherAvailabilityBands(teacherId: string | null, hourHeights: number[], offsets: number[]): { top: number; height: number }[] {
+  function teacherAvailabilityBands(teacherId: string | null): { top: number; height: number }[] {
     if (!teacherId) return [];
     // anchorDate.getDay() reads the BROWSER's local weekday, which can disagree
     // with the studio-zone day the rest of the day view is keyed by (formatDate/
@@ -1911,7 +1934,7 @@ export default function CalendarPage() {
     const key = WEEKDAY_KEYS[(new Date(`${formatDate(anchorDate)}T12:00:00Z`).getUTCDay() + 6) % 7];
     return availability
       .filter(a => a.staffId === teacherId && a.weekday === key)
-      .map(a => elasticBandBox(hhmmToMin(a.startTime), hhmmToMin(a.endTime), hourHeights, offsets))
+      .map(a => elasticBandBox(hhmmToMin(a.startTime), hhmmToMin(a.endTime), dayHourHeights, dayOffsets))
       .filter((b): b is { top: number; height: number } => b !== null);
   }
 
@@ -1933,12 +1956,16 @@ export default function CalendarPage() {
     ...(hasUnassigned ? [{ id: null, name: 'Unassigned' }] : []),
   ];
 
-  // Elastic per-hour heights — computed independently PER COLUMN (each day in
-  // week view, each teacher in day view), not shared/aggregated across them.
-  // An hour with several stacked lessons grows only in the column(s) that
-  // actually need the room; a column with zero or one lesson in that hour
-  // always renders it at the normal one-row height, never inflated just
-  // because a busier column elsewhere needs more space for the same hour.
+  // Elastic per-hour heights, shared by every column in the view so their hour
+  // gridlines still line up — a busy hour in any one column grows the whole
+  // row, rather than that column's content silently overflowing past hours
+  // that stayed a fixed height.
+  const weekHourHeights = view === 'week' ? computeElasticHourHeights(DAYS.map((_, di) => dayLessons(di))) : BASELINE_HOURS;
+  const weekOffsets = cumulativeOffsets(weekHourHeights);
+  const weekTotalH = elasticTotalHeight(weekHourHeights);
+  const dayHourHeights = view === 'day' ? computeElasticHourHeights(teacherCols.map(col => teacherDayLessons(col.id))) : BASELINE_HOURS;
+  const dayOffsets = cumulativeOffsets(dayHourHeights);
+  const dayTotalH = elasticTotalHeight(dayHourHeights);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -2163,26 +2190,22 @@ export default function CalendarPage() {
               d.setDate(d.getDate() + di);
               const dStr = formatDate(d);
               const isToday = dStr === todayStr;
-              // This column's own hour heights — a busy hour here never borrows
-              // extra room from (or forces extra room onto) any other day.
-              const hourHeights = computeElasticHourHeights([dayLessons(di)]);
-              const offsets = cumulativeOffsets(hourHeights);
-              const totalH = elasticTotalHeight(hourHeights);
-              const layout = computeLayout(dayLessons(di), hourHeights);
+              const layout = computeLayout(dayLessons(di), weekHourHeights);
 
               return (
                 <div key={di}
                   className={`relative border-r border-[var(--bd)] ${di === 6 ? 'border-r-0' : ''} ${isToday ? 'bg-[var(--sage-lt)]/20' : ''}`}
-                  style={{ height: totalH }}>
+                  style={{ height: weekTotalH }}>
 
-                  {/* Hour guide lines + hour marker — each column keeps its own
-                      scale now, so every column needs its own labels. */}
+                  {/* Hour guide lines + faint hour marker (leftmost column only) */}
                   {HOURS.map((h, hi) => (
                     <div key={h} className="absolute inset-x-0 border-t border-[var(--bd)]"
-                      style={{ top: offsets[hi] }}>
-                      <span className="absolute left-1 top-0.5 text-[9px] font-semibold text-[var(--txt4)] leading-none tabular-nums pointer-events-none opacity-70">
-                        {String(h).padStart(2, '0')}:00
-                      </span>
+                      style={{ top: weekOffsets[hi] }}>
+                      {di === 0 && (
+                        <span className="absolute left-1 top-0.5 text-[9px] font-semibold text-[var(--txt4)] leading-none tabular-nums pointer-events-none opacity-70">
+                          {String(h).padStart(2, '0')}:00
+                        </span>
+                      )}
                     </div>
                   ))}
 
@@ -2190,7 +2213,7 @@ export default function CalendarPage() {
                       Admin only sees these once a specific teacher is filtered
                       (otherwise every teacher's hours would blend together);
                       a teacher always sees their own windows. */}
-                  {(role === 'teacher' || !!filterTeacherId) && weekAvailabilityBands(di, hourHeights, offsets).map((b, bi) => (
+                  {(role === 'teacher' || !!filterTeacherId) && weekAvailabilityBands(di).map((b, bi) => (
                     <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
                       style={{ top: b.top, height: b.height, background: hexToRgba('#3D7A55', 0.09), borderLeft: '2px solid rgba(61,122,85,0.35)' }} />
                   ))}
@@ -2198,14 +2221,14 @@ export default function CalendarPage() {
                   {/* Half-hour guide lines (lighter) */}
                   {HOURS.map((h, hi) => (
                     <div key={`h${h}`} className="absolute inset-x-0 border-t border-dashed"
-                      style={{ top: offsets[hi]! + hourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
+                      style={{ top: weekOffsets[hi]! + weekHourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
                   ))}
 
                   {/* Clickable hour slots (behind lessons) */}
                   {HOURS.map((h, hi) => (
                     <div key={`slot${h}`}
                       className="absolute inset-x-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
-                      style={{ top: offsets[hi], height: hourHeights[hi] }}
+                      style={{ top: weekOffsets[hi], height: weekHourHeights[hi] }}
                       onClick={() => openSlot(di, h)}>
                       <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
                     </div>
@@ -2222,7 +2245,7 @@ export default function CalendarPage() {
                     if (nowMins < 0 || nowMins > HOURS.length * 60) return null;
                     return (
                       <div className="absolute inset-x-0 z-20 pointer-events-none flex items-center"
-                        style={{ top: elasticY(nowMins, hourHeights, offsets) }}>
+                        style={{ top: elasticY(nowMins, weekHourHeights, weekOffsets) }}>
                         <div className="w-2 h-2 rounded-full bg-[var(--coral)] ml-0.5 shrink-0" />
                         <div className="flex-1 h-px bg-[var(--coral)]" />
                       </div>
@@ -2265,33 +2288,30 @@ export default function CalendarPage() {
               <div className="grid" style={{ gridTemplateColumns: `repeat(${teacherCols.length}, minmax(140px, 1fr))`, minWidth: 700 }}>
                 {/* Teacher columns */}
                 {teacherCols.map((col, ci) => {
-                  // This teacher's own hour heights — a busy hour for one
-                  // teacher never inflates a quiet hour for a colleague.
-                  const hourHeights = computeElasticHourHeights([teacherDayLessons(col.id)]);
-                  const offsets = cumulativeOffsets(hourHeights);
-                  const totalH = elasticTotalHeight(hourHeights);
-                  const layout = computeLayout(teacherDayLessons(col.id), hourHeights);
+                  const layout = computeLayout(teacherDayLessons(col.id), dayHourHeights);
                   return (
                     <div key={col.id ?? 'unassigned'}
                       className={`relative border-r border-[var(--bd)] ${ci === teacherCols.length - 1 ? 'border-r-0' : ''} ${isAnchorToday ? 'bg-[var(--sage-lt)]/20' : ''}`}
-                      style={{ height: totalH }}>
+                      style={{ height: dayTotalH }}>
 
                       {HOURS.map((h, hi) => (
                         <div key={h} className="absolute inset-x-0 border-t border-[var(--bd)]"
-                          style={{ top: offsets[hi] }}>
-                          <span className="absolute left-1 top-0.5 text-[9px] font-semibold text-[var(--txt4)] leading-none tabular-nums pointer-events-none opacity-70">
-                            {String(h).padStart(2, '0')}:00
-                          </span>
+                          style={{ top: dayOffsets[hi] }}>
+                          {ci === 0 && (
+                            <span className="absolute left-1 top-0.5 text-[9px] font-semibold text-[var(--txt4)] leading-none tabular-nums pointer-events-none opacity-70">
+                              {String(h).padStart(2, '0')}:00
+                            </span>
+                          )}
                         </div>
                       ))}
                       {HOURS.map((h, hi) => (
                         <div key={`h${h}`} className="absolute inset-x-0 border-t border-dashed"
-                          style={{ top: offsets[hi]! + hourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
+                          style={{ top: dayOffsets[hi]! + dayHourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
                       ))}
                       {/* Availability bands — this teacher's free-to-teach hours, in their
                           colour. Admin only sees these once a specific teacher is
                           filtered; a teacher always sees their own. */}
-                      {(role === 'teacher' || !!filterTeacherId) && teacherAvailabilityBands(col.id, hourHeights, offsets).map((b, bi) => (
+                      {(role === 'teacher' || !!filterTeacherId) && teacherAvailabilityBands(col.id).map((b, bi) => (
                         <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
                           style={{ top: b.top, height: b.height, background: hexToRgba(teacherColor(col.id), 0.1), borderLeft: `2px solid ${hexToRgba(teacherColor(col.id), 0.4)}` }}>
                           <span className="absolute left-1.5 top-1 text-[8px] font-bold uppercase tracking-wide pointer-events-none"
@@ -2302,7 +2322,7 @@ export default function CalendarPage() {
                       {HOURS.map((h, hi) => (
                         <div key={`slot${h}`}
                           className="absolute inset-x-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
-                          style={{ top: offsets[hi], height: hourHeights[hi] }}
+                          style={{ top: dayOffsets[hi], height: dayHourHeights[hi] }}
                           onClick={() => openSlotForDay(h)}>
                           <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
                         </div>
@@ -2317,7 +2337,7 @@ export default function CalendarPage() {
                         if (nowMins < 0 || nowMins > HOURS.length * 60) return null;
                         return (
                           <div className="absolute inset-x-0 z-20 pointer-events-none flex items-center"
-                            style={{ top: elasticY(nowMins, hourHeights, offsets) }}>
+                            style={{ top: elasticY(nowMins, dayHourHeights, dayOffsets) }}>
                             <div className="w-2 h-2 rounded-full bg-[var(--coral)] ml-0.5 shrink-0" />
                             <div className="flex-1 h-px bg-[var(--coral)]" />
                           </div>
