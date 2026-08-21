@@ -445,7 +445,28 @@ export class SchedulingService {
     const fromArg = opts?.fromDate
       ? parseZonedDateTime(opts.fromDate.includes('T') ? opts.fromDate : `${opts.fromDate}T00:00:00`, tz)
       : now;
-    const from = fromArg > now ? fromArg : now;
+    let from = fromArg > now ? fromArg : now;
+
+    // If this series already has a genuine first lesson (the one deliberately
+    // booked when the schedule was set up — e.g. a future term start), never
+    // generate anything earlier than it. Without this floor, the nightly
+    // top-up worker calls this with no fromDate, so `from` collapses to "now"
+    // and it dutifully back-fills every week between today and that
+    // deliberately-chosen start — real lessons on real families' calendars,
+    // days before the studio ever intended them to begin, complete with
+    // reminder emails. The earliest-ever lesson for the enrollment (not just
+    // ones in this run's window) is the floor; an ordinary already-running
+    // series has its earliest lesson in the past, so this is a no-op there.
+    const earliest = await this.db.db.query.lessons.findFirst({
+      where: eq(lessons.enrollmentId, enrollment.id),
+      columns: { startsAt: true, seriesSlotAt: true },
+      orderBy: (l, { asc }) => [asc(l.startsAt)],
+    });
+    if (earliest) {
+      const floor = earliest.seriesSlotAt ?? earliest.startsAt;
+      if (floor.getTime() > from.getTime()) from = floor;
+    }
+
     const windowEnd = new Date(from.getTime() + weeks * 7 * 86400000);
     const occurrences = weeklyOccurrenceStrings(from, weeks, rule.weekday, rule.startTime, tz);
 
