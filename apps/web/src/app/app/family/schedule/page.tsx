@@ -293,7 +293,7 @@ export default function FamilySchedulePage() {
                           <span className="flex items-baseline gap-1 min-w-0">
                             <span className="text-[10px] font-bold leading-none tabular-nums shrink-0" style={{ color: c, opacity: 0.7 }}>{fmtTime(l.startsAt)}</span>
                             <span className="text-[13px] font-bold leading-tight truncate" style={{ color: c, textDecoration: cancelled ? 'line-through' : undefined }}>
-                              {l.student?.firstName}
+                              {l.student?.firstName} {l.student?.lastName}
                             </span>
                           </span>
                           <span className="flex items-center gap-1 min-w-0">

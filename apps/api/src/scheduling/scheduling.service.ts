@@ -306,6 +306,26 @@ export class SchedulingService {
       const tz = await this.getOrgTimezone(tx, orgId);
       // Interpret a naive wall-clock ("...T16:00:00") as the studio's local time.
       const startsAt = parseZonedDateTime(dto.startsAt, tz);
+
+      // A term's exception weeks (half-term, holidays) must mean genuinely zero
+      // classes that week — materializeEnrollment already skips them when
+      // auto-generating a recurring series, but that's the only place this was
+      // enforced. Any one-off booking against the same term (admin/teacher "Add
+      // lesson", a family self-booking, confirming a lesson request) could still
+      // land a lesson inside a week the studio doesn't run. Enforce it here too,
+      // at the single choke point every lesson creation passes through.
+      if (dto.termId) {
+        const term = await tx.query.terms.findFirst({ where: eq(terms.id, dto.termId), columns: { exceptionWeeks: true } });
+        const exceptionWeeks = term?.exceptionWeeks ?? [];
+        if (exceptionWeeks.length > 0) {
+          const dayStr = formatInZone(startsAt, tz, { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-CA');
+          const inException = exceptionWeeks.some((ex) => dayStr >= ex.start && dayStr <= ex.end);
+          if (inException) {
+            throw new BadRequestException('This date falls inside a term exception week (no classes) — pick a different date, or edit the term’s exception weeks first.');
+          }
+        }
+      }
+
       await this.lockResources(tx, orgId, dto.teacherId, dto.studentId);
       await this.checkConflicts(tx, orgId, startsAt.toISOString(), dto.duration ?? 60, dto.teacherId, undefined, dto.studentId);
 
