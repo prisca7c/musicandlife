@@ -8,8 +8,9 @@ import { CreateTermDto } from './dto/create-term.dto';
 import { UpdateTermStatusDto } from './dto/update-term-status.dto';
 import { UpdateTermExceptionsDto } from './dto/update-term-exceptions.dto';
 import { eq, and } from 'drizzle-orm';
-import { terms } from '@music-life/db';
+import { terms, lessons, lessonRequests, invoiceLineItems } from '@music-life/db';
 import type { RequestUser } from '@music-life/types';
+import { getOrgTimezone, formatInZone } from '../common/timezone';
 
 @Controller('terms')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -73,6 +74,37 @@ export class TermsController {
       .where(and(eq(terms.id, id), eq(terms.organizationId, user.orgId)))
       .returning();
     if (!updated) throw new NotFoundException('Term not found');
-    return updated;
+
+    // An exception week (half-term, holiday) means the whole studio is closed
+    // that week — not just lessons tagged with this term's id (plenty of
+    // enrollments carry no termId at all). Setting the exception here must
+    // also clear out any lesson that already exists inside it, or "block off
+    // this week" would leave real, billable lessons still sitting there.
+    // Billed or attended lessons are left alone and reported back so the
+    // admin can handle them manually rather than silently losing billing
+    // history.
+    const removed: { id: string; startsAt: string }[] = [];
+    const kept: { id: string; startsAt: string; reason: string }[] = [];
+    if (body.exceptionWeeks.length > 0) {
+      const tz = await getOrgTimezone(this.db.db, user.orgId);
+      const orgLessons = await this.db.db.query.lessons.findMany({
+        where: and(eq(lessons.organizationId, user.orgId), eq(lessons.status, 'scheduled')),
+        columns: { id: true, startsAt: true },
+      });
+      for (const l of orgLessons) {
+        const dayStr = formatInZone(l.startsAt, tz, { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-CA');
+        const inException = body.exceptionWeeks.some((ex) => dayStr >= ex.start && dayStr <= ex.end);
+        if (!inException) continue;
+        const billed = await this.db.db.query.invoiceLineItems.findFirst({ where: eq(invoiceLineItems.lessonId, l.id), columns: { id: true } });
+        if (billed) { kept.push({ id: l.id, startsAt: l.startsAt.toISOString(), reason: 'billed' }); continue; }
+        await this.db.db.transaction(async (tx) => {
+          await tx.update(lessonRequests).set({ createdLessonId: null }).where(eq(lessonRequests.createdLessonId, l.id));
+          await tx.delete(lessons).where(eq(lessons.id, l.id));
+        });
+        removed.push({ id: l.id, startsAt: l.startsAt.toISOString() });
+      }
+    }
+
+    return { ...updated, removedLessons: removed.length, keptBilledLessons: kept.length };
   }
 }
