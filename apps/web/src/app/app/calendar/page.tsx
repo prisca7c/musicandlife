@@ -2307,11 +2307,14 @@ export default function CalendarPage() {
                 style={{ gridTemplateColumns: `repeat(${teacherCols.length}, minmax(140px, 1fr))` }}>
                 {teacherCols.map(col => {
                   const count = teacherDayLessons(col.id).length;
+                  const exception = exceptionLabel(anchorStr);
                   return (
                     <div key={col.id ?? 'unassigned'}
                       className="border-r border-[var(--bd)] last:border-r-0 px-2 py-2.5 text-center bg-[var(--surf)]">
                       <div className="text-[12px] font-bold truncate" style={{ color: 'var(--txt)' }}>{col.name}</div>
-                      {count > 0 && (
+                      {exception ? (
+                        <div className="text-[9px] font-bold mt-0.5 uppercase tracking-wide" style={{ color: 'var(--txt4)' }}>Closed</div>
+                      ) : count > 0 && (
                         <div className="text-[9px] font-bold mt-0.5" style={{ color: 'var(--txt4)' }}>
                           {count} lesson{count !== 1 ? 's' : ''}
                         </div>
@@ -2326,6 +2329,7 @@ export default function CalendarPage() {
                 {/* Teacher columns */}
                 {teacherCols.map((col, ci) => {
                   const layout = computeLayout(teacherDayLessons(col.id), dayHourHeights);
+                  const exception = exceptionLabel(anchorStr);
                   return (
                     <div key={col.id ?? 'unassigned'}
                       className={`relative border-r border-[var(--bd)] ${ci === teacherCols.length - 1 ? 'border-r-0' : ''} ${isAnchorToday ? 'bg-[var(--sage-lt)]/20' : ''}`}
@@ -2341,33 +2345,47 @@ export default function CalendarPage() {
                           )}
                         </div>
                       ))}
-                      {HOURS.map((h, hi) => (
-                        <div key={`h${h}`} className="absolute inset-x-0 border-t border-dashed"
-                          style={{ top: dayOffsets[hi]! + dayHourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
-                      ))}
-                      {/* Availability bands — this teacher's free-to-teach hours, in their
-                          colour. Admin only sees these once a specific teacher is
-                          filtered; a teacher always sees their own. */}
-                      {(role === 'teacher' || !!filterTeacherId) && teacherAvailabilityBands(col.id).map((b, bi) => (
-                        <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
-                          style={{ top: b.top, height: b.height, background: hexToRgba(teacherColor(col.id), 0.1), borderLeft: `2px solid ${hexToRgba(teacherColor(col.id), 0.4)}` }}>
-                          <span className="absolute left-1.5 top-1 text-[8px] font-bold uppercase tracking-wide pointer-events-none"
-                            style={{ color: teacherColor(col.id), opacity: 0.55 }}>Available</span>
-                        </div>
-                      ))}
 
-                      {HOURS.map((h, hi) => (
-                        <div key={`slot${h}`}
-                          className="absolute inset-x-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
-                          style={{ top: dayOffsets[hi], height: dayHourHeights[hi] }}
-                          onClick={() => openSlotForDay(h)}>
-                          <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
+                      {exception ? (
+                        <div className="absolute inset-0 flex items-center justify-center text-center px-2"
+                          style={{ background: 'repeating-linear-gradient(135deg, rgba(148,138,120,0.10) 0px, rgba(148,138,120,0.10) 8px, transparent 8px, transparent 16px)' }}>
+                          {ci === 0 && (
+                            <span className="text-[10px] font-bold uppercase tracking-wide leading-tight" style={{ color: 'var(--txt4)' }}>
+                              {exception}
+                            </span>
+                          )}
                         </div>
-                      ))}
+                      ) : (
+                        <>
+                          {HOURS.map((h, hi) => (
+                            <div key={`h${h}`} className="absolute inset-x-0 border-t border-dashed"
+                              style={{ top: dayOffsets[hi]! + dayHourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
+                          ))}
+                          {/* Availability bands — this teacher's free-to-teach hours, in their
+                              colour. Admin only sees these once a specific teacher is
+                              filtered; a teacher always sees their own. */}
+                          {(role === 'teacher' || !!filterTeacherId) && teacherAvailabilityBands(col.id).map((b, bi) => (
+                            <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
+                              style={{ top: b.top, height: b.height, background: hexToRgba(teacherColor(col.id), 0.1), borderLeft: `2px solid ${hexToRgba(teacherColor(col.id), 0.4)}` }}>
+                              <span className="absolute left-1.5 top-1 text-[8px] font-bold uppercase tracking-wide pointer-events-none"
+                                style={{ color: teacherColor(col.id), opacity: 0.55 }}>Available</span>
+                            </div>
+                          ))}
 
-                      {layout.map(l => (
-                        <LessonBlock key={l.id} lesson={l} onClick={() => setSelectedLesson(l)} />
-                      ))}
+                          {HOURS.map((h, hi) => (
+                            <div key={`slot${h}`}
+                              className="absolute inset-x-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
+                              style={{ top: dayOffsets[hi], height: dayHourHeights[hi] }}
+                              onClick={() => openSlotForDay(h)}>
+                              <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
+                            </div>
+                          ))}
+
+                          {layout.map(l => (
+                            <LessonBlock key={l.id} lesson={l} onClick={() => setSelectedLesson(l)} />
+                          ))}
+                        </>
+                      )}
 
                       {isAnchorToday && (() => {
                         const nowMins = (new Date().getHours() - DAY_START) * 60 + new Date().getMinutes();
@@ -2413,6 +2431,7 @@ export default function CalendarPage() {
               const dayList = lessons
                 .filter(l => studioDayString(l.startsAt) === dayStr)
                 .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+              const exception = exceptionLabel(dayStr);
               return (
                 <button
                   key={i}
@@ -2427,10 +2446,13 @@ export default function CalendarPage() {
                   // of sitting at the top where the row's date numbers line
                   // up. Force block layout, top-anchored explicitly.
                   style={{
-                    minHeight: 148, background: inMonth ? '#fff' : 'var(--surf)',
+                    minHeight: 148,
+                    background: exception
+                      ? 'repeating-linear-gradient(135deg, rgba(148,138,120,0.14) 0px, rgba(148,138,120,0.14) 6px, #fff 6px, #fff 12px)'
+                      : inMonth ? '#fff' : 'var(--surf)',
                     display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start',
                   }}
-                  title="Open this day"
+                  title={exception ?? 'Open this day'}
                 >
                   <div className="flex items-center justify-between mb-1">
                     {/* dayStr (studio-zone) is what dayList is filtered by —
@@ -2439,7 +2461,9 @@ export default function CalendarPage() {
                     <span className={`text-xs font-bold ${isToday ? 'text-white bg-[var(--sage)] rounded-full w-5 h-5 flex items-center justify-center' : inMonth ? 'text-[var(--txt2)]' : 'text-[var(--txt4)]'}`}>
                       {Number(dayStr.slice(8, 10))}
                     </span>
-                    {dayList.length > 0 && (
+                    {exception ? (
+                      <span className="text-[8px] font-bold uppercase tracking-wide" style={{ color: 'var(--txt4)' }}>Closed</span>
+                    ) : dayList.length > 0 && (
                       <span className="text-[9px] font-bold" style={{ color: 'var(--txt4)' }}>{dayList.length}</span>
                     )}
                   </div>
