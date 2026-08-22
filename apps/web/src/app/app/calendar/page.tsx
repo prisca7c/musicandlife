@@ -1763,6 +1763,20 @@ export default function CalendarPage() {
   const { data: lessonsRaw = [], mutate } = useApi<Lesson[]>(lessonsQuery);
   const load = () => mutate();
 
+  // Half-term/holiday exception weeks close the whole studio, so the calendar
+  // marks them off visually (diagonal stripes + label) rather than just
+  // silently having no lessons that week — a blank week reads as "nothing's
+  // been booked yet", not "we don't run classes this week".
+  const { data: allTerms = [] } = useApi<{ id: string; name: string; exceptionWeeks: { start: string; end: string }[] }[]>('/terms');
+  function exceptionLabel(dStr: string): string | null {
+    for (const t of allTerms) {
+      for (const ex of t.exceptionWeeks ?? []) {
+        if (dStr >= ex.start && dStr <= ex.end) return `${t.name} — half term break`;
+      }
+    }
+    return null;
+  }
+
   // Staff for colours + the teacher filter. Management gets the full record;
   // a teacher opting into the whole studio gets a names-only roster; otherwise
   // just themselves. `/staff/me` is fetched separately so we always know the
@@ -2160,16 +2174,20 @@ export default function CalendarPage() {
               const dStr = formatDate(d);
               const isToday = dStr === todayStr;
               const count = dayLessons(i).length;
+              const exception = exceptionLabel(dStr);
               return (
                 <div key={day}
-                  className={`border-r border-[var(--bd)] px-2 py-2.5 text-center bg-[var(--surf)] ${i === 6 ? 'border-r-0' : ''}`}>
+                  className={`border-r border-[var(--bd)] px-2 py-2.5 text-center ${i === 6 ? 'border-r-0' : ''} ${exception ? '' : 'bg-[var(--surf)]'}`}
+                  style={exception ? { background: 'repeating-linear-gradient(135deg, rgba(148,138,120,0.14) 0px, rgba(148,138,120,0.14) 6px, var(--surf) 6px, var(--surf) 12px)' } : undefined}>
                   <div className={`text-[11px] font-bold uppercase tracking-wider ${isToday ? 'text-[var(--sage)]' : 'text-[var(--txt4)]'}`}>{day}</div>
                   {/* dStr (studio-zone) is what dayLessons(i)/isToday are keyed by
                       below — d.getDate() reads the browser-local day-of-month,
                       which can show a different number than the studio-zone day
                       this column's lessons belong to. */}
                   <div className={`text-xl font-bold mt-0.5 ${isToday ? 'text-[var(--sage)]' : 'text-[var(--txt)]'}`}>{Number(dStr.slice(8, 10))}</div>
-                  {count > 0 && (
+                  {exception ? (
+                    <div className="text-[9px] font-bold mt-0.5 uppercase tracking-wide" style={{ color: 'var(--txt4)' }}>Closed</div>
+                  ) : count > 0 && (
                     <div className="text-[9px] font-bold mt-0.5" style={{ color: 'var(--txt4)' }}>
                       {count} lesson{count !== 1 ? 's' : ''}
                     </div>
@@ -2191,6 +2209,7 @@ export default function CalendarPage() {
               const dStr = formatDate(d);
               const isToday = dStr === todayStr;
               const layout = computeLayout(dayLessons(di), weekHourHeights);
+              const exception = exceptionLabel(dStr);
 
               return (
                 <div key={di}
@@ -2209,35 +2228,53 @@ export default function CalendarPage() {
                     </div>
                   ))}
 
-                  {/* Availability bands — shaded hours a teacher is free to teach.
-                      Admin only sees these once a specific teacher is filtered
-                      (otherwise every teacher's hours would blend together);
-                      a teacher always sees their own windows. */}
-                  {(role === 'teacher' || !!filterTeacherId) && weekAvailabilityBands(di).map((b, bi) => (
-                    <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
-                      style={{ top: b.top, height: b.height, background: hexToRgba('#3D7A55', 0.09), borderLeft: '2px solid rgba(61,122,85,0.35)' }} />
-                  ))}
-
-                  {/* Half-hour guide lines (lighter) */}
-                  {HOURS.map((h, hi) => (
-                    <div key={`h${h}`} className="absolute inset-x-0 border-t border-dashed"
-                      style={{ top: weekOffsets[hi]! + weekHourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
-                  ))}
-
-                  {/* Clickable hour slots (behind lessons) */}
-                  {HOURS.map((h, hi) => (
-                    <div key={`slot${h}`}
-                      className="absolute inset-x-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
-                      style={{ top: weekOffsets[hi], height: weekHourHeights[hi] }}
-                      onClick={() => openSlot(di, h)}>
-                      <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
+                  {exception ? (
+                    /* Half-term/holiday week — blocked off entirely. Diagonal
+                       stripes read as "closed" at a glance; no hour lines,
+                       availability bands, or click-to-add slots render
+                       underneath, since the server also refuses any lesson
+                       booked into this week. */
+                    <div className="absolute inset-0 flex items-center justify-center text-center px-2"
+                      style={{
+                        background: 'repeating-linear-gradient(135deg, rgba(148,138,120,0.10) 0px, rgba(148,138,120,0.10) 8px, transparent 8px, transparent 16px)',
+                      }}>
+                      <span className="text-[10px] font-bold uppercase tracking-wide leading-tight" style={{ color: 'var(--txt4)' }}>
+                        {exception}
+                      </span>
                     </div>
-                  ))}
+                  ) : (
+                    <>
+                      {/* Availability bands — shaded hours a teacher is free to teach.
+                          Admin only sees these once a specific teacher is filtered
+                          (otherwise every teacher's hours would blend together);
+                          a teacher always sees their own windows. */}
+                      {(role === 'teacher' || !!filterTeacherId) && weekAvailabilityBands(di).map((b, bi) => (
+                        <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
+                          style={{ top: b.top, height: b.height, background: hexToRgba('#3D7A55', 0.09), borderLeft: '2px solid rgba(61,122,85,0.35)' }} />
+                      ))}
 
-                  {/* Lesson blocks */}
-                  {layout.map(l => (
-                    <LessonBlock key={l.id} lesson={l} onClick={() => setSelectedLesson(l)} />
-                  ))}
+                      {/* Half-hour guide lines (lighter) */}
+                      {HOURS.map((h, hi) => (
+                        <div key={`h${h}`} className="absolute inset-x-0 border-t border-dashed"
+                          style={{ top: weekOffsets[hi]! + weekHourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
+                      ))}
+
+                      {/* Clickable hour slots (behind lessons) */}
+                      {HOURS.map((h, hi) => (
+                        <div key={`slot${h}`}
+                          className="absolute inset-x-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
+                          style={{ top: weekOffsets[hi], height: weekHourHeights[hi] }}
+                          onClick={() => openSlot(di, h)}>
+                          <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
+                        </div>
+                      ))}
+
+                      {/* Lesson blocks */}
+                      {layout.map(l => (
+                        <LessonBlock key={l.id} lesson={l} onClick={() => setSelectedLesson(l)} />
+                      ))}
+                    </>
+                  )}
 
                   {/* "Now" line for today */}
                   {isToday && (() => {
