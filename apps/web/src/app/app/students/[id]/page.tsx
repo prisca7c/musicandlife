@@ -779,7 +779,7 @@ export default function StudentDetailPage() {
                   <tr key={e.id}>
                     <td className="capitalize font-medium">
                       {e.instrument}
-                      {e.scheduleRule && (
+                      {e.scheduleRule?.weekday && (
                         <span className="ml-2 text-[11px] font-semibold rounded-full px-2 py-0.5"
                           style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)' }}>
                           weekly {e.scheduleRule.weekday.slice(0, 3)} {e.scheduleRule.startTime}
@@ -814,7 +814,7 @@ export default function StudentDetailPage() {
                             <option value="paused">Paused</option>
                             <option value="withdrawn">Withdrawn</option>
                           </select>
-                          {e.scheduleRule && (
+                          {e.scheduleRule?.weekday && (
                             <>
                               <button onClick={() => setRescheduleEnrollment(e)}
                                 className="text-xs font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}
