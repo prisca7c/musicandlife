@@ -68,7 +68,6 @@ export default function FamilyDashboardPage() {
   // say something other than "pay this" in the meantime.
   const [claimed, setClaimed] = useState(false);
   const { data: paymentDetails } = useApi<{
-    reference: string;
     bank: { accountName: string | null; sortCode: string | null; accountNumber: string | null };
     bankConfigured: boolean;
   }>('/family/payment-details');
@@ -323,7 +322,7 @@ export default function FamilyDashboardPage() {
                       transfer can't be tied to a family automatically. */}
                   <p className="mb-2 rounded-lg px-2 py-1.5 text-center text-sm font-bold tracking-wider"
                      style={{ background: 'var(--bg)', color: 'var(--txt)' }}>
-                    {paymentDetails?.reference ?? 'Loading…'}
+                    {outstandingInvoice.number}
                   </p>
                   {payErr && <p className="text-xs text-[var(--coral)] mb-2">{payErr}</p>}
                   <div className="flex gap-2">
