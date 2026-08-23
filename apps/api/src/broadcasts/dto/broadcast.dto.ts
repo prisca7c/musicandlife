@@ -1,5 +1,6 @@
 import {
   IsIn, IsString, MaxLength, MinLength, Equals, IsBoolean, IsOptional, IsUUID, ValidateNested,
+  IsArray, ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -34,16 +35,18 @@ export class BroadcastTestDto {
 }
 
 export class BroadcastPreviewDto {
-  @IsIn(['families', 'teachers', 'students', 'everyone'])
-  audience!: BroadcastAudience;
+  // Multiple audiences can be picked together (e.g. families + teachers but
+  // not students) — 'everyone' is still accepted as shorthand for all three.
+  @IsArray() @ArrayMinSize(1) @IsIn(['families', 'teachers', 'students', 'everyone'], { each: true })
+  audience!: BroadcastAudience[];
 
   @IsOptional() @ValidateNested() @Type(() => BroadcastFilterDto)
   filter?: BroadcastFilterDto;
 }
 
 export class BroadcastSendDto extends BroadcastTestDto {
-  @IsIn(['families', 'teachers', 'students', 'everyone'])
-  audience!: BroadcastAudience;
+  @IsArray() @ArrayMinSize(1) @IsIn(['families', 'teachers', 'students', 'everyone'], { each: true })
+  audience!: BroadcastAudience[];
 
   @IsOptional() @ValidateNested() @Type(() => BroadcastFilterDto)
   filter?: BroadcastFilterDto;

@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { eq, and, isNull, isNotNull, desc } from 'drizzle-orm';
-import { createHash, randomBytes } from 'crypto';
-import { families, invoices, paymentClaims, bankTransactions } from '@music-life/db';
+import { createHash } from 'crypto';
+import { families, invoices, paymentClaims, bankTransactions, students } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { BillingService } from './billing.service';
 
@@ -11,10 +11,6 @@ import { BillingService } from './billing.service';
 function normalise(s: string | null | undefined): string {
   return (s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
-
-// Ambiguity-resistant alphabet: no O/0, I/1, S/5 — references get read aloud,
-// hand-typed into banking apps, and copied off paper invoices.
-const REF_ALPHABET = 'ABCDEFGHJKLMNPQRTUVWXYZ2346789';
 
 export interface ParsedStatementRow {
   bookedOn: string;
@@ -37,6 +33,14 @@ export class ReconciliationService {
   /**
    * Every family needs a stable reference before any of this works. Generated
    * lazily on first use so existing families don't need a backfill migration.
+   *
+   * The reference is the (first-enrolled) student's full name rather than a
+   * random code — easier for a parent to recognise and type correctly on
+   * their banking app. Names aren't unique across families the way a random
+   * code is, so a numbered suffix ("Emma Smith 2") is appended on collision;
+   * importStatement's longest-key-first matching (see normalise() below)
+   * already exists specifically so a longer reference like "Emma Smith 2"
+   * is never shadowed by a shorter one it happens to contain.
    */
   async ensureReference(orgId: string, familyId: string): Promise<string> {
     const family = await this.db.db.query.families.findFirst({
@@ -45,12 +49,12 @@ export class ReconciliationService {
     if (!family) throw new NotFoundException('Family not found');
     if (family.paymentReference) return family.paymentReference;
 
-    // The unique index on (org, reference) is the real guard; retry on the rare
-    // collision rather than trusting randomness alone.
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const bytes = randomBytes(4);
-      const code = Array.from(bytes, (b) => REF_ALPHABET[b % REF_ALPHABET.length]).join('');
-      const reference = `ML-${code}`;
+    const base = await this.referenceBaseName(orgId, familyId, family);
+
+    // The unique index on (org, reference) is the real guard; retry with a
+    // numbered suffix on collision rather than trusting the name alone.
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const reference = attempt === 0 ? base : `${base} ${attempt + 1}`;
       try {
         const [updated] = await this.db.db.update(families)
           .set({ paymentReference: reference, updatedAt: new Date() })
@@ -63,10 +67,25 @@ export class ReconciliationService {
         });
         if (fresh?.paymentReference) return fresh.paymentReference;
       } catch {
-        // Unique violation → this code is taken, try another.
+        // Unique violation → this exact name (or numbered variant) is taken, try the next.
       }
     }
     throw new BadRequestException('Could not allocate a payment reference — please try again');
+  }
+
+  // The family's own contact name reads oddly as a payment reference when
+  // there's a student to name instead ("please quote: Priya Mistry" vs
+  // "please quote: Aanya Mistry" — the latter is what the family actually
+  // recognises as "the reference for Aanya's lessons"). Falls back to the
+  // family's own name only when it has no students yet.
+  private async referenceBaseName(orgId: string, familyId: string, family: { contactName: string | null; name: string }): Promise<string> {
+    const student = await this.db.db.query.students.findFirst({
+      where: and(eq(students.organizationId, orgId), eq(students.familyId, familyId)),
+      orderBy: (s, { asc }) => [asc(s.createdAt)],
+      columns: { firstName: true, lastName: true },
+    });
+    const name = student ? `${student.firstName} ${student.lastName}`.trim() : (family.contactName || family.name);
+    return name || 'Family';
   }
 
   async backfillReferences(orgId: string) {

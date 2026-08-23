@@ -62,60 +62,89 @@ interface HistoryLesson {
 // had 12 lessons?" had no way to check without opening the calendar and paging
 // week by week. This is the flat list, unbounded by date (same /lessons?studentId
 // endpoint the calendar's cross-week search now uses), newest first.
+function LessonTable({ lessons }: { lessons: HistoryLesson[] }) {
+  return (
+    <table className="data-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Time</th>
+          <th>Instrument</th>
+          <th>Teacher</th>
+          <th>Status</th>
+          <th>Attendance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {lessons.map(l => {
+          const d = new Date(l.startsAt);
+          return (
+            <tr key={l.id}>
+              <td className="font-medium">{d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+              <td style={{ color: 'var(--txt3)' }}>{d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</td>
+              <td className="capitalize">{l.enrollment?.instrument ?? '—'}</td>
+              <td>{l.teacher ? `${l.teacher.firstName} ${l.teacher.lastName}` : '—'}</td>
+              <td><Badge variant={l.status}>{l.status.replace(/^cancelled_/, 'cancelled ')}</Badge></td>
+              <td style={{ color: 'var(--txt3)' }}>{l.attendance?.status ?? '—'}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+// Split into Upcoming (soonest first — the thing you actually came here to
+// check) and Past (most recent first). A single newest-first list buried the
+// next lesson at the bottom under however many past ones existed.
 function LessonHistory({ studentId }: { studentId: string }) {
   const { data: lessons = [] } = useApi<HistoryLesson[]>(`/lessons?studentId=${studentId}`);
-  const [expanded, setExpanded] = useState(false);
-  const sorted = [...lessons].sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime());
-  const shown = expanded ? sorted : sorted.slice(0, 8);
+  const [expandedPast, setExpandedPast] = useState(false);
+  const now = Date.now();
+  const upcoming = lessons
+    .filter(l => new Date(l.startsAt).getTime() >= now)
+    .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+  const past = lessons
+    .filter(l => new Date(l.startsAt).getTime() < now)
+    .sort((a, b) => new Date(b.startsAt).getTime() - new Date(a.startsAt).getTime());
+  const pastShown = expandedPast ? past : past.slice(0, 8);
   const bookedCount = lessons.filter(l => l.status === 'scheduled' || l.status === 'completed').length;
 
   return (
-    <div className="data-table-wrap overflow-hidden mt-6">
-      <div className="px-5 py-3.5 border-b flex items-center justify-between" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
-        <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Lesson history</h2>
-        <span className="text-xs font-semibold" style={{ color: 'var(--txt3)' }}>
-          {bookedCount} lesson{bookedCount !== 1 ? 's' : ''} booked
-        </span>
-      </div>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Time</th>
-            <th>Instrument</th>
-            <th>Teacher</th>
-            <th>Status</th>
-            <th>Attendance</th>
-          </tr>
-        </thead>
-        <tbody>
-          {shown.length === 0 && (
-            <tr><td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>
-              No lessons booked yet.
-            </td></tr>
-          )}
-          {shown.map(l => {
-            const d = new Date(l.startsAt);
-            return (
-              <tr key={l.id}>
-                <td className="font-medium">{d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                <td style={{ color: 'var(--txt3)' }}>{d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</td>
-                <td className="capitalize">{l.enrollment?.instrument ?? '—'}</td>
-                <td>{l.teacher ? `${l.teacher.firstName} ${l.teacher.lastName}` : '—'}</td>
-                <td><Badge variant={l.status}>{l.status.replace(/^cancelled_/, 'cancelled ')}</Badge></td>
-                <td style={{ color: 'var(--txt3)' }}>{l.attendance?.status ?? '—'}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {sorted.length > 8 && (
-        <div className="px-5 py-3 border-t text-center" style={{ borderColor: 'var(--bd)' }}>
-          <button onClick={() => setExpanded(v => !v)} className="text-xs font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}>
-            {expanded ? 'Show less' : `Show all ${sorted.length} lessons`}
-          </button>
+    <div className="mt-6 space-y-6">
+      <div className="data-table-wrap overflow-hidden">
+        <div className="px-5 py-3.5 border-b flex items-center justify-between" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+          <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Upcoming lessons</h2>
+          <span className="text-xs font-semibold" style={{ color: 'var(--txt3)' }}>
+            {bookedCount} lesson{bookedCount !== 1 ? 's' : ''} booked
+          </span>
         </div>
-      )}
+        {upcoming.length === 0 ? (
+          <p className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>No upcoming lessons.</p>
+        ) : (
+          <LessonTable lessons={upcoming} />
+        )}
+      </div>
+
+      <div className="data-table-wrap overflow-hidden">
+        <div className="px-5 py-3.5 border-b" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
+          <h2 className="font-bold text-sm" style={{ color: 'var(--txt)' }}>Past lessons</h2>
+        </div>
+        {past.length === 0 ? (
+          <p className="px-4 py-12 text-center text-sm" style={{ color: 'var(--txt4)' }}>No past lessons.</p>
+        ) : (
+          <>
+            <LessonTable lessons={pastShown} />
+            {past.length > 8 && (
+              <div className="px-5 py-3 border-t text-center" style={{ borderColor: 'var(--bd)' }}>
+                <button onClick={() => setExpandedPast(v => !v)} className="text-xs font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}>
+                  {expandedPast ? 'Show less' : `Show all ${past.length} past lessons`}
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -140,7 +169,7 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
   const [rateEdited, setRateEdited] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState<{ created: number; through: string } | null>(null);
+  const [result, setResult] = useState<{ created: number; through: string | null } | null>(null);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   // Cached picker options — only fetched once the modal is open.
@@ -199,7 +228,10 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
         });
         setResult({ created: r.created, through: r.through });
       } else {
-        onClose();
+        // No weekly time was set — this used to close silently with zero
+        // lessons booked and no indication anything was skipped, which read
+        // as "I added a student and everything's just blank." Say so instead.
+        setResult({ created: 0, through: null });
       }
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
     finally { setSaving(false); }
@@ -218,12 +250,17 @@ function AddEnrollmentModal({ open, onClose, studentId, onCreated }: { open: boo
           <div className="rounded-xl px-4 py-4 text-sm"
             style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)', border: '1px solid var(--sage)' }}>
             <p className="font-bold text-base mb-1">Enrollment added ✓</p>
-            {result.created > 0 ? (
-              <p>Booked <strong>{result.created}</strong> weekly lesson{result.created !== 1 ? 's' : ''} through{' '}
-                {new Date(result.through).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.
-                They’re on the calendar now.</p>
+            {result.through ? (
+              result.created > 0 ? (
+                <p>Booked <strong>{result.created}</strong> weekly lesson{result.created !== 1 ? 's' : ''} through{' '}
+                  {new Date(result.through).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.
+                  They’re on the calendar now.</p>
+              ) : (
+                <p>No new lessons were booked (they may already exist for this schedule).</p>
+              )
             ) : (
-              <p>No new lessons were booked (they may already exist for this schedule).</p>
+              <p>No weekly time was set, so <strong>no lessons were booked</strong> — the calendar will stay empty for this
+                student until you edit the enrollment to add a weekday and time, or book lessons for them manually.</p>
             )}
           </div>
           <div className="flex gap-3">
