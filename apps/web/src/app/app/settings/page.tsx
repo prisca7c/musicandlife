@@ -63,9 +63,10 @@ function Section({ title, icon, children }: { title: React.ReactNode; icon: Reac
   );
 }
 
-// Shared editor for a term's "zero classes" weeks (half-term, holidays) — an
-// admin adds a date range here and "book term" (materializeEnrollment) skips
-// any lesson that would otherwise land inside it.
+// Shared editor for a term's "closed" weeks (half-term, holidays) — an admin
+// adds a date range here and the calendar marks it with diagonal stripes as a
+// warning that the studio doesn't normally run classes. Booking still works
+// during it, since makeup lessons sometimes get arranged over a break.
 function ExceptionWeeksEditor({ rows, onChange }: { rows: TermException[]; onChange: (rows: TermException[]) => void }) {
   function update(i: number, field: 'start' | 'end', value: string) {
     onChange(rows.map((r, idx) => idx === i ? { ...r, [field]: value } : r));
@@ -75,7 +76,7 @@ function ExceptionWeeksEditor({ rows, onChange }: { rows: TermException[]; onCha
   }
   return (
     <div>
-      <label className={labelCls}>Weeks with no classes (half-term, holidays)</label>
+      <label className={labelCls}>Break weeks (half-term, holidays) — stripes as a warning, booking still allowed</label>
       <div className="space-y-2">
         {rows.map((r, i) => (
           <div key={i} className="flex items-center gap-2">
@@ -462,7 +463,7 @@ export default function SettingsPage() {
                 </p>
                 {t.exceptionWeeks?.length > 0 && (
                   <p className="text-xs mt-0.5" style={{ color: 'var(--txt4)' }}>
-                    Skips: {t.exceptionWeeks.map(x => `${x.start} – ${x.end}`).join(', ')}
+                    Break: {t.exceptionWeeks.map(x => `${x.start} – ${x.end}`).join(', ')}
                   </p>
                 )}
               </div>

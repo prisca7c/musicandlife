@@ -38,7 +38,7 @@ function makeService(opts: {
     transaction: async (fn: (tx: unknown) => unknown) => fn(tx),
   };
 
-  const service = new BillingService({ db: mockDb } as never);
+  const service = new BillingService({ db: mockDb } as never, { trigger: async () => {} } as never);
   const createInvoice = jest.spyOn(service, 'createInvoice').mockResolvedValue({ id: 'inv-new', number: 'INV-NEW' } as never);
   jest.spyOn(service, 'addLineItem').mockResolvedValue({} as never);
   jest.spyOn(service, 'sendInvoice').mockResolvedValue({} as never);
