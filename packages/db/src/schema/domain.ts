@@ -33,7 +33,13 @@ export const terms = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('terms_org_id_idx').on(t.organizationId)],
+  (t) => [
+    index('terms_org_id_idx').on(t.organizationId),
+    // The three canonical season terms (Autumn/Spring/Summer Term) are
+    // auto-seeded per org and must never duplicate under a concurrent
+    // findAll() race — this is what onConflictDoNothing targets.
+    uniqueIndex('terms_org_name_uidx').on(t.organizationId, t.name),
+  ],
 );
 
 // ─── Families ─────────────────────────────────────────────────────────────────

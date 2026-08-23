@@ -267,6 +267,13 @@
       "when": 1787430100000,
       "tag": "0037_flowery_captain_marvel",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787447343791,
+      "tag": "0038_neat_captain_britain",
+      "breakpoints": true
     }
   ]
 }

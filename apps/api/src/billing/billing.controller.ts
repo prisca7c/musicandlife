@@ -4,6 +4,7 @@ import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { AddLineItemDto } from './dto/add-line-item.dto';
 import { PayAtLessonDto } from './dto/pay-at-lesson.dto';
+import { BillLessonDto } from './dto/bill-lesson.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -103,5 +104,14 @@ export class BillingController {
   @Roles('admin')
   payAtLesson(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: PayAtLessonDto) {
     return this.billing.payForLesson(user.orgId, id, dto.method);
+  }
+
+  // Bill exactly this lesson from the lesson-details view — send an invoice,
+  // or send it already marked paid (cash/bank transfer) for a family that
+  // pays in person and never opens the portal.
+  @Post('lessons/:id/invoice')
+  @Roles('admin')
+  billLesson(@CurrentUser() user: RequestUser, @Param('id') id: string, @Body() dto: BillLessonDto) {
+    return this.billing.billLessonDirectly(user.orgId, id, dto.settleMethod);
   }
 }

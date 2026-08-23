@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useApi } from '@/lib/swr';
 import { PageHeader } from '@/components/page-header';
@@ -98,50 +98,54 @@ function ExceptionWeeksEditor({ rows, onChange }: { rows: TermException[]; onCha
   );
 }
 
-function AddTermModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
+// The studio always runs the same three named terms — an admin only ever
+// needs to move a term's dates (and half-term week) forward to the next
+// school year, never create or delete one. The API auto-seeds these three
+// (findAll in terms.controller.ts), so the settings page just renders them
+// in this fixed order rather than an "Add term" flow.
+const SEASON_ORDER = ['Autumn Term', 'Spring Term', 'Summer Term'] as const;
+
+function EditDatesModal({ term, onClose, onSaved }: { term: Term | null; onClose: () => void; onSaved: () => void }) {
+  const [startsOn, setStartsOn] = useState('');
+  const [endsOn, setEndsOn] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [exceptions, setExceptions] = useState<TermException[]>([]);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault(); setSaving(true); setError('');
-    const f = new FormData(e.currentTarget);
-    const validExceptions = exceptions.filter(x => x.start && x.end);
+  const [openId, setOpenId] = useState<string | null>(null);
+  if (term && term.id !== openId) {
+    setOpenId(term.id);
+    setStartsOn(term.startsOn); setEndsOn(term.endsOn);
+    setError('');
+  }
+
+  async function handleSave() {
+    if (!startsOn || !endsOn) { setError('Both dates are required'); return; }
+    if (endsOn <= startsOn) { setError('End date must be after the start date'); return; }
+    setSaving(true); setError('');
     try {
-      await apiFetch('/terms', { method: 'POST', token: tok(), body: JSON.stringify({
-        name: f.get('name'), startsOn: f.get('startsOn'), endsOn: f.get('endsOn'),
-        weekCount: parseInt(f.get('weekCount') as string) || 12, status: 'planned',
-        exceptionWeeks: validExceptions,
-      })});
-      onCreated(); onClose(); setExceptions([]);
+      await apiFetch(`/terms/${term!.id}/dates`, { method: 'PATCH', token: tok(), body: JSON.stringify({ startsOn, endsOn }) });
+      onSaved(); onClose();
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
     finally { setSaving(false); }
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Create term">
+    <Modal open={!!term} onClose={onClose} title={`Dates — ${term?.name ?? ''}`}>
       {error && <p className="mb-3 text-sm text-[var(--coral)] bg-[var(--coral-lt)] border border-[var(--coral)] rounded-xl px-3 py-2">{error}</p>}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div><label className={labelCls}>Term name <span className="text-[var(--coral)]">*</span></label>
-          <input name="name" required autoFocus placeholder="e.g. Autumn Term 2026" className={inputCls} /></div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className={labelCls}>Start date <span className="text-[var(--coral)]">*</span></label>
-            <input name="startsOn" type="date" required className={inputCls} /></div>
-          <div><label className={labelCls}>End date <span className="text-[var(--coral)]">*</span></label>
-            <input name="endsOn" type="date" required className={inputCls} /></div>
-        </div>
-        <div><label className={labelCls}>Number of lessons</label>
-          <input name="weekCount" type="number" min="1" max="52" defaultValue="12" className={inputCls} /></div>
-        <ExceptionWeeksEditor rows={exceptions} onChange={setExceptions} />
-        <div className="flex gap-3 pt-2">
-          <button type="submit" disabled={saving}
-            className="bg-[var(--sage)] text-white rounded-xl px-5 py-2.5 text-sm font-bold hover:bg-[var(--sage-dk)] disabled:opacity-50">
-            {saving ? 'Creating…' : 'Create term'}
-          </button>
-          <button type="button" onClick={onClose} className="rounded-xl px-5 py-2.5 text-sm border border-[var(--bd2)] hover:bg-[var(--surf)]">Cancel</button>
-        </div>
-      </form>
+      <div className="grid grid-cols-2 gap-3">
+        <div><label className={labelCls}>Start date <span className="text-[var(--coral)]">*</span></label>
+          <input type="date" value={startsOn} onChange={e => setStartsOn(e.target.value)} className={inputCls} /></div>
+        <div><label className={labelCls}>End date <span className="text-[var(--coral)]">*</span></label>
+          <input type="date" value={endsOn} onChange={e => setEndsOn(e.target.value)} className={inputCls} /></div>
+      </div>
+      <div className="flex gap-3 pt-4">
+        <button type="button" onClick={handleSave} disabled={saving}
+          className="bg-[var(--sage)] text-white rounded-xl px-5 py-2.5 text-sm font-bold hover:bg-[var(--sage-dk)] disabled:opacity-50">
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button type="button" onClick={onClose} className="rounded-xl px-5 py-2.5 text-sm border border-[var(--bd2)] hover:bg-[var(--surf)]">Cancel</button>
+      </div>
     </Modal>
   );
 }
@@ -178,7 +182,7 @@ function EditExceptionsModal({ term, onClose, onSaved }: { term: Term | null; on
     <Modal open={!!term} onClose={onClose} title={`Zero-class weeks — ${term?.name ?? ''}`}>
       {error && <p className="mb-3 text-sm text-[var(--coral)] bg-[var(--coral-lt)] border border-[var(--coral)] rounded-xl px-3 py-2">{error}</p>}
       <p className="text-xs mb-3" style={{ color: 'var(--txt4)' }}>
-        Lessons in this term skip these weeks automatically when scheduled.
+        The calendar marks these weeks as closed with diagonal stripes — a visual warning only, booking still works during them.
       </p>
       <ExceptionWeeksEditor rows={rows} onChange={setRows} />
       <div className="flex gap-3 pt-4">
@@ -193,7 +197,7 @@ function EditExceptionsModal({ term, onClose, onSaved }: { term: Term | null; on
 }
 
 export default function SettingsPage() {
-  const [showAddTerm, setShowAddTerm] = useState(false);
+  const [editingDates, setEditingDates] = useState<Term | null>(null);
   const [editingExceptions, setEditingExceptions] = useState<Term | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
@@ -262,7 +266,7 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6 max-w-3xl">
-      <AddTermModal open={showAddTerm} onClose={() => setShowAddTerm(false)} onCreated={() => mutateTerms()} />
+      <EditDatesModal term={editingDates} onClose={() => setEditingDates(null)} onSaved={() => mutateTerms()} />
       <EditExceptionsModal term={editingExceptions} onClose={() => setEditingExceptions(null)} onSaved={() => mutateTerms()} />
       <PageHeader title="Settings" subtitle="Studio configuration" />
 
@@ -444,50 +448,54 @@ export default function SettingsPage() {
         </div>
       </Section>
 
-      {/* Terms */}
+      {/* Terms — always exactly Autumn, Spring, Summer (auto-seeded server-side).
+          Move a term's dates and half-term week forward for the new school
+          year here; there's no "create a term" step. */}
       <Section title="Academic terms" icon={<Calendar size={18} />}>
-        <div className="flex justify-end mb-4">
-          <button onClick={() => setShowAddTerm(true)}
-            className="flex items-center gap-1.5 bg-[var(--sage)] text-white rounded-xl px-4 py-2 text-sm font-bold hover:bg-[var(--sage-dk)]">
-            <Plus size={14} /> Create term
-          </button>
-        </div>
         <div className="space-y-2">
-          {terms.length === 0 && <p className="text-sm py-4 text-center" style={{ color: 'var(--txt4)' }}>No terms yet.</p>}
-          {terms.map(t => (
-            <div key={t.id} className="flex items-center justify-between px-4 py-3 border border-[var(--bd)] rounded-xl">
-              <div>
-                <p className="font-semibold text-sm" style={{ color: 'var(--txt)' }}>{t.name}</p>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--txt3)' }}>
-                  {t.startsOn} – {t.endsOn} · {t.weekCount} lessons
-                </p>
-                {t.exceptionWeeks?.length > 0 && (
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--txt4)' }}>
-                    Break: {t.exceptionWeeks.map(x => `${x.start} – ${x.end}`).join(', ')}
+          {terms.length === 0 && <p className="text-sm py-4 text-center" style={{ color: 'var(--txt4)' }}>Loading…</p>}
+          {SEASON_ORDER.map(name => {
+            const t = terms.find(x => x.name === name);
+            if (!t) return null;
+            return (
+              <div key={t.id} className="flex items-center justify-between px-4 py-3 border border-[var(--bd)] rounded-xl">
+                <div>
+                  <p className="font-semibold text-sm" style={{ color: 'var(--txt)' }}>{t.name}</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--txt3)' }}>
+                    {t.startsOn} – {t.endsOn} · {t.weekCount} weeks
                   </p>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setEditingExceptions(t)} title="Edit zero-class weeks"
-                  className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg border border-[var(--bd2)] hover:bg-[var(--surf)]" style={{ color: 'var(--txt3)' }}>
-                  <Pencil size={12} /> Exceptions
-                </button>
-                <Badge variant={t.status}>{t.status}</Badge>
-                {t.status === 'planned' && (
-                  <button onClick={() => setTermStatus(t.id, 'active')}
-                    className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-[var(--sage-md)] text-[var(--sage)] hover:bg-[var(--sage-lt)]">
-                    Activate
+                  {t.exceptionWeeks?.length > 0 && (
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--txt4)' }}>
+                      Break: {t.exceptionWeeks.map(x => `${x.start} – ${x.end}`).join(', ')}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setEditingDates(t)} title="Edit start/end dates"
+                    className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg border border-[var(--bd2)] hover:bg-[var(--surf)]" style={{ color: 'var(--txt3)' }}>
+                    <Pencil size={12} /> Dates
                   </button>
-                )}
-                {t.status === 'active' && (
-                  <button onClick={() => setTermStatus(t.id, 'closed')}
-                    className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-[var(--bd2)] text-[var(--txt3)] hover:bg-[var(--surf)]">
-                    Close
+                  <button onClick={() => setEditingExceptions(t)} title="Edit half-term / break weeks"
+                    className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg border border-[var(--bd2)] hover:bg-[var(--surf)]" style={{ color: 'var(--txt3)' }}>
+                    <Pencil size={12} /> Half-term
                   </button>
-                )}
+                  <Badge variant={t.status}>{t.status}</Badge>
+                  {t.status === 'planned' && (
+                    <button onClick={() => setTermStatus(t.id, 'active')}
+                      className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-[var(--sage-md)] text-[var(--sage)] hover:bg-[var(--sage-lt)]">
+                      Activate
+                    </button>
+                  )}
+                  {t.status === 'active' && (
+                    <button onClick={() => setTermStatus(t.id, 'closed')}
+                      className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-[var(--bd2)] text-[var(--txt3)] hover:bg-[var(--surf)]">
+                      Close
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Section>
     </div>
