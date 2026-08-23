@@ -48,7 +48,7 @@ function makeService(opts: { dedupeExists?: boolean } = {}) {
       transaction: async (fn: (tx: unknown) => unknown) => fn(tx),
     },
   };
-  return { service: new BillingService(db as never), inserted };
+  return { service: new BillingService(db as never, { trigger: async () => {} } as never), inserted };
 }
 
 jest.mock('@music-life/db', () => {

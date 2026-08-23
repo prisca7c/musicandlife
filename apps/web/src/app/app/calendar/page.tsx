@@ -15,7 +15,7 @@ import { AssignStudentsModal } from '@/components/assign-students-modal';
 import { SectionTabs } from '@/components/section-tabs';
 import { lessonRate } from '@music-life/types';
 import { useInstruments } from '@/lib/use-instruments';
-import { ChevronDown, ChevronLeft, ChevronRight, Users, Check, X, Repeat, PoundSterling, Shuffle, Pencil, Copy, Trash2, ListFilter } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Users, Check, X, Repeat, PoundSterling, Shuffle, Pencil, Copy, Trash2, ListFilter, Send } from 'lucide-react';
 
 interface Lesson {
   id: string; startsAt: string; duration: number; status: string; notes: string | null;
@@ -1248,12 +1248,15 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
   const [deleteSeries, setDeleteSeries] = useState(false);
   const [deleteScope, setDeleteScope] = useState<'all' | 'until'>('all');
   const [deleteUntilDate, setDeleteUntilDate] = useState('');
+  const [sendingInvoice, setSendingInvoice] = useState(false);
+  const [invoiceSent, setInvoiceSent] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   useEffect(() => {
     setShowReschedule(false); setActionError(''); setShowSub(false); setSubTeacherId(''); setShowClone(false);
     setApplyToSeries(false); setSeriesFromMode('now'); setSeriesFromDate('');
     setShowDelete(false); setDeleteSeries(false); setDeleteScope('all'); setDeleteUntilDate('');
+    setInvoiceSent(false);
     if (lesson) {
       // Prefill date + time in the studio zone so they match what's shown elsewhere
       // and round-trip correctly (the backend interprets the naive value as studio-local).
@@ -1289,6 +1292,23 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Could not cancel lesson');
     } finally { setSaving(false); }
+  }
+
+  async function sendInvoiceForLesson() {
+    if (!lesson!.student) return;
+    setSendingInvoice(true); setActionError('');
+    try {
+      const student = await apiFetch<{ familyId: string }>(`/students/${lesson!.student.id}`, { token: tok() });
+      const day = studioDayString(lesson!.startsAt);
+      const inv = await apiFetch<{ id: string }>('/invoices', {
+        method: 'POST', token: tok(),
+        body: JSON.stringify({ familyId: student.familyId, mode: 'per_lesson', itemizeLessons: true, periodStart: day, periodEnd: day }),
+      });
+      await apiFetch(`/invoices/${inv.id}/send`, { method: 'POST', token: tok() });
+      setInvoiceSent(true);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not send invoice');
+    } finally { setSendingInvoice(false); }
   }
 
   async function reinstateLesson() {
@@ -1423,6 +1443,14 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
               style={{ color: showDelete ? 'var(--coral)' : 'var(--txt3)' }}>
               <Trash2 size={15} />
             </button>
+            {canManage && lesson.student && (
+              <button onClick={sendInvoiceForLesson} disabled={saving || deleting || sendingInvoice || invoiceSent}
+                title={invoiceSent ? 'Invoice sent' : 'Send invoice for this lesson'} aria-label="Send invoice for this lesson"
+                className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--surf)] disabled:opacity-40"
+                style={{ color: invoiceSent ? 'var(--sage)' : 'var(--txt3)' }}>
+                {invoiceSent ? <Check size={15} /> : <Send size={15} />}
+              </button>
+            )}
           </div>
         )}
 
@@ -1763,10 +1791,10 @@ export default function CalendarPage() {
   const { data: lessonsRaw = [], mutate } = useApi<Lesson[]>(lessonsQuery);
   const load = () => mutate();
 
-  // Half-term/holiday exception weeks close the whole studio, so the calendar
-  // marks them off visually (diagonal stripes + label) rather than just
-  // silently having no lessons that week — a blank week reads as "nothing's
-  // been booked yet", not "we don't run classes this week".
+  // Half-term/holiday exception weeks don't block booking — students and
+  // teachers sometimes arrange makeup lessons over a break — but the calendar
+  // still marks them off visually (diagonal stripes + label) as a warning
+  // that the studio doesn't normally run classes that week.
   const { data: allTerms = [] } = useApi<{ id: string; name: string; exceptionWeeks: { start: string; end: string }[] }[]>('/terms');
   function exceptionLabel(dStr: string): string | null {
     for (const t of allTerms) {
@@ -2185,9 +2213,10 @@ export default function CalendarPage() {
                       which can show a different number than the studio-zone day
                       this column's lessons belong to. */}
                   <div className={`text-xl font-bold mt-0.5 ${isToday ? 'text-[var(--sage)]' : 'text-[var(--txt)]'}`}>{Number(dStr.slice(8, 10))}</div>
-                  {exception ? (
-                    <div className="text-[9px] font-bold mt-0.5 uppercase tracking-wide" style={{ color: 'var(--txt4)' }}>Closed</div>
-                  ) : count > 0 && (
+                  {exception && (
+                    <div className="text-[9px] font-bold mt-0.5 uppercase tracking-wide" style={{ color: 'var(--txt4)' }}>Half term</div>
+                  )}
+                  {count > 0 && (
                     <div className="text-[9px] font-bold mt-0.5" style={{ color: 'var(--txt4)' }}>
                       {count} lesson{count !== 1 ? 's' : ''}
                     </div>
@@ -2228,52 +2257,49 @@ export default function CalendarPage() {
                     </div>
                   ))}
 
-                  {exception ? (
-                    /* Half-term/holiday week — blocked off entirely. Diagonal
-                       stripes read as "closed" at a glance; no hour lines,
-                       availability bands, or click-to-add slots render
-                       underneath, since the server also refuses any lesson
-                       booked into this week. */
-                    <div className="absolute inset-0 flex items-center justify-center text-center px-2"
+                  {/* Availability bands — shaded hours a teacher is free to teach.
+                      Admin only sees these once a specific teacher is filtered
+                      (otherwise every teacher's hours would blend together);
+                      a teacher always sees their own windows. */}
+                  {(role === 'teacher' || !!filterTeacherId) && weekAvailabilityBands(di).map((b, bi) => (
+                    <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
+                      style={{ top: b.top, height: b.height, background: hexToRgba('#3D7A55', 0.09), borderLeft: '2px solid rgba(61,122,85,0.35)' }} />
+                  ))}
+
+                  {/* Half-hour guide lines (lighter) */}
+                  {HOURS.map((h, hi) => (
+                    <div key={`h${h}`} className="absolute inset-x-0 border-t border-dashed"
+                      style={{ top: weekOffsets[hi]! + weekHourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
+                  ))}
+
+                  {/* Clickable hour slots (behind lessons) — still bookable during a
+                      half-term/holiday week, since makeup lessons sometimes get
+                      arranged then. The stripe overlay below is only a visual
+                      warning that the studio doesn't normally run classes. */}
+                  {HOURS.map((h, hi) => (
+                    <div key={`slot${h}`}
+                      className="absolute inset-x-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
+                      style={{ top: weekOffsets[hi], height: weekHourHeights[hi] }}
+                      onClick={() => openSlot(di, h)}>
+                      <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
+                    </div>
+                  ))}
+
+                  {/* Lesson blocks */}
+                  {layout.map(l => (
+                    <LessonBlock key={l.id} lesson={l} onClick={() => setSelectedLesson(l)} />
+                  ))}
+
+                  {exception && (
+                    <div className="absolute inset-0 pointer-events-none flex items-start justify-center pt-1"
                       style={{
-                        background: 'repeating-linear-gradient(135deg, rgba(148,138,120,0.10) 0px, rgba(148,138,120,0.10) 8px, transparent 8px, transparent 16px)',
+                        background: 'repeating-linear-gradient(135deg, rgba(148,138,120,0.08) 0px, rgba(148,138,120,0.08) 8px, transparent 8px, transparent 16px)',
                       }}>
-                      <span className="text-[10px] font-bold uppercase tracking-wide leading-tight" style={{ color: 'var(--txt4)' }}>
+                      <span className="text-[9px] font-bold uppercase tracking-wide leading-tight px-1.5 py-0.5 rounded"
+                        style={{ color: 'var(--txt4)', background: 'rgba(255,255,255,0.85)' }}>
                         {exception}
                       </span>
                     </div>
-                  ) : (
-                    <>
-                      {/* Availability bands — shaded hours a teacher is free to teach.
-                          Admin only sees these once a specific teacher is filtered
-                          (otherwise every teacher's hours would blend together);
-                          a teacher always sees their own windows. */}
-                      {(role === 'teacher' || !!filterTeacherId) && weekAvailabilityBands(di).map((b, bi) => (
-                        <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
-                          style={{ top: b.top, height: b.height, background: hexToRgba('#3D7A55', 0.09), borderLeft: '2px solid rgba(61,122,85,0.35)' }} />
-                      ))}
-
-                      {/* Half-hour guide lines (lighter) */}
-                      {HOURS.map((h, hi) => (
-                        <div key={`h${h}`} className="absolute inset-x-0 border-t border-dashed"
-                          style={{ top: weekOffsets[hi]! + weekHourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
-                      ))}
-
-                      {/* Clickable hour slots (behind lessons) */}
-                      {HOURS.map((h, hi) => (
-                        <div key={`slot${h}`}
-                          className="absolute inset-x-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
-                          style={{ top: weekOffsets[hi], height: weekHourHeights[hi] }}
-                          onClick={() => openSlot(di, h)}>
-                          <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
-                        </div>
-                      ))}
-
-                      {/* Lesson blocks */}
-                      {layout.map(l => (
-                        <LessonBlock key={l.id} lesson={l} onClick={() => setSelectedLesson(l)} />
-                      ))}
-                    </>
                   )}
 
                   {/* "Now" line for today */}
@@ -2312,9 +2338,10 @@ export default function CalendarPage() {
                     <div key={col.id ?? 'unassigned'}
                       className="border-r border-[var(--bd)] last:border-r-0 px-2 py-2.5 text-center bg-[var(--surf)]">
                       <div className="text-[12px] font-bold truncate" style={{ color: 'var(--txt)' }}>{col.name}</div>
-                      {exception ? (
-                        <div className="text-[9px] font-bold mt-0.5 uppercase tracking-wide" style={{ color: 'var(--txt4)' }}>Closed</div>
-                      ) : count > 0 && (
+                      {exception && (
+                        <div className="text-[9px] font-bold mt-0.5 uppercase tracking-wide" style={{ color: 'var(--txt4)' }}>Half term</div>
+                      )}
+                      {count > 0 && (
                         <div className="text-[9px] font-bold mt-0.5" style={{ color: 'var(--txt4)' }}>
                           {count} lesson{count !== 1 ? 's' : ''}
                         </div>
@@ -2346,45 +2373,47 @@ export default function CalendarPage() {
                         </div>
                       ))}
 
-                      {exception ? (
-                        <div className="absolute inset-0 flex items-center justify-center text-center px-2"
-                          style={{ background: 'repeating-linear-gradient(135deg, rgba(148,138,120,0.10) 0px, rgba(148,138,120,0.10) 8px, transparent 8px, transparent 16px)' }}>
+                      {HOURS.map((h, hi) => (
+                        <div key={`h${h}`} className="absolute inset-x-0 border-t border-dashed"
+                          style={{ top: dayOffsets[hi]! + dayHourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
+                      ))}
+                      {/* Availability bands — this teacher's free-to-teach hours, in their
+                          colour. Admin only sees these once a specific teacher is
+                          filtered; a teacher always sees their own. */}
+                      {(role === 'teacher' || !!filterTeacherId) && teacherAvailabilityBands(col.id).map((b, bi) => (
+                        <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
+                          style={{ top: b.top, height: b.height, background: hexToRgba(teacherColor(col.id), 0.1), borderLeft: `2px solid ${hexToRgba(teacherColor(col.id), 0.4)}` }}>
+                          <span className="absolute left-1.5 top-1 text-[8px] font-bold uppercase tracking-wide pointer-events-none"
+                            style={{ color: teacherColor(col.id), opacity: 0.55 }}>Available</span>
+                        </div>
+                      ))}
+
+                      {/* Clickable hour slots — still bookable during a half-term/
+                          holiday week; the stripe overlay below is a visual warning
+                          only, since makeup lessons sometimes get arranged then. */}
+                      {HOURS.map((h, hi) => (
+                        <div key={`slot${h}`}
+                          className="absolute inset-x-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
+                          style={{ top: dayOffsets[hi], height: dayHourHeights[hi] }}
+                          onClick={() => openSlotForDay(h)}>
+                          <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
+                        </div>
+                      ))}
+
+                      {layout.map(l => (
+                        <LessonBlock key={l.id} lesson={l} onClick={() => setSelectedLesson(l)} />
+                      ))}
+
+                      {exception && (
+                        <div className="absolute inset-0 pointer-events-none flex items-start justify-center pt-1"
+                          style={{ background: 'repeating-linear-gradient(135deg, rgba(148,138,120,0.08) 0px, rgba(148,138,120,0.08) 8px, transparent 8px, transparent 16px)' }}>
                           {ci === 0 && (
-                            <span className="text-[10px] font-bold uppercase tracking-wide leading-tight" style={{ color: 'var(--txt4)' }}>
+                            <span className="text-[9px] font-bold uppercase tracking-wide leading-tight px-1.5 py-0.5 rounded"
+                              style={{ color: 'var(--txt4)', background: 'rgba(255,255,255,0.85)' }}>
                               {exception}
                             </span>
                           )}
                         </div>
-                      ) : (
-                        <>
-                          {HOURS.map((h, hi) => (
-                            <div key={`h${h}`} className="absolute inset-x-0 border-t border-dashed"
-                              style={{ top: dayOffsets[hi]! + dayHourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
-                          ))}
-                          {/* Availability bands — this teacher's free-to-teach hours, in their
-                              colour. Admin only sees these once a specific teacher is
-                              filtered; a teacher always sees their own. */}
-                          {(role === 'teacher' || !!filterTeacherId) && teacherAvailabilityBands(col.id).map((b, bi) => (
-                            <div key={`av${bi}`} className="absolute inset-x-0 pointer-events-none"
-                              style={{ top: b.top, height: b.height, background: hexToRgba(teacherColor(col.id), 0.1), borderLeft: `2px solid ${hexToRgba(teacherColor(col.id), 0.4)}` }}>
-                              <span className="absolute left-1.5 top-1 text-[8px] font-bold uppercase tracking-wide pointer-events-none"
-                                style={{ color: teacherColor(col.id), opacity: 0.55 }}>Available</span>
-                            </div>
-                          ))}
-
-                          {HOURS.map((h, hi) => (
-                            <div key={`slot${h}`}
-                              className="absolute inset-x-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
-                              style={{ top: dayOffsets[hi], height: dayHourHeights[hi] }}
-                              onClick={() => openSlotForDay(h)}>
-                              <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
-                            </div>
-                          ))}
-
-                          {layout.map(l => (
-                            <LessonBlock key={l.id} lesson={l} onClick={() => setSelectedLesson(l)} />
-                          ))}
-                        </>
                       )}
 
                       {isAnchorToday && (() => {
@@ -2452,7 +2481,7 @@ export default function CalendarPage() {
                       : inMonth ? '#fff' : 'var(--surf)',
                     display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start',
                   }}
-                  title={exception ?? 'Open this day'}
+                  title={exception ? `${exception} — booking still allowed` : 'Open this day'}
                 >
                   <div className="flex items-center justify-between mb-1">
                     {/* dayStr (studio-zone) is what dayList is filtered by —
@@ -2461,11 +2490,14 @@ export default function CalendarPage() {
                     <span className={`text-xs font-bold ${isToday ? 'text-white bg-[var(--sage)] rounded-full w-5 h-5 flex items-center justify-center' : inMonth ? 'text-[var(--txt2)]' : 'text-[var(--txt4)]'}`}>
                       {Number(dayStr.slice(8, 10))}
                     </span>
-                    {exception ? (
-                      <span className="text-[8px] font-bold uppercase tracking-wide" style={{ color: 'var(--txt4)' }}>Closed</span>
-                    ) : dayList.length > 0 && (
-                      <span className="text-[9px] font-bold" style={{ color: 'var(--txt4)' }}>{dayList.length}</span>
-                    )}
+                    <span className="flex items-center gap-1">
+                      {exception && (
+                        <span className="text-[8px] font-bold uppercase tracking-wide" style={{ color: 'var(--txt4)' }}>Half term</span>
+                      )}
+                      {dayList.length > 0 && (
+                        <span className="text-[9px] font-bold" style={{ color: 'var(--txt4)' }}>{dayList.length}</span>
+                      )}
+                    </span>
                   </div>
                   {/* Chips match the week view's lesson blocks exactly: left rail
                       (attendance + paid stacked), two-line content. Every lesson

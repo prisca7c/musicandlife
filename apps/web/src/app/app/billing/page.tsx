@@ -28,8 +28,22 @@ interface Invoice {
   id: string; number: string; status: string; total: number; issuedOn: string; dueDate: string;
   mode: string; family: { id: string; name: string } | null;
 }
-interface Family { id: string; name: string; }
+interface Family {
+  id: string; name: string; contactName?: string | null;
+  students?: { id: string; firstName: string; lastName: string }[];
+}
+interface Term { id: string; name: string; startsOn: string; endsOn: string; }
 interface LineItem { description: string; amount: string; }
+
+// Two families both named "Mistry Family" are indistinguishable in a plain
+// name dropdown — lead with the parent/adult's actual name (contactName),
+// and list the kids so the picker still disambiguates when contactName isn't
+// set either.
+function familyLabel(f: Family): string {
+  const who = f.contactName?.trim() || f.name;
+  const kids = (f.students ?? []).map(s => s.firstName).filter(Boolean).join(', ');
+  return kids ? `${who} (${kids})` : who;
+}
 
 function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [families, setFamilies] = useState<Family[]>([]);
@@ -37,6 +51,10 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
   const [mode, setMode] = useState<'monthly_statement' | 'per_lesson' | 'custom'>('monthly_statement');
   const [lineItems, setLineItems] = useState<LineItem[]>([{ description: '', amount: '' }]);
   const [splitByClass, setSplitByClass] = useState(false);
+  const [terms, setTerms] = useState<Term[]>([]);
+  const [termId, setTermId] = useState('');
+  const [periodStart, setPeriodStart] = useState('');
+  const [periodEnd, setPeriodEnd] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
@@ -44,10 +62,18 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
   useEffect(() => {
     if (open) {
       apiFetch<Family[]>('/families', { token: tok() }).then(setFamilies).catch(() => {});
+      apiFetch<Term[]>('/terms', { token: tok() }).then(setTerms).catch(() => {});
       setFamilyId(''); setMode('monthly_statement');
       setLineItems([{ description: '', amount: '' }]); setSplitByClass(false); setError('');
+      setTermId(''); setPeriodStart(''); setPeriodEnd('');
     }
   }, [open]);
+
+  function pickTerm(id: string) {
+    setTermId(id);
+    const t = terms.find(x => x.id === id);
+    if (t) { setPeriodStart(t.startsOn); setPeriodEnd(t.endsOn); }
+  }
 
   function addLineItem() {
     setLineItems(items => [...items, { description: '', amount: '' }]);
@@ -67,15 +93,15 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
     setSaving(true); setError('');
     try {
       const apiMode = mode === 'custom' ? 'per_lesson' : mode;
-      const periodStart = (e.currentTarget.elements.namedItem('periodStart') as HTMLInputElement)?.value || undefined;
-      const periodEnd = (e.currentTarget.elements.namedItem('periodEnd') as HTMLInputElement)?.value || undefined;
+      const start = periodStart || undefined;
+      const end = periodEnd || undefined;
 
       // "Separate invoice per class" raises one invoice per enrolment for the
       // period instead of a single combined statement. Not available for the
       // custom (manual line items) flow, which has no lessons to split.
       if (splitByClass && mode !== 'custom') {
         const res = await apiFetch<{ invoices: unknown[] }>('/invoices/split-by-class', {
-          method: 'POST', token: tok(), body: JSON.stringify({ familyId, mode: apiMode, periodStart, periodEnd }),
+          method: 'POST', token: tok(), body: JSON.stringify({ familyId, mode: apiMode, periodStart: start, periodEnd: end, termId: termId || undefined }),
         });
         if (!res.invoices?.length) throw new Error('No unbilled lessons in this period to invoice.');
         onCreated(); onClose();
@@ -88,8 +114,9 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
           mode: apiMode,
           // Custom invoices are manual-only — don't auto-pull the period's lessons.
           itemizeLessons: mode !== 'custom',
-          periodStart,
-          periodEnd,
+          termId: termId || undefined,
+          periodStart: start,
+          periodEnd: end,
           notes: (e.currentTarget.elements.namedItem('notes') as HTMLTextAreaElement)?.value || undefined,
         }),
       });
@@ -124,12 +151,25 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
         <div>
           <label className="ui-label">Family <span style={{ color: 'var(--coral)' }}>*</span></label>
           <SearchableSelect
-            options={families.map(f => ({ value: f.id, label: f.name }))}
+            options={families.map(f => ({ value: f.id, label: familyLabel(f) }))}
             value={familyId}
             onChange={setFamilyId}
             placeholder="Select family…"
           />
         </div>
+
+        {mode !== 'custom' && terms.length > 0 && (
+          <div>
+            <label className="ui-label">Term</label>
+            <SearchableSelect
+              options={terms.map(t => ({ value: t.id, label: t.name }))}
+              value={termId}
+              onChange={pickTerm}
+              placeholder="No term — use dates below…"
+              emptyLabel="No term — use dates below"
+            />
+          </div>
+        )}
 
         {/* Mode tabs */}
         <div>
@@ -160,11 +200,13 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="ui-label">Period start</label>
-              <input name="periodStart" type="date" className="ui-input" />
+              <input name="periodStart" type="date" className="ui-input" value={periodStart}
+                onChange={e => { setPeriodStart(e.target.value); setTermId(''); }} />
             </div>
             <div>
               <label className="ui-label">Period end</label>
-              <input name="periodEnd" type="date" className="ui-input" />
+              <input name="periodEnd" type="date" className="ui-input" value={periodEnd}
+                onChange={e => { setPeriodEnd(e.target.value); setTermId(''); }} />
             </div>
           </div>
         )}
@@ -202,7 +244,8 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
                       onChange={e => updateLineItem(idx, 'amount', e.target.value)}
                       type="number" min="0.01" max="100000" step="0.01"
                       placeholder="0.00"
-                      className="ui-input pl-6 w-full"
+                      className="ui-input w-full"
+                      style={{ paddingLeft: '1.5rem' }}
                     />
                   </div>
                   {lineItems.length > 1 && (
@@ -307,7 +350,7 @@ function RecordPaymentModal({ open, onClose, onCreated }: { open: boolean; onClo
         <div>
           <label className="ui-label">Family <span style={{ color: 'var(--coral)' }}>*</span></label>
           <SearchableSelect
-            options={families.map(f => ({ value: f.id, label: f.name }))}
+            options={families.map(f => ({ value: f.id, label: familyLabel(f) }))}
             value={familyId}
             onChange={setFamilyId}
             placeholder="Select family…"

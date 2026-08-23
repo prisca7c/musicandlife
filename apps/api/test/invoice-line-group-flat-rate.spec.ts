@@ -18,7 +18,7 @@ function makeService() {
       update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
     },
   };
-  const svc = new BillingService(db as never);
+  const svc = new BillingService(db as never, { trigger: async () => {} } as never);
   return { svc, inserted };
 }
 

@@ -24,6 +24,7 @@ export type TriggerEvent =
   | 'lesson.booked'
   | 'invoice.sent'
   | 'invoice.preview_summary'
+  | 'payment.receipt'
   | 'newsletter.event'
   | 'message.received'
   | 'payroll.approved';
@@ -174,6 +175,23 @@ export const TEMPLATES: Record<string, (ctx: TriggerContext) => { subject: strin
       bodyHtml: `<p style="margin:0 0 12px">The following auto-invoices are scheduled to go out soon.</p><p style="margin:0">${ctx.body}</p>`,
     }),
   }),
+  // Fires once a payment actually settles (recordPayment) — a staff member
+  // recording cash/bank transfer/card, or a bank statement auto-matching a
+  // family's claimed transfer. Doubles as the family's receipt: keep it
+  // self-contained (amount, method, date, reference) since some families only
+  // ever see this and never open the invoice itself.
+  'payment.receipt': (ctx) => ({
+    subject: 'Payment received - receipt',
+    html: brandedEmail({
+      previewText: "We've received your payment - here's your receipt.",
+      heading: 'Payment received',
+      bodyHtml:
+        `<p style="margin:0 0 12px">Thank you - we've received your payment. Here's your receipt for your records:</p>` +
+        `<p style="margin:0">${ctx.body}</p>`,
+      cta: { label: 'View in your portal', url: BRAND.portalUrl },
+      footnote: 'Keep this email as your receipt. Need a copy later? Just reply and we can resend it.',
+    }),
+  }),
   'newsletter.event': (ctx) => ({
     subject: ctx.subject ?? "What's on at Music & Life",
     html: brandedEmail({
@@ -203,6 +221,7 @@ export const DEFAULT_RULES: Array<{
   { triggerEvent: 'lesson.booked', templateId: 'lesson.booked', channels: ['email'] },
   { triggerEvent: 'invoice.sent', templateId: 'invoice.sent', channels: ['email'] },
   { triggerEvent: 'invoice.preview_summary', templateId: 'invoice.preview_summary', channels: ['email'] },
+  { triggerEvent: 'payment.receipt', templateId: 'payment.receipt', channels: ['email'] },
   { triggerEvent: 'newsletter.event', templateId: 'newsletter.event', channels: ['email'] },
   { triggerEvent: 'message.received', templateId: 'message.received', channels: ['email'] },
 ];

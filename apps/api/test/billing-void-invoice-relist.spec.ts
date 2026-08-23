@@ -20,7 +20,7 @@ function makeService(opts: {
       },
     },
   };
-  return new BillingService(db as never);
+  return new BillingService(db as never, { trigger: async () => {} } as never);
 }
 
 const call = (svc: BillingService, studentIds: string[]) =>

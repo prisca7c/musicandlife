@@ -5,6 +5,7 @@ import {
   families, students, enrollments, lessonCredits, lessons, organizations, attendance,
 } from '@music-life/db';
 import { DbService } from '../db/db.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import type { CreateInvoiceDto } from './dto/create-invoice.dto';
 import type { RecordPaymentDto } from './dto/record-payment.dto';
 
@@ -71,7 +72,10 @@ export function planPrepaidCredits(
 export class BillingService {
   private readonly logger = new Logger(BillingService.name);
 
-  constructor(private readonly db: DbService) {}
+  constructor(
+    private readonly db: DbService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   // ─── Invoices ──────────────────────────────────────────────────────────────
   async getInvoices(orgId: string, familyId?: string) {
@@ -1107,7 +1111,41 @@ export class BillingService {
         .catch(err => this.logger.warn(`Credit allocation failed for payment ${payment.id}: ${err}`));
     }
 
+    this.sendReceipt(orgId, payment)
+      .catch(err => this.logger.warn(`Receipt email failed for payment ${payment.id}: ${err}`));
+
     return payment;
+  }
+
+  // A receipt for every settled payment, regardless of how it landed — a
+  // staff member recording cash/bank transfer at the desk, a bank statement
+  // auto-matching a family's self-claimed transfer, or pay-at-lesson. Some
+  // families never open the invoice itself, so this is self-contained.
+  private async sendReceipt(orgId: string, payment: { id: string; familyId: string; amount: number; method: string; invoiceId: string | null; createdAt: Date }) {
+    const family = await this.db.db.query.families.findFirst({
+      where: eq(families.id, payment.familyId),
+      columns: { email: true, contactName: true, name: true },
+    });
+    const email = family?.email?.trim();
+    if (!email) return;
+
+    const inv = payment.invoiceId
+      ? await this.db.db.query.invoices.findFirst({ where: eq(invoices.id, payment.invoiceId), columns: { number: true } })
+      : null;
+
+    const amount = `£${(payment.amount / 100).toFixed(2)}`;
+    const methodLabel = payment.method.replace(/_/g, ' ');
+    const date = payment.createdAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    const lines = [
+      `<strong>Amount:</strong> ${amount}`,
+      `<strong>Method:</strong> ${methodLabel}`,
+      `<strong>Date:</strong> ${date}`,
+      inv ? `<strong>Invoice:</strong> ${inv.number}` : null,
+      `<strong>Reference:</strong> ${payment.id}`,
+    ].filter(Boolean);
+    const body = lines.map(l => `<p style="margin:0 0 4px">${l}</p>`).join('');
+
+    await this.notifications.trigger('payment.receipt', { orgId, email, body });
   }
 
   // Postgres unique-violation SQLSTATE is 23505 (surfaced by postgres-js on err.code).

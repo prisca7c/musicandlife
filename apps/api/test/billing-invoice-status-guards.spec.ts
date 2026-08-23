@@ -23,7 +23,7 @@ function makeService(invoice: { id: string; status: string; total: number; famil
       insert: () => ({ values: () => ({ returning: async () => [{ id: 'li-1' }] }) }),
     },
   };
-  return new BillingService(db as never);
+  return new BillingService(db as never, { trigger: async () => {} } as never);
 }
 
 describe('BillingService — invoice status guards', () => {

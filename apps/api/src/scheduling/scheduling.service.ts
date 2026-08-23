@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and, gte, lte, ne, or, isNull, inArray, sql } from 'drizzle-orm';
-import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, organizations, enrollments, users, invoiceLineItems, invoices, terms } from '@music-life/db';
+import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, organizations, enrollments, users, invoiceLineItems, invoices } from '@music-life/db';
 import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateLessonDto } from './dto/create-lesson.dto';
@@ -307,25 +307,10 @@ export class SchedulingService {
       // Interpret a naive wall-clock ("...T16:00:00") as the studio's local time.
       const startsAt = parseZonedDateTime(dto.startsAt, tz);
 
-      // A term's exception weeks (half-term, holidays) must mean genuinely zero
-      // classes that week — materializeEnrollment already skips them when
-      // auto-generating a recurring series, but that's the only place this was
-      // enforced. Any one-off booking against the same term (admin/teacher "Add
-      // lesson", a family self-booking, confirming a lesson request) could still
-      // land a lesson inside a week the studio doesn't run. Enforce it here too,
-      // at the single choke point every lesson creation passes through.
-      if (dto.termId) {
-        const term = await tx.query.terms.findFirst({ where: eq(terms.id, dto.termId), columns: { exceptionWeeks: true } });
-        const exceptionWeeks = term?.exceptionWeeks ?? [];
-        if (exceptionWeeks.length > 0) {
-          const dayStr = formatInZone(startsAt, tz, { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-CA');
-          const inException = exceptionWeeks.some((ex) => dayStr >= ex.start && dayStr <= ex.end);
-          if (inException) {
-            throw new BadRequestException('This date falls inside a term exception week (no classes) — pick a different date, or edit the term’s exception weeks first.');
-          }
-        }
-      }
-
+      // A term's exception weeks (half-term, holidays) mean the studio doesn't
+      // run its normal classes that week, but students/teachers still sometimes
+      // arrange makeup lessons then — so this is a visual "closed" warning on
+      // the calendar only, never a hard block on booking.
       await this.lockResources(tx, orgId, dto.teacherId, dto.studentId);
       await this.checkConflicts(tx, orgId, startsAt.toISOString(), dto.duration ?? 60, dto.teacherId, undefined, dto.studentId);
 
@@ -340,25 +325,33 @@ export class SchedulingService {
 
     if (opts?.notify !== false) {
       this.notifyBooked(orgId, lesson).catch((e) => this.logger.warn(`lesson.booked notify failed: ${e}`));
+      // The hourly reminder worker only ever catches a lesson starting 24-25h
+      // out — a lesson booked with less than 24h's notice would otherwise never
+      // get a reminder at all (its window has already passed by the time the
+      // worker next runs). Send it immediately instead, right when it's booked.
+      if (lesson.startsAt.getTime() - Date.now() < 24 * 3600000) {
+        this.notifyImmediateReminder(orgId, lesson).catch((e) => this.logger.warn(`lesson.reminder_24h immediate notify failed: ${e}`));
+      }
     }
     return lesson;
   }
 
   /**
    * In-app + email notification when a lesson is put on the calendar by staff
-   * (the admin "Add lesson" dialog, or confirming a lesson request) — the one
-   * creation path that previously told no one. Reaches the teacher and every
-   * portal LOGIN the student's family has (guardians + the student's own
-   * account, if any) — a bare contact email with no login can't receive an
-   * in-app banner, so those still only get the family confirmation flow's
-   * separate email where applicable.
+   * (the admin "Add lesson" dialog, or confirming a lesson request, or a
+   * family self-booking). Reaches the teacher, every portal LOGIN the
+   * student's family has (guardians + the student's own account, if any),
+   * AND the family's plain contact email/the student's own email even when
+   * neither has a login — a family that books and pays without ever
+   * creating a portal account still gets a confirmation, it just won't also
+   * get an in-app banner (there's no account to show one in).
    */
   private async notifyBooked(orgId: string, lesson: { id: string; studentId: string; teacherId: string | null; startsAt: Date; duration: number }) {
     const [student, teacher] = await Promise.all([
       this.db.db.query.students.findFirst({
         where: eq(students.id, lesson.studentId),
-        columns: { firstName: true, lastName: true, studentUserId: true },
-        with: { family: { columns: { id: true } } },
+        columns: { firstName: true, lastName: true, studentUserId: true, email: true },
+        with: { family: { columns: { id: true, email: true } } },
       }),
       lesson.teacherId
         ? this.db.db.query.staffMembers.findFirst({
@@ -380,7 +373,6 @@ export class SchedulingService {
     if (teacher?.userId) recipientUserIds.add(teacher.userId);
     if (student.studentUserId) recipientUserIds.add(student.studentUserId);
     for (const g of familyGuardians) recipientUserIds.add(g.userId);
-    if (recipientUserIds.size === 0) return;
 
     const tz = await this.getOrgTimezone(this.db.db, orgId);
     const when = formatInZone(lesson.startsAt, tz, {
@@ -391,10 +383,53 @@ export class SchedulingService {
     const teacherName = teacher ? esc(`${teacher.firstName} ${teacher.lastName}`) : 'a teacher';
     const body = `${studentName}'s lesson with ${teacherName} is now on ${when} (${lesson.duration} min).`;
 
+    const emailedAlready = new Set<string>();
     for (const userId of recipientUserIds) {
       const recipientUser = await this.db.db.query.users.findFirst({ where: eq(users.id, userId), columns: { email: true } });
+      const email = recipientUser?.email?.trim().toLowerCase();
+      if (email) emailedAlready.add(email);
       await this.notifications.trigger('lesson.booked', {
         orgId, userId, email: recipientUser?.email, body,
+      });
+    }
+
+    // Plain contact emails with no portal login — dedupe against the accounts
+    // already emailed above so a family using the same address for both isn't
+    // sent the confirmation twice.
+    const bareEmails = [student.family?.email, student.email]
+      .map((e) => e?.trim().toLowerCase())
+      .filter((e): e is string => !!e && !emailedAlready.has(e));
+    for (const email of new Set(bareEmails)) {
+      await this.notifications.trigger('lesson.booked', { orgId, email, body });
+    }
+  }
+
+  // A same-day/next-day booking's reminder window (24-25h before start) has
+  // already passed by the time the hourly ReminderWorker next runs, so it
+  // would never get the "your lesson is tomorrow" email — send it right away
+  // instead, mirroring ReminderWorker.scanReminders' consent gate and
+  // recipient logic exactly.
+  private async notifyImmediateReminder(orgId: string, lesson: { studentId: string; startsAt: Date }) {
+    const student = await this.db.db.query.students.findFirst({
+      where: eq(students.id, lesson.studentId),
+      columns: { email: true },
+      with: { family: { columns: { email: true, emailRemindersEnabled: true } } },
+    });
+    if (!student) return;
+    if (student.family && student.family.emailRemindersEnabled === false) return;
+
+    const recipients = [...new Set(
+      [student.family?.email, student.email]
+        .map((e) => e?.trim().toLowerCase())
+        .filter((e): e is string => !!e),
+    )];
+    if (recipients.length === 0) return;
+
+    const tz = await this.getOrgTimezone(this.db.db, orgId);
+    const at = formatInZone(lesson.startsAt, tz, { hour: '2-digit', minute: '2-digit' });
+    for (const email of recipients) {
+      await this.notifications.trigger('lesson.reminder_24h', {
+        orgId, email, body: `Your lesson is on ${formatInZone(lesson.startsAt, tz, { weekday: 'long', day: 'numeric', month: 'long' })} at ${at}.`,
       });
     }
   }
@@ -413,7 +448,7 @@ export class SchedulingService {
     enrollmentId: string,
     opts?: { weeks?: number; fromDate?: string },
     actor?: Actor,
-  ): Promise<{ created: number; skippedExisting: number; skippedConflicts: number; skippedExceptions: number; through: string; weeks: number }> {
+  ): Promise<{ created: number; skippedExisting: number; skippedConflicts: number; through: string; weeks: number }> {
     const weeks = Math.min(Math.max(opts?.weeks ?? RECURRENCE_WINDOW_WEEKS, 1), 520);
 
     const enrollment = await this.db.db.query.enrollments.findFirst({
@@ -490,22 +525,10 @@ export class SchedulingService {
     const windowEnd = new Date(from.getTime() + weeks * 7 * 86400000);
     const occurrences = weeklyOccurrenceStrings(from, weeks, rule.weekday, rule.startTime, tz);
 
-    // A term can mark whole weeks (half-term, holidays) as having zero classes.
-    // "Book term" must skip generating a lesson on any occurrence that falls in
-    // one of those windows, rather than booking a class the studio never runs.
-    let exceptionWeeks: { start: string; end: string }[] = [];
-    if (enrollment.termId) {
-      const term = await this.db.db.query.terms.findFirst({
-        where: eq(terms.id, enrollment.termId),
-        columns: { exceptionWeeks: true },
-      });
-      exceptionWeeks = term?.exceptionWeeks ?? [];
-    }
-    const inException = (instant: Date) => {
-      if (exceptionWeeks.length === 0) return false;
-      const dayStr = formatInZone(instant, tz, { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-CA');
-      return exceptionWeeks.some((ex) => dayStr >= ex.start && dayStr <= ex.end);
-    };
+    // A term's exception weeks (half-term, holidays) are a visual "closed"
+    // warning on the calendar only — "Book term" still generates the normal
+    // weekly occurrence through them, since makeup lessons sometimes get
+    // arranged during a break week.
 
     // Dedup on the canonical SLOT, not the current start time. A lesson occupies
     // its slot via seriesSlotAt, which a reschedule never touches — so moving a
@@ -529,15 +552,11 @@ export class SchedulingService {
       if (!bySlot.has(slot)) bySlot.set(slot, { id: l.id, stamped: !!l.seriesSlotAt });
     }
 
-    let created = 0, skippedExisting = 0, skippedConflicts = 0, skippedExceptions = 0;
+    let created = 0, skippedExisting = 0, skippedConflicts = 0;
     for (const naive of occurrences) {
       const instant = parseZonedDateTime(naive, tz);
       if (endCap && instant.getTime() > endCap.getTime()) break; // occurrences are ascending
       const hit = bySlot.get(instant.getTime());
-      if (!hit && inException(instant)) {
-        skippedExceptions++;
-        continue;
-      }
       if (hit) {
         skippedExisting++;
         // Adopt a legacy/one-off row sitting exactly on this slot (e.g. the first
@@ -573,7 +592,7 @@ export class SchedulingService {
     // reporting the full windowEnd regardless, telling the booker their
     // series ran weeks further than it actually does.
     const through = endCap && endCap.getTime() < windowEnd.getTime() ? endCap : windowEnd;
-    return { created, skippedExisting, skippedConflicts, skippedExceptions, through: through.toISOString(), weeks };
+    return { created, skippedExisting, skippedConflicts, through: through.toISOString(), weeks };
   }
 
   /**

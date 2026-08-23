@@ -220,17 +220,31 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
 }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
-  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  const [terms, setTerms] = useState<{ id: string; name: string; startsOn: string; endsOn: string }[]>([]);
+  const [termId, setTermId] = useState('');
   const lastMonthStart = new Date(); lastMonthStart.setDate(1); lastMonthStart.setMonth(lastMonthStart.getMonth()-1);
   const lastMonthEnd = new Date(); lastMonthEnd.setDate(0);
+  const [periodStart, setPeriodStart] = useState(lastMonthStart.toISOString().split('T')[0]!);
+  const [periodEnd, setPeriodEnd] = useState(lastMonthEnd.toISOString().split('T')[0]!);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  useEffect(() => {
+    if (open) apiFetch<{ id: string; name: string; startsOn: string; endsOn: string }[]>('/terms', { token: tok() }).then(setTerms).catch(() => {});
+  }, [open]);
+
+  function pickTerm(id: string) {
+    setTermId(id);
+    const t = terms.find(x => x.id === id);
+    if (t) { setPeriodStart(t.startsOn); setPeriodEnd(t.endsOn); }
+  }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSaving(true); setError('');
     const f = new FormData(e.currentTarget);
     try {
       const inv = await apiFetch<{id:string}>('/invoices', { method: 'POST', token: tok(), body: JSON.stringify({
-        familyId, mode: f.get('mode'),
-        periodStart: f.get('periodStart') || undefined, periodEnd: f.get('periodEnd') || undefined,
+        familyId, mode: f.get('mode'), termId: termId || undefined,
+        periodStart: periodStart || undefined, periodEnd: periodEnd || undefined,
         notes: f.get('notes') || undefined,
       })});
       onCreated(); onClose();
@@ -255,14 +269,25 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
             <option value="per_lesson">Per lesson</option>
           </select>
         </div>
+        {terms.length > 0 && (
+          <div>
+            <label className="ui-label">Term</label>
+            <select value={termId} onChange={e => pickTerm(e.target.value)} className="ui-input">
+              <option value="">No term — use dates below</option>
+              {terms.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="ui-label">Period start</label>
-            <input name="periodStart" type="date" defaultValue={lastMonthStart.toISOString().split('T')[0]} className="ui-input" />
+            <input name="periodStart" type="date" value={periodStart}
+              onChange={e => { setPeriodStart(e.target.value); setTermId(''); }} className="ui-input" />
           </div>
           <div>
             <label className="ui-label">Period end</label>
-            <input name="periodEnd" type="date" defaultValue={lastMonthEnd.toISOString().split('T')[0]} className="ui-input" />
+            <input name="periodEnd" type="date" value={periodEnd}
+              onChange={e => { setPeriodEnd(e.target.value); setTermId(''); }} className="ui-input" />
           </div>
         </div>
         <div>
@@ -393,7 +418,7 @@ export default function FamilyDetailPage() {
       {family && <AddStudentModal open={showAddStudent} onClose={() => setShowAddStudent(false)}
         familyId={family.id} familyName={family.name} onCreated={load} />}
       {family && <CreateInvoiceModal open={showCreateInvoice} onClose={() => setShowCreateInvoice(false)}
-        familyId={family.id} familyName={family.name} invoiceMode={family.invoiceMode} onCreated={load} />}
+        familyId={family.id} familyName={family.contactName || family.name} invoiceMode={family.invoiceMode} onCreated={load} />}
       {family && <AutoInvoicingSettingsModal open={showInvoicingSettings} onClose={() => setShowInvoicingSettings(false)}
         family={family} onSaved={load} />}
       {family && <MergeFamilyModal open={showMerge} onClose={() => setShowMerge(false)}
@@ -500,7 +525,7 @@ export default function FamilyDetailPage() {
                 {family.guardians.map(g => (
                   <li key={g.id} className="flex justify-between gap-3">
                     <span className="capitalize" style={{ color: 'var(--txt3)' }}>{g.relationship}</span>
-                    <span className="font-medium">{g.user.email}</span>
+                    <span className="font-medium">{g.user?.email ?? '—'}</span>
                   </li>
                 ))}
               </ul>

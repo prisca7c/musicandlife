@@ -26,7 +26,7 @@ function makeService(reReadTotal: number) {
       insert: () => ({ values: () => ({ returning: async () => [inserted] }) }),
     },
   };
-  const svc = new BillingService(db as never);
+  const svc = new BillingService(db as never, { trigger: async () => {} } as never);
   // Stub the two collaborators so we isolate the return-value behaviour.
   Object.assign(svc as object, {
     nextInvoiceNumber: async () => 'INV-1',
