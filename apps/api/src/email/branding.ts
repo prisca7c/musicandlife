@@ -16,7 +16,7 @@ export const BRAND = {
   // a bundled asset, so this has to be an absolute URL on a host that's up.
   logoUrl: 'https://lirico.uk/logo-full-transparent.png',
   website: 'https://www.musicandlife.co.uk',
-  supportEmail: 'office@musicandlife.co.uk',
+  supportEmail: 'academy@musicandlife.co.uk',
   phone: '+44 7848 115 447',
   address: '10 High Street, Pinner HA5 5PW',
   // Colours
@@ -116,9 +116,11 @@ ${preview}
         <p style="margin:0 0 8px;font-family:${FONT};font-size:14px;line-height:20px;font-weight:700;letter-spacing:.3px;color:${BRAND.pine}">
           Music &amp; Life London
         </p>
-        <p style="margin:0 0 6px;font-family:${FONT};font-size:12.5px;line-height:20px;color:${BRAND.muted}">
+        <p style="margin:0 0 2px;font-family:${FONT};font-size:12.5px;line-height:20px;color:${BRAND.muted}">
           <a href="mailto:${BRAND.supportEmail}" style="color:${BRAND.moss};text-decoration:none">${BRAND.supportEmail}</a>
-          &nbsp;&nbsp;&middot;&nbsp;&nbsp; ${BRAND.phone}
+        </p>
+        <p style="margin:0 0 6px;font-family:${FONT};font-size:12.5px;line-height:20px;color:${BRAND.muted};white-space:nowrap">
+          ${BRAND.phone}
         </p>
         <p style="margin:0 0 10px;font-family:${FONT};font-size:12.5px;line-height:20px;color:${BRAND.muted}">
           ${BRAND.address}

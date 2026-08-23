@@ -213,7 +213,10 @@ export function InvoicePDF({
     org?.bankAccountNumber ? `Please pay to:\n${studioName}` : '',
     org?.bankSortCode       ? `Sort code: ${org.bankSortCode}` : '',
     org?.bankAccountNumber  ? `Account no.: ${org.bankAccountNumber}` : '',
-    org?.bankAccountName    ? org.bankAccountName : '',
+    // Only worth a separate line when the account is held under a different
+    // name than the studio itself — otherwise it just repeats studioName,
+    // shown a line up under "Please pay to:".
+    org?.bankAccountName && org.bankAccountName !== studioName ? org.bankAccountName : '',
     org?.invoiceNotes       ? `\n${org.invoiceNotes}` : '',
   ].filter(Boolean).join('\n');
 

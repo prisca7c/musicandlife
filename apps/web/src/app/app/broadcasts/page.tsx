@@ -39,9 +39,27 @@ export default function BroadcastsPage() {
 
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
-  const [audience, setAudience] = useState<Audience>('families');
+  const [audiences, setAudiences] = useState<Audience[]>(['families']);
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // Picking "Everyone" selects (and clears down to) just that; picking any
+  // individual audience drops "Everyone" from the selection so the two never
+  // sit checked together.
+  function toggleAudience(a: Audience) {
+    if (a === 'everyone') {
+      setAudiences(prev => prev.includes('everyone') ? [] : ['everyone']);
+      return;
+    }
+    setAudiences(prev => {
+      const rest = prev.filter(x => x !== 'everyone');
+      return rest.includes(a) ? rest.filter(x => x !== a) : [...rest, a];
+    });
+  }
+
+  const audienceSummary = audiences.length === 0
+    ? 'no one'
+    : audiences.map(a => AUDIENCE_LABEL[a].split(' ')[0]).join(', ').toLowerCase();
 
   const [testing, setTesting] = useState(false);
   const [sending, setSending] = useState(false);
@@ -60,26 +78,28 @@ export default function BroadcastsPage() {
     return f;
   }
 
-  // A filtered headcount can't be read off the static audience counts, so ask
-  // the API. Unfiltered, the cached counts answer it for free.
-  const [filteredCount, setFilteredCount] = useState<number | null>(null);
+  // A multi-audience or filtered headcount can't be read off the static
+  // per-audience counts, so always ask the API for the real union/intersection
+  // total once at least one audience is picked.
+  const [previewCount, setPreviewCount] = useState<number | null>(null);
   useEffect(() => {
-    if (!hasFilters) { setFilteredCount(null); return; }
+    if (audiences.length === 0) { setPreviewCount(0); return; }
     let cancelled = false;
+    setPreviewCount(null);
     (async () => {
       try {
         const res = await apiFetch<{ total: number }>('/broadcasts/preview', {
           method: 'POST', token: tok(),
-          body: JSON.stringify({ audience, filter: activeFilter() }),
+          body: JSON.stringify({ audience: audiences, filter: activeFilter() }),
         });
-        if (!cancelled) setFilteredCount(res.total);
-      } catch { if (!cancelled) setFilteredCount(0); }
+        if (!cancelled) setPreviewCount(res.total);
+      } catch { if (!cancelled) setPreviewCount(0); }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audience, filters.instrument, filters.lessonType, filters.groupName, filters.teacherId, hasFilters]);
+  }, [audiences, filters.instrument, filters.lessonType, filters.groupName, filters.teacherId]);
 
-  const recipientCount = hasFilters ? (filteredCount ?? 0) : (counts?.[audience] ?? 0);
+  const recipientCount = previewCount ?? 0;
 
   async function sendTest() {
     setTesting(true); setNotice(null);
@@ -99,7 +119,7 @@ export default function BroadcastsPage() {
     try {
       const res = await apiFetch<{ sent: number; failed: number; total: number }>('/broadcasts/send', {
         method: 'POST', token: tok(),
-        body: JSON.stringify({ subject, body, audience, filter: activeFilter(), confirm: true }),
+        body: JSON.stringify({ subject, body, audience: audiences, filter: activeFilter(), confirm: true }),
       });
       setConfirmOpen(false);
       const failedNote = res.failed > 0 ? ` ${res.failed} could not be delivered.` : '';
@@ -141,13 +161,13 @@ export default function BroadcastsPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Send to</label>
+            <label className="block text-sm font-medium mb-1">Send to <span className="text-gray-400 font-normal">(choose one or more)</span></label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {(Object.keys(AUDIENCE_LABEL) as Audience[]).map(a => (
                 <label key={a} className={`flex items-center justify-between gap-2 border rounded px-3 py-2 text-sm cursor-pointer ${
-                  audience === a ? 'border-[var(--sage)] ring-1 ring-[var(--sage)] bg-[var(--sage)]/5' : 'hover:bg-gray-50'}`}>
+                  audiences.includes(a) ? 'border-[var(--sage)] ring-1 ring-[var(--sage)] bg-[var(--sage)]/5' : 'hover:bg-gray-50'}`}>
                   <span className="flex items-center gap-2">
-                    <input type="radio" name="audience" checked={audience === a} onChange={() => setAudience(a)} />
+                    <input type="checkbox" checked={audiences.includes(a)} onChange={() => toggleAudience(a)} />
                     {AUDIENCE_LABEL[a]}
                   </span>
                   <span className="text-xs text-gray-400">{counts ? `${counts[a]}` : '…'}</span>
@@ -213,7 +233,7 @@ export default function BroadcastsPage() {
 
             {hasFilters && (
               <p className="text-xs mt-3 font-medium" style={{ color: recipientCount === 0 ? 'var(--coral)' : 'var(--sage)' }}>
-                {filteredCount === null
+                {previewCount === null
                   ? 'Counting recipients…'
                   : recipientCount === 0
                     ? 'No one matches this combination — nothing would be sent.'
@@ -228,9 +248,9 @@ export default function BroadcastsPage() {
             className="rounded px-4 py-2 text-sm border font-medium hover:bg-gray-50 disabled:opacity-50">
             {testing ? 'Sending…' : 'Send test to me'}
           </button>
-          <button onClick={() => setConfirmOpen(true)} disabled={!ready || recipientCount === 0}
+          <button onClick={() => setConfirmOpen(true)} disabled={!ready || audiences.length === 0 || recipientCount === 0}
             className="inline-flex items-center gap-2 bg-[var(--sage)] text-white rounded px-4 py-2 text-sm font-medium hover:bg-[var(--sage-dk)] disabled:opacity-50">
-            <Send size={15} /> Send to {AUDIENCE_LABEL[audience].split(' ')[0].toLowerCase()} ({recipientCount})
+            <Send size={15} /> Send to {audienceSummary} ({recipientCount})
           </button>
           <span className="text-xs text-gray-400">Always send a test to yourself first.</span>
         </div>
@@ -239,7 +259,7 @@ export default function BroadcastsPage() {
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="Send this email?">
         <p className="text-sm text-gray-600 mb-2">
           This will email <strong>{recipientCount}</strong> {recipientCount === 1 ? 'recipient' : 'recipients'} in
-          the <strong>{AUDIENCE_LABEL[audience].toLowerCase()}</strong> group
+          the <strong>{audienceSummary}</strong> group{audiences.length > 1 ? 's' : ''}
           {hasFilters && (
             <>
               , narrowed to{' '}

@@ -302,9 +302,33 @@ export class BroadcastService {
       : this.audienceEmails(orgId, audience);
   }
 
+  // A picked audience list can name the same people more than once (e.g.
+  // ['families', 'everyone']) or spell out 'everyone' one role at a time
+  // (['families', 'teachers', 'students']) — both collapse to the single
+  // 'everyone' audience so downstream resolution and the family-contact/
+  // adult-student fallbacks in audienceEmails only run once, not three times.
+  private static normalizeAudiences(audiences: BroadcastAudience[]): BroadcastAudience[] {
+    const set = new Set(audiences);
+    if (set.has('everyone') || (set.has('families') && set.has('teachers') && set.has('students'))) {
+      return ['everyone'];
+    }
+    return [...set];
+  }
+
+  /** Recipients across every picked audience, deduped. */
+  private async resolveRecipientsMulti(
+    orgId: string,
+    audiences: BroadcastAudience[],
+    filter?: BroadcastFilterDto,
+  ): Promise<string[]> {
+    const normalized = BroadcastService.normalizeAudiences(audiences);
+    const lists = await Promise.all(normalized.map((a) => this.resolveRecipients(orgId, a, filter)));
+    return BroadcastService.dedupe(lists.flat());
+  }
+
   /** Headcount for the composed selection, so nothing is sent blind. */
-  async preview(orgId: string, audience: BroadcastAudience, filter?: BroadcastFilterDto) {
-    const recipients = await this.resolveRecipients(orgId, audience, filter);
+  async preview(orgId: string, audience: BroadcastAudience[], filter?: BroadcastFilterDto) {
+    const recipients = await this.resolveRecipientsMulti(orgId, audience, filter);
     return { total: recipients.length, filtered: BroadcastService.hasFilter(filter) };
   }
 
@@ -336,12 +360,12 @@ export class BroadcastService {
    */
   async send(
     orgId: string,
-    audience: BroadcastAudience,
+    audience: BroadcastAudience[],
     subject: string,
     body: string,
     filter?: BroadcastFilterDto,
   ) {
-    const recipients = await this.resolveRecipients(orgId, audience, filter);
+    const recipients = await this.resolveRecipientsMulti(orgId, audience, filter);
     const { subject: subj, html } = this.render(subject, body);
 
     let sent = 0;
