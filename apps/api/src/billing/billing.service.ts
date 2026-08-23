@@ -692,6 +692,92 @@ export class BillingService {
     await this.recomputeInvoiceTotal(orgId, invoiceId);
   }
 
+  // ─── Bill one specific lesson directly ───────────────────────────────────────
+  /**
+   * Invoice exactly the lesson the caller is looking at, right now — from the
+   * lesson-details view, not the period-based monthly/per-lesson itemiser.
+   * That itemiser only ever pulls lessons already marked 'completed' (i.e.
+   * attendance taken) within a date window, so aiming it at "just this one
+   * lesson" via a same-day period silently came back empty — and empty invoice
+   * issuing then failed with "£0.00" — whenever the lesson hadn't had
+   * attendance marked yet. This bills the lesson by id instead, independent of
+   * its attendance/status, since the admin explicitly chose to bill it.
+   *
+   * `settleMethod` set means the family paid in person (cash/bank transfer) —
+   * for a family that never opens the portal — and the invoice is immediately
+   * marked paid; omitted just emails the invoice, still outstanding.
+   */
+  async billLessonDirectly(orgId: string, lessonId: string, settleMethod?: 'cash' | 'bank_transfer') {
+    const lesson = await this.db.db.query.lessons.findFirst({
+      where: and(eq(lessons.id, lessonId), eq(lessons.organizationId, orgId)),
+      with: {
+        enrollment: { columns: { instrument: true, rate: true, trialRate: true, defaultDuration: true, lessonType: true } },
+        student: { columns: { id: true }, with: { family: { columns: { id: true } } } },
+      },
+    });
+    if (!lesson) throw new NotFoundException('Lesson not found');
+
+    const familyId = (lesson.student as { family?: { id: string } } | null)?.family?.id;
+    if (!familyId) throw new BadRequestException('This lesson has no family to bill.');
+    if (!lesson.enrollmentId || !lesson.enrollment) {
+      throw new BadRequestException('This lesson is not linked to an enrolment, so it has no fee to bill.');
+    }
+
+    // Already on a real (non-void) invoice — refuse the double-bill rather
+    // than silently raising a second charge for the same lesson.
+    const already = await this.db.db.query.invoiceLineItems.findFirst({
+      where: and(eq(invoiceLineItems.organizationId, orgId), eq(invoiceLineItems.lessonId, lessonId)),
+      with: { invoice: { columns: { number: true, status: true } } },
+    });
+    if (already?.invoice && already.invoice.status !== 'void') {
+      throw new BadRequestException(`This lesson is already on invoice ${already.invoice.number}.`);
+    }
+
+    const amount = effectiveLessonAmount({
+      isTrialLesson: lesson.isTrialLesson,
+      lessonType: lesson.enrollment.lessonType,
+      rate: lesson.enrollment.rate,
+      trialRate: lesson.enrollment.trialRate,
+      defaultDuration: lesson.enrollment.defaultDuration,
+      duration: lesson.duration,
+    });
+    if (amount <= 0) throw new BadRequestException('This lesson has no fee to bill.');
+
+    const idempotencyKey = `bl-${lessonId}`;
+    const priorPayment = settleMethod
+      ? await this.db.db.query.payments.findFirst({
+          where: and(eq(payments.idempotencyKey, idempotencyKey), eq(payments.organizationId, orgId)),
+          columns: { invoiceId: true },
+        })
+      : null;
+    if (priorPayment?.invoiceId) {
+      const inv = await this.db.db.query.invoices.findFirst({
+        where: eq(invoices.id, priorPayment.invoiceId), columns: { id: true, number: true, total: true },
+      });
+      return { invoiceId: inv?.id ?? null, invoiceNumber: inv?.number ?? null, amount: inv?.total ?? amount, status: 'paid' as const, alreadyPaid: true };
+    }
+
+    const inv = await this.createInvoice(orgId, { familyId, mode: 'per_lesson', itemizeLessons: false });
+    const instrument = lesson.enrollment.instrument
+      ? lesson.enrollment.instrument.charAt(0).toUpperCase() + lesson.enrollment.instrument.slice(1)
+      : '';
+    const isTrialPriced = !!lesson.isTrialLesson && lesson.enrollment.trialRate != null;
+    const kind = `${isTrialPriced ? 'trial ' : ''}${lesson.enrollment.lessonType === 'group' ? 'group class' : 'lesson'}`;
+    const description = [instrument, `${kind} · ${lesson.duration} min`].filter(Boolean).join(' ');
+    await this.addLineItem(orgId, inv.id, description, amount, lessonId);
+    await this.sendInvoice(orgId, inv.id);
+
+    if (settleMethod) {
+      await this.recordPayment(orgId, {
+        familyId, invoiceId: inv.id, method: settleMethod, amount,
+        notes: 'Paid in person', idempotencyKey,
+      });
+      return { invoiceId: inv.id, invoiceNumber: inv.number, amount, status: 'paid' as const };
+    }
+
+    return { invoiceId: inv.id, invoiceNumber: inv.number, amount, status: 'sent' as const };
+  }
+
   // ─── Paid at the lesson ──────────────────────────────────────────────────────
   /**
    * Record that a family paid for a single lesson on the spot (cash/card at the

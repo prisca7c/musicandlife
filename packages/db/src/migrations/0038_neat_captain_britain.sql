@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "terms_org_name_uidx" ON "terms" USING btree ("organization_id","name");

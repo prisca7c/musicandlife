@@ -1248,15 +1248,17 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
   const [deleteSeries, setDeleteSeries] = useState(false);
   const [deleteScope, setDeleteScope] = useState<'all' | 'until'>('all');
   const [deleteUntilDate, setDeleteUntilDate] = useState('');
-  const [sendingInvoice, setSendingInvoice] = useState(false);
-  const [invoiceSent, setInvoiceSent] = useState(false);
+  const [showBilling, setShowBilling] = useState(false);
+  const [billing, setBilling] = useState(false);
+  const [billResult, setBillResult] = useState<{ status: 'sent' | 'paid'; invoiceNumber: string | null } | null>(null);
+  const [billError, setBillError] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   useEffect(() => {
     setShowReschedule(false); setActionError(''); setShowSub(false); setSubTeacherId(''); setShowClone(false);
     setApplyToSeries(false); setSeriesFromMode('now'); setSeriesFromDate('');
     setShowDelete(false); setDeleteSeries(false); setDeleteScope('all'); setDeleteUntilDate('');
-    setInvoiceSent(false);
+    setShowBilling(false); setBillResult(null); setBillError('');
     if (lesson) {
       // Prefill date + time in the studio zone so they match what's shown elsewhere
       // and round-trip correctly (the backend interprets the naive value as studio-local).
@@ -1294,21 +1296,17 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
     } finally { setSaving(false); }
   }
 
-  async function sendInvoiceForLesson() {
-    if (!lesson!.student) return;
-    setSendingInvoice(true); setActionError('');
+  async function billLesson(settleMethod?: 'cash' | 'bank_transfer') {
+    setBilling(true); setBillError(''); setBillResult(null);
     try {
-      const student = await apiFetch<{ familyId: string }>(`/students/${lesson!.student.id}`, { token: tok() });
-      const day = studioDayString(lesson!.startsAt);
-      const inv = await apiFetch<{ id: string }>('/invoices', {
-        method: 'POST', token: tok(),
-        body: JSON.stringify({ familyId: student.familyId, mode: 'per_lesson', itemizeLessons: true, periodStart: day, periodEnd: day }),
-      });
-      await apiFetch(`/invoices/${inv.id}/send`, { method: 'POST', token: tok() });
-      setInvoiceSent(true);
+      const res = await apiFetch<{ status: 'sent' | 'paid'; invoiceNumber: string | null }>(
+        `/lessons/${lesson!.id}/invoice`, { method: 'POST', token: tok(), body: JSON.stringify({ settleMethod }) },
+      );
+      setBillResult(res);
+      onUpdated();
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : 'Could not send invoice');
-    } finally { setSendingInvoice(false); }
+      setBillError(e instanceof Error ? e.message : 'Could not bill this lesson');
+    } finally { setBilling(false); }
   }
 
   async function reinstateLesson() {
@@ -1444,12 +1442,55 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
               <Trash2 size={15} />
             </button>
             {canManage && lesson.student && (
-              <button onClick={sendInvoiceForLesson} disabled={saving || deleting || sendingInvoice || invoiceSent}
-                title={invoiceSent ? 'Invoice sent' : 'Send invoice for this lesson'} aria-label="Send invoice for this lesson"
+              <button onClick={() => { setShowReschedule(false); setShowClone(false); setShowDelete(false); setShowBilling(v => !v); }}
+                disabled={saving || deleting}
+                title="Bill this lesson" aria-label="Bill this lesson"
                 className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-[var(--surf)] disabled:opacity-40"
-                style={{ color: invoiceSent ? 'var(--sage)' : 'var(--txt3)' }}>
-                {invoiceSent ? <Check size={15} /> : <Send size={15} />}
+                style={{ color: showBilling ? 'var(--sage)' : 'var(--txt3)' }}>
+                <Send size={15} />
               </button>
+            )}
+          </div>
+        )}
+
+        {canManage && lesson.student && showBilling && (
+          <div className="rounded-xl p-3.5 space-y-3" style={{ background: 'var(--surf)', border: '1px solid var(--bd)' }}>
+            <p className="text-sm font-semibold" style={{ color: 'var(--txt2)' }}>Bill this lesson</p>
+            {billResult ? (
+              <p className="text-sm rounded-lg px-3 py-2"
+                style={{ background: 'var(--sage-lt)', color: 'var(--sage-dk)', border: '1px solid var(--sage)' }}>
+                {billResult.status === 'paid'
+                  ? `Invoice ${billResult.invoiceNumber} recorded as paid.`
+                  : `Invoice ${billResult.invoiceNumber} sent.`}
+              </p>
+            ) : (
+              <>
+                {billError && (
+                  <p className="text-sm rounded-lg px-3 py-2" style={{ background: 'var(--coral-lt)', color: 'var(--coral)' }}>
+                    {billError}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => billLesson()} disabled={billing}
+                    className="text-sm font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+                    style={{ background: 'var(--sage)' }}>
+                    {billing ? 'Sending…' : 'Send invoice'}
+                  </button>
+                  <button onClick={() => billLesson('cash')} disabled={billing}
+                    className="text-sm font-semibold px-3 py-1.5 rounded-lg border border-[var(--bd2)] hover:bg-white disabled:opacity-50"
+                    style={{ color: 'var(--txt2)' }}>
+                    Paid by cash
+                  </button>
+                  <button onClick={() => billLesson('bank_transfer')} disabled={billing}
+                    className="text-sm font-semibold px-3 py-1.5 rounded-lg border border-[var(--bd2)] hover:bg-white disabled:opacity-50"
+                    style={{ color: 'var(--txt2)' }}>
+                    Paid by bank transfer
+                  </button>
+                </div>
+                <p className="text-xs" style={{ color: 'var(--txt4)' }}>
+                  &ldquo;Paid by cash&rdquo; or &ldquo;bank transfer&rdquo; marks the invoice settled immediately — for a family that pays in person and doesn&apos;t use the portal.
+                </p>
+              </>
             )}
           </div>
         )}
