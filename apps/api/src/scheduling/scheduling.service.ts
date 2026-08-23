@@ -843,12 +843,23 @@ export class SchedulingService {
     // Cap the series so it stops generating past whatever we just cleared —
     // "until a custom date" ends the series there rather than leaving a gap
     // the worker would refill; "all future" ends it at this lesson.
-    const dayBefore = new Date(lesson.startsAt.getTime() - 86400000);
-    const newEndDate = untilCap ? until! : formatInZone(dayBefore, tz, { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-CA');
-    const rule = (enrollment.scheduleRule ?? {}) as Record<string, unknown>;
-    await this.db.db.update(enrollments)
-      .set({ scheduleRule: { ...rule, endDate: newEndDate }, updatedAt: new Date() })
-      .where(eq(enrollments.id, enrollment.id));
+    //
+    // Only rewrite the rule when there actually IS a weekly weekday+startTime
+    // to cap — an enrollment whose scheduleRule was already null (never had a
+    // weekly schedule; these lessons were booked some other way) has nothing
+    // for materializeEnrollment to regenerate from regardless of an endDate,
+    // and synthesising `{ endDate }` with no weekday/startTime produced a
+    // malformed rule that crashed every UI reading `scheduleRule.weekday`
+    // (e.g. the student page's enrolments table) for that enrollment from
+    // then on.
+    const rule = enrollment.scheduleRule as { weekday?: string; startTime?: string; endDate?: string } | null;
+    if (rule?.weekday && rule?.startTime) {
+      const dayBefore = new Date(lesson.startsAt.getTime() - 86400000);
+      const newEndDate = untilCap ? until! : formatInZone(dayBefore, tz, { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-CA');
+      await this.db.db.update(enrollments)
+        .set({ scheduleRule: { ...rule, endDate: newEndDate }, updatedAt: new Date() })
+        .where(eq(enrollments.id, enrollment.id));
+    }
 
     return { deleted, skipped };
   }
