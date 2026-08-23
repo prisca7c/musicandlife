@@ -13,11 +13,15 @@
  */
 import { ReconciliationService } from '../src/billing/reconciliation.service';
 
-function makeService(bankTxn: unknown) {
+// A claim always belongs to one specific invoice now (the reference a family
+// quotes IS that invoice's number) — findUnclaimedBankPayment narrows to a
+// bank line whose already-recorded payment is for that SAME invoice, not
+// just a matching amount, so the mock payments lookup matters here too.
+function makeService(bankTxn: unknown, matchingPayment: unknown) {
   const recordPayment = jest.fn().mockResolvedValue({ id: 'pay-new' });
   const claim = {
     id: 'claim-1', organizationId: 'org-1', familyId: 'fam-1',
-    invoiceId: null, amount: 4500, status: 'pending' as const,
+    invoiceId: 'inv-1', amount: 4500, status: 'pending' as const,
   };
 
   const setCalls: Array<{ table: string; values: Record<string, unknown> }> = [];
@@ -32,7 +36,8 @@ function makeService(bankTxn: unknown) {
     db: {
       query: {
         paymentClaims: { findFirst: jest.fn().mockResolvedValue(claim) },
-        bankTransactions: { findFirst: jest.fn().mockResolvedValue(bankTxn) },
+        bankTransactions: { findMany: jest.fn().mockResolvedValue(bankTxn ? [bankTxn] : []) },
+        payments: { findMany: jest.fn().mockResolvedValue(matchingPayment ? [matchingPayment] : []) },
       },
       update: jest.fn((table: { _: { name?: string } }) => {
         // Drizzle table objects don't expose a clean name here; disambiguate by
@@ -55,7 +60,8 @@ describe('confirmClaim — no double credit when money already landed', () => {
       id: 'txn-1', paymentId: 'pay-bank', bookedOn: '2026-07-01',
       matchedFamilyId: 'fam-1', amount: 4500, status: 'matched', matchedClaimId: null,
     };
-    const { svc, recordPayment, setCalls } = makeService(bankTxn);
+    const matchingPayment = { id: 'pay-bank', invoiceId: 'inv-1' };
+    const { svc, recordPayment, setCalls } = makeService(bankTxn, matchingPayment);
 
     const res = await svc.confirmClaim('org-1', 'claim-1', 'user-1');
 
@@ -69,7 +75,7 @@ describe('confirmClaim — no double credit when money already landed', () => {
   });
 
   it('still records a real payment when nothing is already banked (genuine override)', async () => {
-    const { svc, recordPayment } = makeService(undefined);
+    const { svc, recordPayment } = makeService(undefined, undefined);
 
     const res = await svc.confirmClaim('org-1', 'claim-1', 'user-1');
 

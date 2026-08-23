@@ -405,15 +405,26 @@ export class FamilyPortalController {
   }
 
   /**
-   * The details a family needs in order to pay: their own reference (the thing
-   * that makes an incoming transfer identifiable) plus any claim still waiting
-   * to be confirmed.
+   * The details a family needs in order to pay: the reference to quote (the
+   * outstanding invoice's own number — it changes every invoice, so this is
+   * whichever one is due soonest, same selection the dashboard's
+   * "outstandingInvoice" uses) plus any claim still waiting to be confirmed.
    */
   @Get('payment-details')
   @Roles('student')
   async getPaymentDetails(@CurrentUser() user: RequestUser) {
     const family = await this.requireFamily(user.userId, user.orgId);
-    const reference = await this.recon.ensureReference(user.orgId, family.id);
+    const outstanding = await this.db.db.query.invoices.findFirst({
+      where: and(
+        eq(invoices.familyId, family.id),
+        eq(invoices.organizationId, user.orgId),
+        eq(invoices.status, 'sent'),
+        gt(invoices.total, 0),
+      ),
+      orderBy: (i, { asc }) => [asc(i.dueDate)],
+      columns: { number: true },
+    });
+    const reference = outstanding?.number ?? null;
     const pending = await this.db.db.query.paymentClaims.findMany({
       where: and(
         eq(paymentClaims.organizationId, user.orgId),

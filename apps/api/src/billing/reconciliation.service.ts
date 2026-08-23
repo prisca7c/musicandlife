@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
-import { eq, and, isNull, isNotNull, desc } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, desc, inArray } from 'drizzle-orm';
 import { createHash } from 'crypto';
-import { families, invoices, paymentClaims, bankTransactions } from '@music-life/db';
+import { invoices, paymentClaims, bankTransactions, payments } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import { BillingService } from './billing.service';
 
@@ -28,68 +28,20 @@ export class ReconciliationService {
     private readonly billing: BillingService,
   ) {}
 
-  // ─── Family payment references ─────────────────────────────────────────────
-
-  /**
-   * Every family needs a stable reference before any of this works. Generated
-   * lazily on first use so existing families don't need a backfill migration.
-   *
-   * The reference is a plain zero-padded sequential number ("0016") — no
-   * letters, no hyphen, nothing a parent can mistype on their banking app's
-   * reference field. (An earlier version used the student's name, which read
-   * nicely but was easy to type wrong and wasn't unique across families; a
-   * random ML-XXXX code before that had the same mistyping risk. A bare
-   * number is the simplest thing that's still hard to get wrong.)
-   */
-  async ensureReference(orgId: string, familyId: string): Promise<string> {
-    const family = await this.db.db.query.families.findFirst({
-      where: and(eq(families.id, familyId), eq(families.organizationId, orgId)),
-    });
-    if (!family) throw new NotFoundException('Family not found');
-    if (family.paymentReference) return family.paymentReference;
-
-    // The unique index on (org, reference) is the real guard; retry the next
-    // number on the rare race where two families are assigned one at once.
-    const assigned = await this.db.db.$count(
-      families, and(eq(families.organizationId, orgId), isNotNull(families.paymentReference)),
-    );
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const reference = String(assigned + 1 + attempt).padStart(4, '0');
-      try {
-        const [updated] = await this.db.db.update(families)
-          .set({ paymentReference: reference, updatedAt: new Date() })
-          .where(and(eq(families.id, familyId), eq(families.organizationId, orgId), isNull(families.paymentReference)))
-          .returning();
-        if (updated?.paymentReference) return updated.paymentReference;
-        // Lost a race — someone else assigned one. Re-read and use theirs.
-        const fresh = await this.db.db.query.families.findFirst({
-          where: eq(families.id, familyId), columns: { paymentReference: true },
-        });
-        if (fresh?.paymentReference) return fresh.paymentReference;
-      } catch {
-        // Unique violation → this number is taken, try the next.
-      }
-    }
-    throw new BadRequestException('Could not allocate a payment reference — please try again');
-  }
-
-  async backfillReferences(orgId: string) {
-    const missing = await this.db.db.query.families.findMany({
-      where: and(eq(families.organizationId, orgId), isNull(families.paymentReference)),
-      columns: { id: true },
-    });
-    for (const f of missing) await this.ensureReference(orgId, f.id);
-    return { assigned: missing.length };
-  }
-
   // ─── Claims ────────────────────────────────────────────────────────────────
 
   /**
    * A family says they've sent a transfer. This is a CLAIM, not money: the
    * ledger does not move and the invoice stays unpaid until a real statement
    * line backs it up (or staff confirm it by hand).
+   *
+   * The reference a family is told to quote is simply that invoice's own
+   * number — it changes every invoice, so there's no separate per-family code
+   * to keep straight, and matching an incoming transfer means finding which
+   * invoice number appears in its reference/description, not guessing by
+   * amount. A claim therefore always belongs to one specific invoice.
    */
-  async createClaim(orgId: string, familyId: string, invoiceId: string | null, amount: number) {
+  async createClaim(orgId: string, familyId: string, invoiceId: string, amount: number) {
     // Defence in depth behind the caller's own check. A claim for £0 or a
     // negative amount would sit in the exceptions queue forever — no bank line
     // can ever match it — and a negative claim would try to match a debit,
@@ -97,22 +49,24 @@ export class ReconciliationService {
     if (amount <= 0) {
       throw new BadRequestException('A payment claim must be for a positive amount.');
     }
-    const reference = await this.ensureReference(orgId, familyId);
+    const invoice = await this.db.db.query.invoices.findFirst({
+      where: and(eq(invoices.id, invoiceId), eq(invoices.organizationId, orgId), eq(invoices.familyId, familyId)),
+      columns: { number: true },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
 
-    if (invoiceId) {
-      const open = await this.db.db.query.paymentClaims.findFirst({
-        where: and(
-          eq(paymentClaims.organizationId, orgId),
-          eq(paymentClaims.invoiceId, invoiceId),
-          eq(paymentClaims.status, 'pending'),
-        ),
-      });
-      // Repeat taps are idempotent — the partial unique index enforces this too.
-      if (open) return { ...open, alreadyClaimed: true };
-    }
+    const open = await this.db.db.query.paymentClaims.findFirst({
+      where: and(
+        eq(paymentClaims.organizationId, orgId),
+        eq(paymentClaims.invoiceId, invoiceId),
+        eq(paymentClaims.status, 'pending'),
+      ),
+    });
+    // Repeat taps are idempotent — the partial unique index enforces this too.
+    if (open) return { ...open, alreadyClaimed: true };
 
     const [claim] = await this.db.db.insert(paymentClaims).values({
-      organizationId: orgId, familyId, invoiceId, amount, reference, status: 'pending',
+      organizationId: orgId, familyId, invoiceId, amount, reference: invoice.number, status: 'pending',
     }).returning();
 
     // A claim may arrive after the money did (parent forgot to press the button
@@ -129,7 +83,7 @@ export class ReconciliationService {
         ? and(eq(paymentClaims.organizationId, orgId), eq(paymentClaims.status, status))
         : eq(paymentClaims.organizationId, orgId),
       with: {
-        family: { columns: { id: true, name: true, paymentReference: true } },
+        family: { columns: { id: true, name: true } },
         invoice: { columns: { id: true, number: true, total: true, status: true } },
       },
       orderBy: [desc(paymentClaims.createdAt)],
@@ -146,11 +100,13 @@ export class ReconciliationService {
     if (claim.status !== 'pending') throw new BadRequestException('This claim has already been decided');
 
     // The money may have already landed and been auto-credited (an imported
-    // statement line for this family+amount that no claim is tied to yet). If
+    // statement line for this invoice that no claim is tied to yet). If
     // so, settle the claim against THAT existing payment — recording a fresh
     // one here would credit the same transfer twice. Only fall through to a
     // genuine staff override (new payment) when nothing is already banked.
-    const banked = await this.findUnclaimedBankPayment(orgId, claim.familyId, claim.amount);
+    const banked = claim.invoiceId
+      ? await this.findUnclaimedBankPayment(orgId, claim.familyId, claim.invoiceId, claim.amount)
+      : null;
     if (banked) {
       await this.linkClaimToBankedPayment(claim, banked, userId);
       return { status: 'confirmed', paymentId: banked.paymentId };
@@ -165,13 +121,15 @@ export class ReconciliationService {
   }
 
   /**
-   * An imported statement line for this family+amount that already has a payment
-   * (credited on account or against an invoice) but isn't yet tied to a claim.
-   * This is the money a later claim should settle against rather than paying
-   * again.
+   * An imported statement line for this family that already has a payment but
+   * isn't yet tied to a claim — this is the money a later claim should settle
+   * against rather than paying again. Narrowed to the SAME invoice the claim
+   * is for (not just a matching amount), since two invoices for the same
+   * family can share a total; matching by amount alone could link a claim to
+   * a payment that actually settled a different invoice.
    */
-  private async findUnclaimedBankPayment(orgId: string, familyId: string, amount: number) {
-    return this.db.db.query.bankTransactions.findFirst({
+  private async findUnclaimedBankPayment(orgId: string, familyId: string, invoiceId: string, amount: number) {
+    const candidates = await this.db.db.query.bankTransactions.findMany({
       where: and(
         eq(bankTransactions.organizationId, orgId),
         eq(bankTransactions.matchedFamilyId, familyId),
@@ -182,6 +140,15 @@ export class ReconciliationService {
       ),
       orderBy: [desc(bankTransactions.bookedOn)],
     });
+    if (candidates.length === 0) return null;
+
+    const paymentIds = candidates.map((t) => t.paymentId!).filter(Boolean);
+    const matchingPayments = await this.db.db.query.payments.findMany({
+      where: and(inArray(payments.id, paymentIds), eq(payments.invoiceId, invoiceId)),
+      columns: { id: true },
+    });
+    const matchingPaymentIds = new Set(matchingPayments.map((p) => p.id));
+    return candidates.find((t) => t.paymentId && matchingPaymentIds.has(t.paymentId)) ?? null;
   }
 
   /**
@@ -318,31 +285,34 @@ export class ReconciliationService {
    *
    * At any real volume nobody can eyeball hundreds of lines, so the importer
    * settles everything it can identify and only surfaces what it genuinely
-   * cannot. In order of confidence:
+   * cannot. Matching is entirely by invoice number now — a family is told to
+   * quote the invoice's own number (it changes every invoice), so finding
+   * that number in the reference/description IS finding the invoice, with no
+   * need to also guess by amount:
    *
-   *   1. reference → family, amount → a pending claim  … confirm that claim
-   *   2. reference → family, amount → an unpaid invoice … pay that invoice
-   *   3. reference → family, amount matches nothing     … credit the family's
-   *      balance anyway (the money is theirs; it just doesn't line up with an
-   *      invoice yet)
-   *   4. no family found                                … the only thing a human
-   *      has to look at
+   *   1. invoice number found → a pending claim for that invoice … confirm it
+   *   2. invoice number found, no claim                          … pay that
+   *      invoice directly, whatever the amount (covers partial payments too)
+   *   3. no invoice number recognised                            … the only
+   *      thing a human has to look at
    */
   async importStatement(orgId: string, rows: ParsedStatementRow[]) {
-    const orgFamilies = await this.db.db.query.families.findMany({
-      where: eq(families.organizationId, orgId),
-      columns: { id: true, name: true, paymentReference: true },
+    // Only invoices still awaiting payment are worth matching against — an
+    // already-paid or void invoice's number showing up again is far more
+    // likely a mistyped/reused reference than a genuine second bill.
+    const openInvoices = await this.db.db.query.invoices.findMany({
+      where: and(eq(invoices.organizationId, orgId), eq(invoices.status, 'sent')),
+      columns: { id: true, number: true, familyId: true },
     });
-    // Longest reference first: a short code must never shadow a longer one that
+    // Longest number first: a short one must never shadow a longer one that
     // happens to contain it.
-    const refIndex = orgFamilies
-      .filter((f) => f.paymentReference)
-      .map((f) => ({ family: f, key: normalise(f.paymentReference) }))
+    const refIndex = openInvoices
+      .map((inv) => ({ invoice: inv, key: normalise(inv.number) }))
       .sort((a, b) => b.key.length - a.key.length);
 
     const summary = {
       imported: 0, duplicates: 0,
-      matchedToClaim: 0, matchedToInvoice: 0, creditedOnAccount: 0, unmatched: 0,
+      matchedToClaim: 0, matchedToInvoice: 0, unmatched: 0,
       unmatchedRows: [] as { bookedOn: string; amount: number; reference?: string; description?: string }[],
     };
 
@@ -368,7 +338,7 @@ export class ReconciliationService {
         reference: row.reference ?? null,
         description: row.description ?? null,
         fingerprint,
-        matchedFamilyId: hit?.family.id ?? null,
+        matchedFamilyId: hit?.invoice.familyId ?? null,
         status: 'unmatched',
       }).returning();
       summary.imported++;
@@ -379,15 +349,14 @@ export class ReconciliationService {
         continue;
       }
 
-      const familyId = hit.family.id;
+      const { familyId, id: invoiceId } = hit.invoice;
 
-      // 1 — a claim for this exact amount
+      // 1 — a claim already raised for this specific invoice
       const claim = await this.db.db.query.paymentClaims.findFirst({
         where: and(
           eq(paymentClaims.organizationId, orgId),
-          eq(paymentClaims.familyId, familyId),
+          eq(paymentClaims.invoiceId, invoiceId),
           eq(paymentClaims.status, 'pending'),
-          eq(paymentClaims.amount, row.amount),
         ),
         orderBy: [desc(paymentClaims.createdAt)],
       });
@@ -402,35 +371,14 @@ export class ReconciliationService {
         continue;
       }
 
-      // 2 — an unpaid invoice for this exact amount
-      const invoice = await this.db.db.query.invoices.findFirst({
-        where: and(
-          eq(invoices.organizationId, orgId),
-          eq(invoices.familyId, familyId),
-          eq(invoices.status, 'sent'),
-          eq(invoices.total, row.amount),
-        ),
-        orderBy: [desc(invoices.issuedOn)],
-      });
-      if (invoice) {
-        const payment = await this.billing.recordPayment(orgId, {
-          familyId, invoiceId: invoice.id, method: 'bank_transfer', amount: row.amount,
-          notes: `Auto-matched from bank statement (${row.bookedOn}).`,
-          idempotencyKey: `bank-${txn!.id}`,
-        });
-        await this.markTxnMatched(txn!.id, null, payment.id);
-        summary.matchedToInvoice++;
-        continue;
-      }
-
-      // 3 — identified but unallocated: still their money, credit the balance
+      // 2 — no claim yet, but the invoice number tells us exactly what this is
       const payment = await this.billing.recordPayment(orgId, {
-        familyId, method: 'bank_transfer', amount: row.amount,
-        notes: `Auto-matched from bank statement (${row.bookedOn}) — on account, no matching invoice.`,
+        familyId, invoiceId, method: 'bank_transfer', amount: row.amount,
+        notes: `Auto-matched from bank statement (${row.bookedOn}).`,
         idempotencyKey: `bank-${txn!.id}`,
       });
       await this.markTxnMatched(txn!.id, null, payment.id);
-      summary.creditedOnAccount++;
+      summary.matchedToInvoice++;
     }
 
     return summary;
@@ -456,9 +404,9 @@ export class ReconciliationService {
    */
   private async tryMatchClaimAgainstImported(orgId: string, claimId: string) {
     const claim = await this.db.db.query.paymentClaims.findFirst({ where: eq(paymentClaims.id, claimId) });
-    if (!claim || claim.status !== 'pending') return;
+    if (!claim || claim.status !== 'pending' || !claim.invoiceId) return;
 
-    const txn = await this.findUnclaimedBankPayment(orgId, claim.familyId, claim.amount);
+    const txn = await this.findUnclaimedBankPayment(orgId, claim.familyId, claim.invoiceId, claim.amount);
     if (!txn) return;
 
     await this.linkClaimToBankedPayment(claim, txn);

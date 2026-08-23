@@ -74,9 +74,6 @@ export class ReconciliationController {
   @Post('import')
   @Roles('admin')
   async importStatement(@CurrentUser() u: RequestUser, @Body() dto: ImportStatementDto) {
-    // Anything without a reference can't be matched, so make sure every family
-    // has one before the first import rather than after.
-    await this.recon.backfillReferences(u.orgId);
     const { rows, skipped } = this.recon.parseCsv(dto.csv);
     const summary = await this.recon.importStatement(u.orgId, rows);
     return { ...summary, skippedNonCreditRows: skipped };
@@ -100,13 +97,5 @@ export class ReconciliationController {
   @Roles('admin')
   ignore(@CurrentUser() u: RequestUser, @Param('id') id: string) {
     return this.recon.ignoreTransaction(u.orgId, id);
-  }
-
-  // ─── References ────────────────────────────────────────────────────────────
-
-  @Post('references/backfill')
-  @Roles('admin')
-  backfill(@CurrentUser() u: RequestUser) {
-    return this.recon.backfillReferences(u.orgId);
   }
 }

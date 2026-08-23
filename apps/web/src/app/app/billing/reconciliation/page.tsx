@@ -20,7 +20,7 @@ const SECTION_ITEMS = [
 
 interface Claim {
   id: string; amount: number; reference: string; status: string; createdAt: string;
-  family: { id: string; name: string; paymentReference: string | null } | null;
+  family: { id: string; name: string } | null;
   invoice: { id: string; number: string; total: number; status: string } | null;
 }
 interface BankTxn {
@@ -31,7 +31,7 @@ interface FamilyOption { id: string; name: string }
 
 interface ImportSummary {
   imported: number; duplicates: number;
-  matchedToClaim: number; matchedToInvoice: number; creditedOnAccount: number; unmatched: number;
+  matchedToClaim: number; matchedToInvoice: number; unmatched: number;
   skippedNonCreditRows: number;
 }
 
@@ -139,8 +139,7 @@ export default function ReconciliationPage() {
             </p>
             <ul className="mt-2 space-y-0.5 text-xs" style={{ color: 'var(--txt3)' }}>
               <li>{summary.matchedToClaim} matched to a family&apos;s &ldquo;I&apos;ve sent it&rdquo;</li>
-              <li>{summary.matchedToInvoice} matched straight to an unpaid invoice</li>
-              <li>{summary.creditedOnAccount} credited on account (family known, no matching invoice)</li>
+              <li>{summary.matchedToInvoice} matched straight to an invoice by its number</li>
               <li><strong>{summary.unmatched} need you</strong> — listed below</li>
               <li>{summary.duplicates} already imported · {summary.skippedNonCreditRows} non-payment rows skipped</li>
             </ul>
@@ -154,8 +153,8 @@ export default function ReconciliationPage() {
         {' '}<AutomatedHint by="bankMatching" />
       </h2>
       <p className="text-xs mb-3" style={{ color: 'var(--txt3)' }}>
-        Money arrived but no family reference was quoted. Assign it to a family and it posts to
-        their balance.
+        Money arrived but no invoice number was recognised in its reference or description. Assign it
+        to a family and it posts to their balance.
       </p>
       <div className="rounded-2xl border mb-8" style={{ borderColor: 'var(--bd)' }}>
         {unmatched.length === 0 ? (
