@@ -1488,7 +1488,7 @@ function LessonDetailModal({ lesson, open, onClose, onUpdated, readOnly = false,
                   </button>
                 </div>
                 <p className="text-xs" style={{ color: 'var(--txt4)' }}>
-                  "Paid by cash" or "bank transfer" marks the invoice settled immediately — for a family that pays in person and doesn't use the portal.
+                  &ldquo;Paid by cash&rdquo; or &ldquo;bank transfer&rdquo; marks the invoice settled immediately — for a family that pays in person and doesn&apos;t use the portal.
                 </p>
               </>
             )}
