@@ -318,7 +318,10 @@ function computeLayout(dayLessons: Lesson[], hourHeights: number[] = BASELINE_HO
       // short lesson would render abnormally tall purely because some other
       // cluster (in this hour, in this or another column) needed more room.
       const clusterHeight = Math.max((cluster[0]!.duration / 60) * PX_PER_HOUR, STACK_ROW_H);
-      cursorBottom = clusterTop + clusterHeight + CLUSTER_GAP;
+      // No + CLUSTER_GAP here — see the note below the side-by-side branch on
+      // why baking the gap into cursorBottom cascades into real clock drift
+      // across a busy day.
+      cursorBottom = clusterTop + clusterHeight;
       result.push({
         ...cluster[0]!, rowIndex: 0, colIndex: 0, colsInRow: 1, stackSize: 1,
         clusterTop, clusterHeight, ownTop: clusterTop, ownHeight: clusterHeight - STACK_GAP,
@@ -347,7 +350,17 @@ function computeLayout(dayLessons: Lesson[], hourHeights: number[] = BASELINE_HO
       });
       const clusterBottom = Math.max(...boxes.map(b => b.top + b.height));
       const clusterHeight = clusterBottom - clusterTop;
-      cursorBottom = clusterBottom + CLUSTER_GAP;
+      // No + CLUSTER_GAP: adding a fixed gap here meant every back-to-back
+      // cluster (the next one starting exactly when this one ends — the
+      // normal case on a fully-booked day) got pushed CLUSTER_GAP further
+      // than its real start time, and that debt carried into cursorBottom
+      // for the NEXT cluster too — five, ten, twenty+ px of accumulated
+      // drift by the fourth or fifth lesson of the day, each one rendering
+      // later (and so looking "short"/misaligned against the hour grid)
+      // than its actual time. Bordered boxes already read as visually
+      // distinct without an enforced gap between them; cursorBottom now only
+      // ever pushes a cluster down for a GENUINE time overlap.
+      cursorBottom = clusterBottom;
       boxes.forEach(b => {
         result.push({
           ...b.l, rowIndex: 0, colIndex: b.colIndex, colsInRow: b.numColumns, stackSize: cluster.length,
@@ -359,7 +372,7 @@ function computeLayout(dayLessons: Lesson[], hourHeights: number[] = BASELINE_HO
 
     const numRows = Math.ceil(cluster.length / MAX_PER_ROW);
     const clusterHeight = numRows * STACK_ROW_H;
-    cursorBottom = clusterTop + clusterHeight + CLUSTER_GAP;
+    cursorBottom = clusterTop + clusterHeight;
     cluster.forEach((l, i) => {
       const rowIndex = Math.floor(i / MAX_PER_ROW);
       const rowStart = rowIndex * MAX_PER_ROW;
