@@ -56,8 +56,16 @@ export class StudentsService {
     opts: { search?: string; status?: string; page?: PageParams | null } = {},
   ) {
     const { search, status, page = null } = opts;
+    // firstName/lastName ORed separately never matches a "First Last" query
+    // (e.g. "John Sm" against 10+ students all first-named "John" plus one
+    // "John Smith") — neither column alone contains the two-word substring.
+    // Also match the concatenated full name so a space-separated query works.
     const searchClause: SQL | undefined = search
-      ? or(ilike(students.firstName, `%${search}%`), ilike(students.lastName, `%${search}%`))
+      ? or(
+          ilike(students.firstName, `%${search}%`),
+          ilike(students.lastName, `%${search}%`),
+          ilike(sql`${students.firstName} || ' ' || ${students.lastName}`, `%${search}%`),
+        )
       : undefined;
     const statusClause: SQL | undefined = status
       ? eq(students.status, status as 'waiting' | 'trial' | 'active' | 'paused' | 'withdrawn')
