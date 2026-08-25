@@ -194,6 +194,20 @@ function computeElasticHourHeights(columns: Lesson[][]): number[] {
     const clusters = clusterLessons(col);
     const perHour = HOURS.map(() => 0);
     for (const cluster of clusters) {
+      // A side-by-side cluster (peakOverlap <= MAX_PER_ROW) never actually
+      // needs extra vertical room: assignColumns puts each lesson in its own
+      // column, positioned purely by its real start time, and two lessons
+      // sharing a column never overlap in time by construction — nothing in
+      // that branch can ever collide. Its total time SPAN can run well past
+      // the hour its first lesson starts in (e.g. a 45-min lesson starting
+      // at :45), but that span is not a space deficiency, so counting it as
+      // "needed height" wrongly stretched the FIRST hour alone — inflating
+      // its row far past what any lesson in it actually needed, so every box
+      // in that hour fell visibly short of the next (needlessly pushed-down)
+      // gridline. Only the stacked-row fallback below (genuinely more than
+      // MAX_PER_ROW simultaneous) stacks boxes on top of each other at the
+      // same instant and actually needs the hour to grow.
+      if (peakOverlap(cluster) <= MAX_PER_ROW) continue;
       // Laying this one cluster out alone always yields its true, pushdown-free
       // height — computeLayout never pushes down the very first (only) cluster
       // it processes in a pass.
