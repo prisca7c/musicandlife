@@ -667,10 +667,19 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
     // then tried to create a second one and got rejected as a duplicate by
     // that same server check. Case-insensitive here keeps both sides in sync.
     const instrumentNorm = instrument.trim().toLowerCase();
-    const existing = detail.enrollments.find(
+    const candidates = detail.enrollments.filter(
       en => en.instrument.trim().toLowerCase() === instrumentNorm && en.lessonType === lessonType && en.status !== 'withdrawn'
         && (lessonType !== 'group' || (en.groupName ?? '') === groupName.trim()),
     );
+    // A student can genuinely have two separate enrollments in the same
+    // instrument under different teachers (switched teachers, trialing a
+    // second one, etc.) — matching on instrument alone and reassigning
+    // whichever one .find() happened to land on FIRST corrupted the wrong
+    // enrollment's teacherId instead of reusing the right one. Prefer an
+    // enrollment already under the chosen teacher; only fall back to
+    // reconciling one with no teacher assigned yet.
+    const existing = candidates.find(en => teacherId && en.teacherId === teacherId)
+      ?? candidates.find(en => !en.teacherId);
     if (existing) {
       // A matching enrollment can predate this booking and carry a different (or
       // no) teacher. Without reconciling it, this dialog's teacher choice is

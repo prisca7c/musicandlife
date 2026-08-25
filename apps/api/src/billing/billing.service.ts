@@ -153,7 +153,24 @@ export class BillingService {
   async getPublicInvoiceSummary(id: string) {
     const inv = await this.db.db.query.invoices.findFirst({
       where: eq(invoices.id, id),
-      columns: { id: true, number: true, total: true, status: true, dueDate: true, organizationId: true },
+      columns: {
+        id: true, number: true, total: true, status: true, dueDate: true, issuedOn: true,
+        notes: true, organizationId: true, familyId: true,
+      },
+      with: {
+        lineItems: {
+          with: {
+            lesson: {
+              columns: { startsAt: true, duration: true },
+              with: {
+                teacher: { columns: { firstName: true, lastName: true } },
+                student: { columns: { firstName: true, lastName: true } },
+                enrollment: { columns: { instrument: true, lessonType: true } },
+              },
+            },
+          },
+        },
+      },
     });
     // Only issued invoices are reachable via the public pay link. Drafts are
     // staff-only and not yet finalised; voids are cancelled — neither should be
@@ -162,18 +179,48 @@ export class BillingService {
       throw new NotFoundException('Invoice not found');
     }
 
-    const org = await this.db.db.query.organizations.findFirst({
-      where: eq(organizations.id, inv.organizationId),
-    });
+    const [org, family] = await Promise.all([
+      this.db.db.query.organizations.findFirst({ where: eq(organizations.id, inv.organizationId) }),
+      this.db.db.query.families.findFirst({
+        where: eq(families.id, inv.familyId),
+        columns: { name: true, address: true },
+      }),
+    ]);
     const settings = (org?.settings as Record<string, unknown>) ?? {};
+
+    // Same shape as the admin invoice detail's lineItems (getInvoice above) so
+    // the public page can render the identical itemised breakdown and reuse
+    // the same PDF template — a payer with nothing but the pay link had no
+    // way to see what they were actually being charged for.
+    const lineItems = inv.lineItems
+      .map(li => ({
+        id: li.id,
+        description: li.description,
+        amount: li.amount,
+        date: li.lesson?.startsAt ? li.lesson.startsAt.toISOString().split('T')[0]! : null,
+        teacher: li.lesson?.teacher ? `${li.lesson.teacher.firstName} ${li.lesson.teacher.lastName}` : null,
+        student: li.lesson?.student ? `${li.lesson.student.firstName} ${li.lesson.student.lastName}` : null,
+        instrument: li.lesson?.enrollment?.instrument ?? null,
+      }))
+      .sort((a, b) => {
+        if (a.date && b.date) return a.date.localeCompare(b.date);
+        if (a.date) return -1;
+        if (b.date) return 1;
+        return 0;
+      });
 
     return {
       number: inv.number,
       total: inv.total,
       status: inv.status,
       dueDate: inv.dueDate,
+      issuedOn: inv.issuedOn,
+      notes: inv.notes,
+      lineItems,
+      family: family ? { name: family.name, address: family.address } : null,
       org: {
         name: org?.name ?? 'Music & Life',
+        address: settings.address as string | undefined,
         bankSortCode: settings.bankSortCode as string | undefined,
         bankAccountNumber: settings.bankAccountNumber as string | undefined,
         bankAccountName: settings.bankAccountName as string | undefined,
