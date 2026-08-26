@@ -163,6 +163,32 @@ export const bankTransactions = pgTable(
   ],
 );
 
+// ─── Revolut card payments ──────────────────────────────────────────────────
+// Alongside bank transfer — a family can pay a public invoice by card via a
+// Revolut-hosted checkout page (card details never touch our servers). One
+// row per checkout attempt, so a family reopening the same invoice and
+// retrying gets a fresh order rather than reusing a stale/expired one; the
+// webhook looks a completed order up by revolutOrderId to know which
+// invoice to mark paid.
+export const revolutOrders = pgTable(
+  'revolut_orders',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    invoiceId: uuid('invoice_id').notNull().references(() => invoices.id),
+    revolutOrderId: text('revolut_order_id').notNull(),
+    amount: integer('amount').notNull(),
+    status: text('status', { enum: ['pending', 'completed', 'failed', 'cancelled'] }).notNull().default('pending'),
+    paymentId: uuid('payment_id').references(() => payments.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('revolut_orders_revolut_order_id_uidx').on(t.revolutOrderId),
+    index('revolut_orders_invoice_idx').on(t.invoiceId),
+  ],
+);
+
 // ─── Payroll ──────────────────────────────────────────────────────────────────
 export const payrollRuns = pgTable(
   'payroll_runs',

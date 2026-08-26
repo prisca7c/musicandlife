@@ -32,6 +32,12 @@ process.on('uncaughtException', (err) => {
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'verbose'],
+    // Preserves req.rawBody (a Buffer) alongside Nest's normal JSON parsing on
+    // every route — needed to verify the Revolut webhook's HMAC signature,
+    // which is computed over the exact raw bytes Revolut sent, not a
+    // re-serialised (and potentially byte-different) JSON.stringify of the
+    // parsed body.
+    rawBody: true,
   });
 
   app.use(cookieParser(process.env.COOKIE_SECRET));

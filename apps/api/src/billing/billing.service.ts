@@ -217,6 +217,9 @@ export class BillingService {
       issuedOn: inv.issuedOn,
       notes: inv.notes,
       lineItems,
+      // Just an env-var presence check, not a service dependency — avoids a
+      // BillingModule <-> PaymentsModule circular import for one boolean.
+      cardPaymentEnabled: !!process.env.REVOLUT_API_KEY,
       family: family ? { name: family.name, address: family.address } : null,
       org: {
         name: org?.name ?? 'Music & Life',
