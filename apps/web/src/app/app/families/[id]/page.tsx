@@ -215,8 +215,10 @@ function AddStudentModal({ open, onClose, familyId, familyName, onCreated }: {
 }
 
 // Create invoice — family pre-filled
-function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, onCreated }: {
-  open: boolean; onClose: () => void; familyId: string; familyName: string; invoiceMode: string | null; onCreated: () => void;
+function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, students, onCreated }: {
+  open: boolean; onClose: () => void; familyId: string; familyName: string; invoiceMode: string | null;
+  students: { id: string; firstName: string; lastName: string; enrollments: { id: string; instrument: string; status: string }[] }[];
+  onCreated: () => void;
 }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -226,7 +228,18 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
   const lastMonthEnd = new Date(); lastMonthEnd.setDate(0);
   const [periodStart, setPeriodStart] = useState(lastMonthStart.toISOString().split('T')[0]!);
   const [periodEnd, setPeriodEnd] = useState(lastMonthEnd.toISOString().split('T')[0]!);
+  // Upcoming = lessons that haven't happened yet — the normal itemiser only
+  // ever picks up 'completed' (attendance-taken) lessons, so billing a family
+  // for lessons still to come needs its own opt-in and its own quick date
+  // ranges (a past-lessons statement is almost never "just today").
+  const [includeFuture, setIncludeFuture] = useState(false);
+  const [enrollmentId, setEnrollmentId] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+  const todayStr = new Date().toISOString().split('T')[0]!;
+
+  const classOptions = students.flatMap(s => s.enrollments
+    .filter(e => e.status === 'active')
+    .map(e => ({ id: e.id, label: `${s.firstName} — ${e.instrument.charAt(0).toUpperCase() + e.instrument.slice(1)}` })));
 
   useEffect(() => {
     if (open) apiFetch<{ id: string; name: string; startsOn: string; endsOn: string }[]>('/terms', { token: tok() }).then(setTerms).catch(() => {});
@@ -237,6 +250,16 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
     const t = terms.find(x => x.id === id);
     if (t) { setPeriodStart(t.startsOn); setPeriodEnd(t.endsOn); }
   }
+  function pickDay() {
+    setTermId(''); setPeriodStart(todayStr); setPeriodEnd(todayStr);
+  }
+  function pickMonth() {
+    setTermId('');
+    const start = new Date(); start.setDate(1);
+    const end = new Date(start); end.setMonth(end.getMonth() + 1); end.setDate(0);
+    setPeriodStart(start.toISOString().split('T')[0]!);
+    setPeriodEnd(end.toISOString().split('T')[0]!);
+  }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSaving(true); setError('');
@@ -246,6 +269,8 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
         familyId, mode: f.get('mode'), termId: termId || undefined,
         periodStart: periodStart || undefined, periodEnd: periodEnd || undefined,
         notes: f.get('notes') || undefined,
+        enrollmentId: enrollmentId || undefined,
+        includeFuture: includeFuture || undefined,
       })});
       onCreated(); onClose();
       window.location.href = `/app/billing/${inv.id}`;
@@ -269,27 +294,50 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
             <option value="per_lesson">Per lesson</option>
           </select>
         </div>
-        {terms.length > 0 && (
+        {classOptions.length > 1 && (
           <div>
-            <label className="ui-label">Term</label>
-            <select value={termId} onChange={e => pickTerm(e.target.value)} className="ui-input">
-              <option value="">No term — use dates below</option>
-              {terms.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            <label className="ui-label">Class</label>
+            <select value={enrollmentId} onChange={e => setEnrollmentId(e.target.value)} className="ui-input">
+              <option value="">All classes</option>
+              {classOptions.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
           </div>
         )}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="ui-label">Period start</label>
-            <input name="periodStart" type="date" value={periodStart}
-              onChange={e => { setPeriodStart(e.target.value); setTermId(''); }} className="ui-input" />
+        <div>
+          <label className="ui-label">Date range</label>
+          <div className="flex gap-2 mb-2">
+            <button type="button" onClick={pickDay} className="ui-btn-ghost text-xs px-2.5 py-1">Today</button>
+            <button type="button" onClick={pickMonth} className="ui-btn-ghost text-xs px-2.5 py-1">This month</button>
+            {terms.length > 0 && (
+              <select value={termId} onChange={e => pickTerm(e.target.value)} className="ui-input text-xs py-1">
+                <option value="">Term…</option>
+                {terms.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
           </div>
-          <div>
-            <label className="ui-label">Period end</label>
-            <input name="periodEnd" type="date" value={periodEnd}
-              onChange={e => { setPeriodEnd(e.target.value); setTermId(''); }} className="ui-input" />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="ui-label">Period start</label>
+              <input name="periodStart" type="date" value={periodStart}
+                onChange={e => { setPeriodStart(e.target.value); setTermId(''); }} className="ui-input" />
+            </div>
+            <div>
+              <label className="ui-label">Period end</label>
+              <input name="periodEnd" type="date" value={periodEnd}
+                onChange={e => { setPeriodEnd(e.target.value); setTermId(''); }} className="ui-input" />
+            </div>
           </div>
         </div>
+        <label className="flex items-start gap-2 text-sm cursor-pointer" style={{ color: 'var(--txt2)' }}>
+          <input type="checkbox" checked={includeFuture} onChange={e => setIncludeFuture(e.target.checked)}
+            className="mt-0.5" />
+          <span>
+            Include upcoming lessons that haven&apos;t happened yet
+            <span className="block text-xs" style={{ color: 'var(--txt4)' }}>
+              Bills scheduled lessons in this range ahead of time, not just completed ones.
+            </span>
+          </span>
+        </label>
         <div>
           <label className="ui-label">Notes</label>
           <textarea name="notes" rows={2} className="ui-input" style={{ resize: 'vertical' }} />
@@ -418,7 +466,8 @@ export default function FamilyDetailPage() {
       {family && <AddStudentModal open={showAddStudent} onClose={() => setShowAddStudent(false)}
         familyId={family.id} familyName={family.name} onCreated={load} />}
       {family && <CreateInvoiceModal open={showCreateInvoice} onClose={() => setShowCreateInvoice(false)}
-        familyId={family.id} familyName={family.contactName || family.name} invoiceMode={family.invoiceMode} onCreated={load} />}
+        familyId={family.id} familyName={family.contactName || family.name} invoiceMode={family.invoiceMode}
+        students={family.students} onCreated={load} />}
       {family && <AutoInvoicingSettingsModal open={showInvoicingSettings} onClose={() => setShowInvoicingSettings(false)}
         family={family} onSaved={load} />}
       {family && <MergeFamilyModal open={showMerge} onClose={() => setShowMerge(false)}

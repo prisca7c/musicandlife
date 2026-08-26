@@ -2001,16 +2001,16 @@ export default function CalendarPage() {
     }
   }
 
-  function openSlot(dayIndex: number, hour: number) {
+  function openSlot(dayIndex: number, hour: number, minute: 0 | 30 = 0) {
     const d = new Date(weekStart);
     d.setDate(d.getDate() + dayIndex);
     setSlotDate(formatDate(d));
-    setSlotTime(`${String(hour).padStart(2, '0')}:00`);
+    setSlotTime(`${String(hour).padStart(2, '0')}:${minute === 30 ? '30' : '00'}`);
     setShowAdd(true);
   }
-  function openSlotForDay(hour: number) {
+  function openSlotForDay(hour: number, minute: 0 | 30 = 0) {
     setSlotDate(formatDate(anchorDate));
-    setSlotTime(`${String(hour).padStart(2, '0')}:00`);
+    setSlotTime(`${String(hour).padStart(2, '0')}:${minute === 30 ? '30' : '00'}`);
     setShowAdd(true);
   }
 
@@ -2350,16 +2350,22 @@ export default function CalendarPage() {
                       style={{ top: weekOffsets[hi]! + weekHourHeights[hi]! / 2, borderColor: '#E2E8F0' }} />
                   ))}
 
-                  {/* Clickable hour slots (behind lessons) — still bookable during a
+                  {/* Clickable half-hour slots (behind lessons) — still bookable during a
                       half-term/holiday week, since makeup lessons sometimes get
                       arranged then. The stripe overlay below is only a visual
-                      warning that the studio doesn't normally run classes. */}
+                      warning that the studio doesn't normally run classes. Split
+                      into :00/:30 halves so a lesson can be booked to start on
+                      the half-hour without manually retyping the time. */}
                   {HOURS.map((h, hi) => (
-                    <div key={`slot${h}`}
-                      className="absolute inset-x-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
-                      style={{ top: weekOffsets[hi], height: weekHourHeights[hi] }}
-                      onClick={() => openSlot(di, h)}>
-                      <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
+                    <div key={`slot${h}`} className="absolute inset-x-0" style={{ top: weekOffsets[hi], height: weekHourHeights[hi] }}>
+                      <div className="absolute inset-x-0 top-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
+                        style={{ height: '50%' }} onClick={() => openSlot(di, h, 0)}>
+                        <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
+                      </div>
+                      <div className="absolute inset-x-0 bottom-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
+                        style={{ height: '50%' }} onClick={() => openSlot(di, h, 30)}>
+                        <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
+                      </div>
                     </div>
                   ))}
 
@@ -2466,15 +2472,19 @@ export default function CalendarPage() {
                         </div>
                       ))}
 
-                      {/* Clickable hour slots — still bookable during a half-term/
+                      {/* Clickable half-hour slots — still bookable during a half-term/
                           holiday week; the stripe overlay below is a visual warning
                           only, since makeup lessons sometimes get arranged then. */}
                       {HOURS.map((h, hi) => (
-                        <div key={`slot${h}`}
-                          className="absolute inset-x-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
-                          style={{ top: dayOffsets[hi], height: dayHourHeights[hi] }}
-                          onClick={() => openSlotForDay(h)}>
-                          <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
+                        <div key={`slot${h}`} className="absolute inset-x-0" style={{ top: dayOffsets[hi], height: dayHourHeights[hi] }}>
+                          <div className="absolute inset-x-0 top-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
+                            style={{ height: '50%' }} onClick={() => openSlotForDay(h, 0)}>
+                            <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
+                          </div>
+                          <div className="absolute inset-x-0 bottom-0 hover:bg-[var(--sage-lt)]/30 transition-colors cursor-pointer group"
+                            style={{ height: '50%' }} onClick={() => openSlotForDay(h, 30)}>
+                            <span className="absolute right-1 top-1 text-[9px] text-[var(--sage)] opacity-0 group-hover:opacity-100 font-bold pointer-events-none">+</span>
+                          </div>
                         </div>
                       ))}
 

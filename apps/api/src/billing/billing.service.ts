@@ -270,7 +270,7 @@ export class BillingService {
     // as an empty £0 shell — e.g. a family's weekly lessons never appeared. The
     // "custom amount" flow passes itemizeLessons=false to stay manual-only.
     if (itemizeLessons !== false) {
-      await this.generateLessonLineItems(orgId, inv!.id, dto.familyId, dto.periodStart, dto.periodEnd);
+      await this.generateLessonLineItems(orgId, inv!.id, dto.familyId, dto.periodStart, dto.periodEnd, dto.enrollmentId, dto.includeFuture);
       // generateLessonLineItems updates invoices.total to the itemised amount, but
       // `inv` is the pre-itemisation snapshot (total = the £0 insert default). Re-read
       // so callers see the real total — same as createInvoicesPerClass does. Without
@@ -288,8 +288,15 @@ export class BillingService {
   // The family's completed lessons that haven't been billed on any invoice yet,
   // within the optional period, earliest-first. Shared by the combined statement
   // and the per-class split so the two can never disagree about what's eligible.
+  //
+  // `includeFuture` also admits lessons that haven't happened yet ('scheduled'/
+  // 'makeup') — for invoicing ahead of time. This is safe against double-charging:
+  // a lesson-linked invoice line is documentation only (billLessonDirectly's
+  // money model — see its doc comment), the real ledger debit is always posted
+  // by attendance's postAutoCharge when the lesson is actually marked present,
+  // regardless of whether it was invoiced before or after that happens.
   private async getEligibleLessons(
-    orgId: string, studentIds: string[], periodStart?: string, periodEnd?: string,
+    orgId: string, studentIds: string[], periodStart?: string, periodEnd?: string, includeFuture?: boolean,
   ) {
     if (studentIds.length === 0) return [];
 
@@ -297,14 +304,14 @@ export class BillingService {
       where: and(
         eq(lessons.organizationId, orgId),
         inArray(lessons.studentId, studentIds),
-        eq(lessons.status, 'completed'),
+        includeFuture ? inArray(lessons.status, ['completed', 'scheduled', 'makeup']) : eq(lessons.status, 'completed'),
       ),
       with: {
         teacher: { columns: { firstName: true, lastName: true } },
         enrollment: { columns: { instrument: true, rate: true, trialRate: true, defaultDuration: true, lessonType: true } },
       },
     });
-    // No completed lessons → nothing to itemise. Returning here also avoids
+    // No eligible lessons → nothing to itemise. Returning here also avoids
     // calling inArray() with an empty list below, which builds invalid SQL.
     if (candidateLessons.length === 0) return [];
 
@@ -424,16 +431,17 @@ export class BillingService {
 
   // Itemises one line per completed, unbilled lesson for every student in the
   // family (the combined statement). Optionally scoped to a single enrolment,
-  // which is how the per-class split bills one class at a time.
+  // which is how the per-class split bills one class at a time. `includeFuture`
+  // also itemises lessons that haven't happened yet — see getEligibleLessons.
   private async generateLessonLineItems(
     orgId: string, invoiceId: string, familyId: string,
-    periodStart?: string, periodEnd?: string, enrollmentId?: string,
+    periodStart?: string, periodEnd?: string, enrollmentId?: string, includeFuture?: boolean,
   ) {
     const famStudents = await this.db.db.query.students.findMany({
       where: and(eq(students.organizationId, orgId), eq(students.familyId, familyId)),
       columns: { id: true },
     });
-    let eligible = await this.getEligibleLessons(orgId, famStudents.map(s => s.id), periodStart, periodEnd);
+    let eligible = await this.getEligibleLessons(orgId, famStudents.map(s => s.id), periodStart, periodEnd, includeFuture);
     if (enrollmentId) eligible = eligible.filter(l => l.enrollmentId === enrollmentId);
     await this.writeLessonLineItems(orgId, invoiceId, eligible);
   }
