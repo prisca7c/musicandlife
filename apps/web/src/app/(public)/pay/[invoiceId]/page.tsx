@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useParams } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { apiFetch } from '@/lib/api';
 import { formatMoney } from '@/lib/money';
@@ -27,6 +27,7 @@ interface PublicInvoiceSummary {
   issuedOn: string;
   notes: string | null;
   lineItems: PublicLineItem[];
+  cardPaymentEnabled: boolean;
   family: { name: string; address: string | null } | null;
   org: {
     name: string;
@@ -49,19 +50,58 @@ async function toBase64(url: string): Promise<string> {
 }
 
 export default function PayInvoicePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 py-12 px-4" />}>
+      <PayInvoicePageInner />
+    </Suspense>
+  );
+}
+
+function PayInvoicePageInner() {
   const params = useParams<{ invoiceId: string }>();
+  const searchParams = useSearchParams();
+  const returnedFromRevolut = searchParams.get('revolut') === '1';
   const [data, setData] = useState<PublicInvoiceSummary | null>(null);
   const [error, setError] = useState('');
   const [logoSrc, setLogoSrc] = useState('');
+  const [payingByCard, setPayingByCard] = useState(false);
+  const [cardError, setCardError] = useState('');
 
-  useEffect(() => {
+  const reload = () =>
     apiFetch<PublicInvoiceSummary>(`/public/invoices/${params.invoiceId}`)
       .then(setData)
       .catch(err => setError(err instanceof Error ? err.message : 'Could not load invoice'));
-  }, [params.invoiceId]);
+
+  useEffect(() => { reload(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [params.invoiceId]);
+
+  // Revolut's webhook confirms the payment server-side, but it can land a
+  // moment after the browser redirect back here — re-check status a few
+  // times rather than showing "unpaid" for a payment that just went through.
+  useEffect(() => {
+    if (!returnedFromRevolut) return;
+    let attempts = 0;
+    const id = setInterval(() => {
+      attempts++;
+      reload();
+      if (attempts >= 5) clearInterval(id);
+    }, 2000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnedFromRevolut]);
 
   // Local static asset, not an API call — same as the admin invoice page.
   useEffect(() => { toBase64('/logo-full.png').then(setLogoSrc).catch(() => {}); }, []);
+
+  async function startCardPayment() {
+    setPayingByCard(true); setCardError('');
+    try {
+      const res = await apiFetch<{ checkoutUrl: string }>(`/public/invoices/${params.invoiceId}/checkout`, { method: 'POST' });
+      window.location.href = res.checkoutUrl;
+    } catch (err) {
+      setCardError(err instanceof Error ? err.message : 'Could not start the card payment.');
+      setPayingByCard(false);
+    }
+  }
 
   const pdfInvoice: InvoicePDFData | null = data ? {
     number: data.number,
@@ -95,6 +135,11 @@ export default function PayInvoicePage() {
       <div className="max-w-md mx-auto">
         <div className="bg-white rounded-xl border shadow-sm p-8">
           {error && <p className="text-sm text-red-600">{error}</p>}
+          {returnedFromRevolut && data && data.status !== 'paid' && (
+            <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 mb-4 text-sm text-blue-800">
+              Confirming your card payment — this page will update automatically once it&apos;s through.
+            </div>
+          )}
           {!data && !error && <p className="text-sm text-gray-400">Loading…</p>}
           {data && data.total <= 0 ? (
             // A zero/negative total is a credit note, not a bill. Never show a
@@ -135,6 +180,24 @@ export default function PayInvoicePage() {
                 <p className="text-2xl font-bold text-gray-900">{formatMoney(data.total)}</p>
                 <p className="text-xs text-gray-500 mt-1">Due {data.dueDate}</p>
               </div>
+
+              {data.cardPaymentEnabled && (
+                <div className="mb-4">
+                  <button
+                    onClick={startCardPayment}
+                    disabled={payingByCard}
+                    className="w-full rounded-lg bg-gray-900 text-white text-sm font-semibold py-2.5 hover:bg-gray-800 disabled:opacity-60"
+                  >
+                    {payingByCard ? 'Redirecting…' : `Pay ${formatMoney(data.total)} by card`}
+                  </button>
+                  {cardError && <p className="text-xs text-red-600 mt-2">{cardError}</p>}
+                  <div className="flex items-center gap-3 my-4">
+                    <div className="flex-1 h-px bg-gray-200" />
+                    <span className="text-xs text-gray-400">or</span>
+                    <div className="flex-1 h-px bg-gray-200" />
+                  </div>
+                </div>
+              )}
 
               {(data.org.bankAccountNumber || data.org.bankSortCode) && (
                 <div className="space-y-2 text-sm text-gray-700 mb-4">
