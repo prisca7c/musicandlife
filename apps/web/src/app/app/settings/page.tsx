@@ -492,6 +492,12 @@ export default function SettingsPage() {
                       Close
                     </button>
                   )}
+                  {t.status === 'closed' && (
+                    <button onClick={() => setTermStatus(t.id, 'active')}
+                      className="text-xs font-semibold px-2.5 py-1 rounded-lg border border-[var(--sage-md)] text-[var(--sage)] hover:bg-[var(--sage-lt)]">
+                      Activate
+                    </button>
+                  )}
                 </div>
               </div>
             );

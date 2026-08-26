@@ -563,7 +563,7 @@ function LessonBlock({ lesson, onClick }: { lesson: LessonLayout; onClick: () =>
 // ─── Add lesson modal ─────────────────────────────────────────────────────────
 interface SlotsResponse { date: string; weekday: string; noWindows: boolean; slots: string[]; }
 type AddResult =
-  | { kind: 'weekly'; created: number; through: string }
+  | { kind: 'weekly'; created: number; through: string; ongoing: boolean }
   | { kind: 'request'; teacherName: string; count: number }
   | { kind: 'single'; lessonId: string; studentName: string };
 
@@ -798,7 +798,7 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
           }),
         });
         onCreated();
-        setResult({ kind: 'weekly', created: r.created, through: r.through });
+        setResult({ kind: 'weekly', created: r.created, through: r.through, ongoing: repeatWeeks === 'ongoing' });
       } else if (requestMode) {
         // Hand the ranked times to the teacher — no lesson exists until they confirm.
         await apiFetch('/lesson-requests', { method: 'POST', token: t, body: JSON.stringify({
@@ -847,8 +847,9 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
               <>
                 <p className="font-bold text-base mb-1">Weekly lessons booked ✓</p>
                 {result.created > 0 ? (
-                  <p>Added <strong>{result.created}</strong> weekly lesson{result.created !== 1 ? 's' : ''} through{' '}
-                    {new Date(result.through).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.</p>
+                  <p>Added <strong>{result.created}</strong> weekly lesson{result.created !== 1 ? 's' : ''}, scheduled through{' '}
+                    {new Date(result.through).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                    {result.ongoing ? ' so far — this repeats weekly with no end date, and more lessons will keep being added automatically.' : '.'}</p>
                 ) : (
                   <p>No new lessons were booked — they may already exist for this weekly slot.</p>
                 )}
