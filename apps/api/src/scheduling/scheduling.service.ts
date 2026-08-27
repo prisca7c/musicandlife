@@ -18,7 +18,15 @@ import { parseZonedDateTime, zonedWeekdayAndTime, formatInZone } from '../common
 export interface Actor { role: BaseRole; userId: string }
 
 // How many weeks ahead recurring weekly lessons are materialised as real rows.
-export const RECURRENCE_WINDOW_WEEKS = 12;
+// This has to be far enough out that a normal "invoice a family through
+// December" or "invoice this term" request actually finds lesson rows to
+// bill — a 12-week rolling window meant a family booked in August had no
+// lessons on the books past mid-November, so invoicing further out came back
+// empty even though the booking itself was genuinely ongoing. A year keeps
+// comfortably ahead of any realistic invoicing horizon; the nightly worker
+// (RecurrenceWorker) re-runs this for every active enrollment and keeps the
+// window rolling forward indefinitely, so an "ongoing" series never runs out.
+export const RECURRENCE_WINDOW_WEEKS = 52;
 
 // Only a live lesson can be moved. 'scheduled' is a normal upcoming lesson;
 // 'makeup' is a real upcoming make-up lesson. A 'completed' or any 'cancelled_*'
