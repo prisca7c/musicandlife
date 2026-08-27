@@ -848,13 +848,14 @@ function AddLessonModal({ open, onClose, onCreated, defaultDate, defaultTime }: 
                 <p className="font-bold text-base mb-1">Weekly lessons booked ✓</p>
                 {result.created > 0 ? (
                   result.ongoing ? (
-                    // Deliberately no "through DATE" here — the series has no end
-                    // date, and showing one (even with a caveat) reads as a
-                    // stopping point. Lessons are generated in a rolling window
-                    // and topped up automatically every night for as long as the
-                    // booking stays active, so there's no fixed cutoff to name.
-                    <p><strong>{result.created}</strong> weekly lesson{result.created !== 1 ? 's' : ''} booked to start the series.
-                      This booking is ongoing, with no end date — it will keep going and new lessons keep getting added automatically, indefinitely.</p>
+                    // Deliberately no date AND no lesson count here — this is an
+                    // internal implementation detail (how far ahead the calendar
+                    // happens to be pre-filled right now) that reads as a
+                    // quantity/boundary no matter how it's framed. A rolling
+                    // window keeps topping this up automatically every night,
+                    // forever, for as long as the booking stays active — there is
+                    // no cutoff and no count to report.
+                    <p>Weekly booking confirmed. This repeats every week with no end date — lessons keep being added automatically as time goes on, so this never needs rebooking.</p>
                   ) : (
                     <p>Added <strong>{result.created}</strong> weekly lesson{result.created !== 1 ? 's' : ''}, scheduled through{' '}
                       {new Date(result.through).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}.</p>
