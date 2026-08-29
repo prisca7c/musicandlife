@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { formatMoney } from '@/lib/money';
@@ -46,17 +46,32 @@ interface Family {
 function AddFamilyModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [isAdult, setIsAdult] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  useEffect(() => { if (open) { setIsAdult(false); setError(''); } }, [open]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setSaving(true); setError('');
     const f = new FormData(e.currentTarget);
+    const adultName = `${f.get('adultFirstName') || ''} ${f.get('adultLastName') || ''}`.trim();
     try {
-      await apiFetch('/families', { method: 'POST', token: tok(), body: JSON.stringify({
-        name: f.get('name'), contactName: f.get('contactName') || undefined,
+      const fam = await apiFetch<{ id: string }>('/families', { method: 'POST', token: tok(), body: JSON.stringify({
+        name: isAdult ? adultName : f.get('name'),
+        contactName: isAdult ? adultName : (f.get('contactName') || undefined),
         phone: f.get('phone') || undefined, email: f.get('email') || undefined,
         address: f.get('address') || undefined, invoiceMode: f.get('invoiceMode') || undefined,
       })});
+      // An "adult" is their own family AND their own student record — the
+      // same person appears in both lists so they can be booked/billed for
+      // their own lessons, without splitting into a separate parent+child.
+      if (isAdult) {
+        await apiFetch('/students', { method: 'POST', token: tok(), body: JSON.stringify({
+          familyId: fam.id,
+          firstName: f.get('adultFirstName'), lastName: f.get('adultLastName'),
+          email: f.get('email') || undefined, status: 'active',
+        })});
+      }
       onCreated(); onClose();
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
     finally { setSaving(false); }
@@ -71,14 +86,34 @@ function AddFamilyModal({ open, onClose, onCreated }: { open: boolean; onClose: 
         </div>
       )}
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="ui-label">Family name <span style={{ color: 'var(--coral)' }}>*</span></label>
-          <input name="name" required className="ui-input" />
-        </div>
-        <div>
-          <label className="ui-label">Primary contact name</label>
-          <input name="contactName" className="ui-input" />
-        </div>
+        <label className="flex items-center gap-2 cursor-pointer text-sm">
+          <input type="checkbox" checked={isAdult} onChange={e => setIsAdult(e.target.checked)}
+            style={{ accentColor: 'var(--sage)' }} />
+          <span>This is an adult, not a child — use one name for both the family and student record</span>
+        </label>
+        {isAdult ? (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="ui-label">Adult first name <span style={{ color: 'var(--coral)' }}>*</span></label>
+              <input name="adultFirstName" required className="ui-input" />
+            </div>
+            <div>
+              <label className="ui-label">Adult last name <span style={{ color: 'var(--coral)' }}>*</span></label>
+              <input name="adultLastName" required className="ui-input" />
+            </div>
+          </div>
+        ) : (
+          <>
+            <div>
+              <label className="ui-label">Family name <span style={{ color: 'var(--coral)' }}>*</span></label>
+              <input name="name" required className="ui-input" />
+            </div>
+            <div>
+              <label className="ui-label">Primary contact name</label>
+              <input name="contactName" className="ui-input" />
+            </div>
+          </>
+        )}
         <div>
           <label className="ui-label">Email</label>
           <input name="email" type="email" className="ui-input" />

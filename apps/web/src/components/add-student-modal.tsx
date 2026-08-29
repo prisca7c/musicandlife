@@ -7,8 +7,20 @@ import { SearchableSelect } from '@/components/searchable-select';
 import { useInstruments } from '@/lib/use-instruments';
 import { lessonRate } from '@music-life/types';
 
-interface Family { id: string; name: string; }
+interface Family {
+  id: string; name: string; contactName?: string | null;
+  students?: { id: string; firstName: string; lastName: string }[];
+}
 interface StaffMember { id: string; firstName: string; lastName: string; instruments: string[]; }
+
+// Two families can share a generic name (e.g. several unrelated "Shah"
+// households) — lead with the parent/adult's actual name so the picker can
+// tell them apart, and list the kids as a further disambiguator.
+function familyLabel(f: Family): string {
+  const who = f.contactName?.trim() || f.name;
+  const kids = (f.students ?? []).map(s => s.firstName).filter(Boolean).join(', ');
+  return kids ? `${who} (${kids})` : who;
+}
 
 // Teachers who teach the picked instrument, per each teacher's own
 // "Instruments taught" list — falls back to the full staff list when nobody
@@ -33,6 +45,7 @@ export function AddStudentModal({ open, onClose, onCreated }: {
   const [familyId, setFamilyId] = useState('');
   const [newFamily, setNewFamily] = useState(false);
   const [newFamilyName, setNewFamilyName] = useState('');
+  const [isAdult, setIsAdult] = useState(false);
   const [status, setStatus] = useState('active');
   const [lessonType, setLessonType] = useState<'private' | 'group'>('private');
   const [instrument, setInstrument] = useState('');
@@ -50,24 +63,28 @@ export function AddStudentModal({ open, onClose, onCreated }: {
       apiFetch<Family[]>('/families', { token: t }).then(setFamilies).catch(() => {});
       apiFetch<StaffMember[]>('/staff', { token: t }).then(setStaff).catch(() => {});
       setFamilyId(''); setStatus('active'); setError('');
-      setNewFamily(false); setNewFamilyName('');
+      setNewFamily(false); setNewFamilyName(''); setIsAdult(false);
       setLessonType('private'); setInstrument(''); setTeacherId(''); setDuration(30);
     }
   }, [open]);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const adultName = `${f.get('firstName') || ''} ${f.get('lastName') || ''}`.trim();
     if (newFamily) {
-      if (!newFamilyName.trim()) { setError('Please enter a family name'); return; }
+      if (!isAdult && !newFamilyName.trim()) { setError('Please enter a family name'); return; }
+      if (isAdult && !adultName) { setError('Please enter the adult’s name'); return; }
     } else if (!familyId) { setError('Please select a family'); return; }
     setSaving(true); setError('');
-    const f = new FormData(e.currentTarget);
     try {
       let resolvedFamilyId = familyId;
       if (newFamily) {
         const fam = await apiFetch<{ id: string }>('/families', { method: 'POST', token: tok(), body: JSON.stringify({
-          name: newFamilyName, contactName: f.get('familyContactName') || undefined,
+          name: isAdult ? adultName : newFamilyName,
+          contactName: isAdult ? adultName : (f.get('familyContactName') || undefined),
           email: f.get('familyEmail') || undefined, phone: f.get('familyPhone') || undefined,
+          address: f.get('familyAddress') || undefined,
         })});
         resolvedFamilyId = fam.id;
       }
@@ -110,14 +127,23 @@ export function AddStudentModal({ open, onClose, onCreated }: {
           </div>
           {newFamily ? (
             <div className="space-y-3 rounded-xl border p-3" style={{ borderColor: 'var(--bd)', background: 'var(--surf)' }}>
-              <div>
-                <label className="ui-label">Family name <span style={{ color: 'var(--coral)' }}>*</span></label>
-                <input value={newFamilyName} onChange={e => setNewFamilyName(e.target.value)} required className="ui-input" />
-              </div>
-              <div>
-                <label className="ui-label">Primary contact name</label>
-                <input name="familyContactName" className="ui-input" />
-              </div>
+              <label className="flex items-center gap-2 cursor-pointer text-sm">
+                <input type="checkbox" checked={isAdult} onChange={e => setIsAdult(e.target.checked)}
+                  style={{ accentColor: 'var(--sage)' }} />
+                <span>This is an adult, not a child — use one name for both the family and student record</span>
+              </label>
+              {!isAdult && (
+                <>
+                  <div>
+                    <label className="ui-label">Family name <span style={{ color: 'var(--coral)' }}>*</span></label>
+                    <input value={newFamilyName} onChange={e => setNewFamilyName(e.target.value)} required className="ui-input" />
+                  </div>
+                  <div>
+                    <label className="ui-label">Primary contact name</label>
+                    <input name="familyContactName" className="ui-input" />
+                  </div>
+                </>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="ui-label">Email</label>
@@ -128,21 +154,25 @@ export function AddStudentModal({ open, onClose, onCreated }: {
                   <input name="familyPhone" className="ui-input" />
                 </div>
               </div>
+              <div>
+                <label className="ui-label">Address</label>
+                <textarea name="familyAddress" rows={2} className="ui-input" style={{ resize: 'vertical' }} />
+              </div>
             </div>
           ) : (
             <SearchableSelect
-              options={families.map(f => ({ value: f.id, label: f.name }))}
+              options={families.map(f => ({ value: f.id, label: familyLabel(f) }))}
               value={familyId} onChange={setFamilyId} placeholder="Select a family…"
             />
           )}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="ui-label">First name <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <label className="ui-label">{newFamily && isAdult ? "Adult's first name" : 'First name'} <span style={{ color: 'var(--coral)' }}>*</span></label>
             <input name="firstName" required className="ui-input" />
           </div>
           <div>
-            <label className="ui-label">Last name <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <label className="ui-label">{newFamily && isAdult ? "Adult's last name" : 'Last name'} <span style={{ color: 'var(--coral)' }}>*</span></label>
             <input name="lastName" required className="ui-input" />
           </div>
         </div>
