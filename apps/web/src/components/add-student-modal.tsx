@@ -83,7 +83,7 @@ export function AddStudentModal({ open, onClose, onCreated }: {
         const fam = await apiFetch<{ id: string }>('/families', { method: 'POST', token: tok(), body: JSON.stringify({
           name: isAdult ? adultName : newFamilyName,
           contactName: isAdult ? adultName : (f.get('familyContactName') || undefined),
-          email: f.get('familyEmail') || undefined, phone: f.get('familyPhone') || undefined,
+          email: (isAdult ? f.get('email') : f.get('familyEmail')) || undefined, phone: f.get('familyPhone') || undefined,
           address: f.get('familyAddress') || undefined,
         })});
         resolvedFamilyId = fam.id;
@@ -144,11 +144,13 @@ export function AddStudentModal({ open, onClose, onCreated }: {
                   </div>
                 </>
               )}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="ui-label">Email</label>
-                  <input name="familyEmail" type="email" className="ui-input" />
-                </div>
+              <div className={isAdult ? '' : 'grid grid-cols-2 gap-3'}>
+                {!isAdult && (
+                  <div>
+                    <label className="ui-label">Email</label>
+                    <input name="familyEmail" type="email" className="ui-input" />
+                  </div>
+                )}
                 <div>
                   <label className="ui-label">Phone</label>
                   <input name="familyPhone" className="ui-input" />
@@ -182,8 +184,10 @@ export function AddStudentModal({ open, onClose, onCreated }: {
         </div>
         <div>
           <label className="ui-label">
-            Student email{' '}
-            <span className="font-normal text-[11px]" style={{ color: 'var(--txt4)' }}>(optional — creates portal login)</span>
+            {newFamily && isAdult ? "Adult's email" : 'Student email'}{' '}
+            <span className="font-normal text-[11px]" style={{ color: 'var(--txt4)' }}>
+              {newFamily && isAdult ? '(optional — used for both billing and portal login)' : '(optional — creates portal login)'}
+            </span>
           </label>
           <input name="email" type="email" className="ui-input" />
         </div>
