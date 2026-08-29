@@ -42,6 +42,15 @@ export class BillingController {
     return this.billing.getInvoice(user.orgId, id);
   }
 
+  // Staff preview of the exact pay page a family will see, for any invoice
+  // status — lets an admin check a draft before sending it, since the public
+  // pay link itself only resolves sent/paid invoices.
+  @Get('invoices/:id/preview-summary')
+  @Roles('admin')
+  getInvoicePreviewSummary(@CurrentUser() user: RequestUser, @Param('id') id: string) {
+    return this.billing.getInvoicePreviewSummary(user.orgId, id);
+  }
+
   @Post('invoices/:id/send')
   @Roles('admin')
   sendInvoice(@CurrentUser() user: RequestUser, @Param('id') id: string) {
