@@ -468,7 +468,6 @@ export default function FamilyDetailPage() {
       </div>
       <PageHeader
         title={family.contactName || family.name}
-        subtitle={family.contactName && family.contactName !== family.name ? family.name : undefined}
         action={
           <div className="flex items-center gap-3">
             <span className="text-sm font-semibold"
