@@ -439,7 +439,7 @@ export class RegistrationService {
           studentLastName: r.studentLastName!,
           studentDob: r.studentDob || undefined,
           studentEmail: r.studentEmail || undefined,
-          familyName: r.familyName || `${r.guardianLastName} Family`,
+          familyName: r.familyName || `${r.guardianFirstName} ${r.guardianLastName}`,
           contactName: `${r.guardianFirstName} ${r.guardianLastName}`,
           contactEmail: r.guardianEmail || undefined,
           contactPhone: r.guardianPhone || undefined,
