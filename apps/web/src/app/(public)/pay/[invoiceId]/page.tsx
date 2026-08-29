@@ -61,16 +61,26 @@ function PayInvoicePageInner() {
   const params = useParams<{ invoiceId: string }>();
   const searchParams = useSearchParams();
   const returnedFromRevolut = searchParams.get('revolut') === '1';
+  // Staff-only preview mode (linked from the admin invoice detail page) — shows
+  // exactly what a family will see, including for a draft that isn't reachable
+  // via the real public pay link yet. Uses the logged-in staff member's own
+  // token, so this only works for someone already signed into the admin.
+  const preview = searchParams.get('preview') === '1';
   const [data, setData] = useState<PublicInvoiceSummary | null>(null);
   const [error, setError] = useState('');
   const [logoSrc, setLogoSrc] = useState('');
   const [payingByCard, setPayingByCard] = useState(false);
   const [cardError, setCardError] = useState('');
 
-  const reload = () =>
-    apiFetch<PublicInvoiceSummary>(`/public/invoices/${params.invoiceId}`)
+  const reload = () => {
+    const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+    const path = preview
+      ? `/invoices/${params.invoiceId}/preview-summary`
+      : `/public/invoices/${params.invoiceId}`;
+    return apiFetch<PublicInvoiceSummary>(path, preview ? { token: tok() } : undefined)
       .then(setData)
       .catch(err => setError(err instanceof Error ? err.message : 'Could not load invoice'));
+  };
 
   useEffect(() => { reload(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [params.invoiceId]);
 
@@ -134,6 +144,12 @@ function PayInvoicePageInner() {
     <div className="min-h-screen bg-gray-50 py-12 px-4">
       <div className="max-w-md mx-auto">
         <div className="bg-white rounded-xl border shadow-sm p-8">
+          {preview && data && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 mb-4 text-sm text-amber-800">
+              Preview only — this is what the family will see once you send this invoice.
+              {data.status === 'draft' && ' Card payment is disabled until then.'}
+            </div>
+          )}
           {error && <p className="text-sm text-red-600">{error}</p>}
           {returnedFromRevolut && data && data.status !== 'paid' && (
             <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 mb-4 text-sm text-blue-800">

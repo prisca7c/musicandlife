@@ -151,8 +151,21 @@ export class BillingService {
   // skips JwtAuthGuard. Invoice ids are unguessable UUIDs and only payment-reference fields
   // (no family PII beyond what's already on the printed invoice) are returned.
   async getPublicInvoiceSummary(id: string) {
+    return this.buildInvoiceSummary(id, undefined, true);
+  }
+
+  // Staff preview of the exact pay page a family will see — same shape as
+  // getPublicInvoiceSummary, but org-scoped (not unguessable-id-scoped) and
+  // available for any status, so a draft can be checked before it's sent.
+  // Card payment is always disabled here: a draft's total isn't final, and
+  // initiating a real checkout for an unissued invoice shouldn't be possible.
+  async getInvoicePreviewSummary(orgId: string, id: string) {
+    return this.buildInvoiceSummary(id, orgId, false);
+  }
+
+  private async buildInvoiceSummary(id: string, orgId: string | undefined, requireIssued: boolean) {
     const inv = await this.db.db.query.invoices.findFirst({
-      where: eq(invoices.id, id),
+      where: orgId ? and(eq(invoices.id, id), eq(invoices.organizationId, orgId)) : eq(invoices.id, id),
       columns: {
         id: true, number: true, total: true, status: true, dueDate: true, issuedOn: true,
         notes: true, organizationId: true, familyId: true,
@@ -175,7 +188,9 @@ export class BillingService {
     // Only issued invoices are reachable via the public pay link. Drafts are
     // staff-only and not yet finalised; voids are cancelled — neither should be
     // resolvable (with the studio's bank details) by anyone holding the id.
-    if (!inv || (inv.status !== 'sent' && inv.status !== 'paid')) {
+    // The staff preview path (requireIssued=false) skips this so a draft can
+    // be reviewed before it's sent.
+    if (!inv || (requireIssued && inv.status !== 'sent' && inv.status !== 'paid')) {
       throw new NotFoundException('Invoice not found');
     }
 
@@ -219,7 +234,8 @@ export class BillingService {
       lineItems,
       // Just an env-var presence check, not a service dependency — avoids a
       // BillingModule <-> PaymentsModule circular import for one boolean.
-      cardPaymentEnabled: !!process.env.REVOLUT_API_KEY,
+      // Always false in preview mode (requireIssued=false) — see comment above.
+      cardPaymentEnabled: requireIssued && !!process.env.REVOLUT_API_KEY,
       family: family ? { name: family.contactName?.trim() || family.name, address: family.address } : null,
       org: {
         name: org?.name ?? 'Music & Life',

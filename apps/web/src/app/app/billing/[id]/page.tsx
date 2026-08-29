@@ -223,6 +223,9 @@ export default function InvoiceDetailPage() {
         subtitle={invoice.family?.contactName?.trim() || invoice.family?.name}
         action={
           <div className="flex items-center gap-2">
+            <a href={`/pay/${invoice.id}?preview=1`} target="_blank" rel="noopener noreferrer" className="ui-btn-ghost text-sm">
+              Preview pay page
+            </a>
             <PdfDownloadButton invoice={pdfInvoice} org={org} logoSrc={logoSrc} />
             {invoice.status === 'draft' && (
               <button onClick={() => action('send')} disabled={actioning} className="ui-btn-primary text-sm">
