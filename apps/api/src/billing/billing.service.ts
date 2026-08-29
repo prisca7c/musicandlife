@@ -83,7 +83,7 @@ export class BillingService {
       where: familyId
         ? and(eq(invoices.organizationId, orgId), eq(invoices.familyId, familyId))
         : eq(invoices.organizationId, orgId),
-      with: { family: { columns: { id: true, name: true } } },
+      with: { family: { columns: { id: true, name: true, contactName: true } } },
       // Newest invoice first, not oldest — issuedOn is a bare date, so a batch
       // of invoices generated the same day sorted by it alone had no reliable
       // order among themselves. createdAt is a real timestamp that always
@@ -98,7 +98,7 @@ export class BillingService {
     const inv = await this.db.db.query.invoices.findFirst({
       where: and(eq(invoices.id, id), eq(invoices.organizationId, orgId)),
       with: {
-        family: { columns: { id: true, name: true, email: true } },
+        family: { columns: { id: true, name: true, contactName: true, email: true } },
         lineItems: {
           with: {
             lesson: {
@@ -183,7 +183,7 @@ export class BillingService {
       this.db.db.query.organizations.findFirst({ where: eq(organizations.id, inv.organizationId) }),
       this.db.db.query.families.findFirst({
         where: eq(families.id, inv.familyId),
-        columns: { name: true, address: true },
+        columns: { name: true, contactName: true, address: true },
       }),
     ]);
     const settings = (org?.settings as Record<string, unknown>) ?? {};
@@ -220,7 +220,7 @@ export class BillingService {
       // Just an env-var presence check, not a service dependency — avoids a
       // BillingModule <-> PaymentsModule circular import for one boolean.
       cardPaymentEnabled: !!process.env.REVOLUT_API_KEY,
-      family: family ? { name: family.name, address: family.address } : null,
+      family: family ? { name: family.contactName?.trim() || family.name, address: family.address } : null,
       org: {
         name: org?.name ?? 'Music & Life',
         address: settings.address as string | undefined,

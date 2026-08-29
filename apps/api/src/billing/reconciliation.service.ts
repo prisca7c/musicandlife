@@ -83,7 +83,7 @@ export class ReconciliationService {
         ? and(eq(paymentClaims.organizationId, orgId), eq(paymentClaims.status, status))
         : eq(paymentClaims.organizationId, orgId),
       with: {
-        family: { columns: { id: true, name: true } },
+        family: { columns: { id: true, name: true, contactName: true } },
         invoice: { columns: { id: true, number: true, total: true, status: true } },
       },
       orderBy: [desc(paymentClaims.createdAt)],

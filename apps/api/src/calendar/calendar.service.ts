@@ -26,7 +26,7 @@ export class CalendarService {
    * per-student secret.
    */
   private async familyForUser(userId: string, orgId: string): Promise<{
-    id: string; name: string; calendarToken: string | null;
+    id: string; name: string; contactName: string | null; calendarToken: string | null;
     students: { id: string }[]; callerStudentId: string | null;
   }> {
     const guardianLink = await this.db.db.query.guardians.findFirst({
@@ -50,7 +50,7 @@ export class CalendarService {
 
     const family = await this.db.db.query.families.findFirst({
       where: and(eq(families.id, familyId), eq(families.organizationId, orgId)),
-      columns: { id: true, name: true, calendarToken: true },
+      columns: { id: true, name: true, contactName: true, calendarToken: true },
       with: { students: { columns: { id: true } } },
     });
     if (!family) throw new NotFoundException('Family not found');
@@ -75,7 +75,7 @@ export class CalendarService {
         .where(eq(families.id, family.id));
     }
 
-    return { token, familyName: family.name, studentId: family.callerStudentId };
+    return { token, familyName: family.contactName?.trim() || family.name, studentId: family.callerStudentId };
   }
 
   /** Invalidates the old URL. Used when a family thinks the link has leaked. */
@@ -86,7 +86,7 @@ export class CalendarService {
       .update(families)
       .set({ calendarToken: token, updatedAt: new Date() })
       .where(eq(families.id, family.id));
-    return { token, familyName: family.name, studentId: family.callerStudentId };
+    return { token, familyName: family.contactName?.trim() || family.name, studentId: family.callerStudentId };
   }
 
   /**
@@ -104,7 +104,7 @@ export class CalendarService {
 
     const family = await this.db.db.query.families.findFirst({
       where: eq(families.calendarToken, token),
-      columns: { id: true, name: true, organizationId: true },
+      columns: { id: true, name: true, contactName: true, organizationId: true },
       with: { students: { columns: { id: true, firstName: true } } },
     });
     if (!family) throw new NotFoundException('Calendar not found');
@@ -166,7 +166,7 @@ export class CalendarService {
     });
 
     return buildIcs({
-      calendarName: `${org?.name ?? 'Music & Life'} — ${family.name}`,
+      calendarName: `${org?.name ?? 'Music & Life'} — ${family.contactName?.trim() || family.name}`,
       events,
     });
   }

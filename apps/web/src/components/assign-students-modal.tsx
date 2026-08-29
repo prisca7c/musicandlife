@@ -7,7 +7,7 @@ import { SearchableSelect } from '@/components/searchable-select';
 import { Check, Search, Loader2 } from 'lucide-react';
 
 interface StaffMember { id: string; firstName: string; lastName: string; }
-interface Student { id: string; firstName: string; lastName: string; family?: { name: string } | null; }
+interface Student { id: string; firstName: string; lastName: string; family?: { name: string; contactName?: string | null } | null; }
 interface StaffDetail { assignments: { student: { id: string } }[] }
 
 /**
@@ -79,7 +79,7 @@ export function AssignStudentsModal({ open, onClose, onChanged, teachers, defaul
   const q = search.trim().toLowerCase();
   const filtered = q
     ? students.filter(s => `${s.firstName} ${s.lastName}`.toLowerCase().includes(q)
-        || (s.family?.name ?? '').toLowerCase().includes(q))
+        || (s.family?.contactName || s.family?.name || '').toLowerCase().includes(q))
     : students;
 
   return (
@@ -145,8 +145,8 @@ export function AssignStudentsModal({ open, onClose, onChanged, teachers, defaul
                         style={{ color: on ? 'var(--sage-dk)' : 'var(--txt)' }}>
                         {s.firstName} {s.lastName}
                       </span>
-                      {s.family?.name && (
-                        <span className="block text-[11px] truncate" style={{ color: 'var(--txt4)' }}>{s.family.name}</span>
+                      {(s.family?.contactName || s.family?.name) && (
+                        <span className="block text-[11px] truncate" style={{ color: 'var(--txt4)' }}>{s.family.contactName || s.family.name}</span>
                       )}
                     </span>
                   </button>

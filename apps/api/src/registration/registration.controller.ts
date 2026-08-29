@@ -53,12 +53,12 @@ export class RegistrationController {
         eq(families.organizationId, org.id),
         sql`lower(${families.email}) = ${q.toLowerCase()}`,
       ),
-      columns: { name: true, email: true },
+      columns: { name: true, contactName: true, email: true },
       limit: 1,
     });
     return results
       .filter(f => f.email)
-      .map(f => ({ email: f.email!, name: f.name }));
+      .map(f => ({ email: f.email!, name: f.contactName?.trim() || f.name }));
   }
 
   // Admin

@@ -290,7 +290,7 @@ export class ReportsService {
   async getStudentInvoicePdfData(orgId: string, studentId: string, from: string, to: string) {
     const student = await this.db.db.query.students.findFirst({
       where: and(eq(students.id, studentId), eq(students.organizationId, orgId)),
-      with: { family: { columns: { id: true, name: true, email: true, address: true } } },
+      with: { family: { columns: { id: true, name: true, contactName: true, email: true, address: true } } },
     });
     if (!student) throw new NotFoundException('Student not found');
 
@@ -346,7 +346,10 @@ export class ReportsService {
     });
 
     return {
-      student: { id: student.id, name: `${student.firstName} ${student.lastName}`, family: student.family },
+      student: {
+        id: student.id, name: `${student.firstName} ${student.lastName}`,
+        family: student.family ? { ...student.family, name: student.family.contactName?.trim() || student.family.name } : null,
+      },
       org: { name: org?.name ?? 'Music & Life' },
       period: { from, to },
       lineItems,
@@ -433,7 +436,7 @@ export class ReportsService {
   async getStudentAttendancePdfData(orgId: string, studentId: string, from: string, to: string) {
     const student = await this.db.db.query.students.findFirst({
       where: and(eq(students.id, studentId), eq(students.organizationId, orgId)),
-      with: { family: { columns: { name: true } } },
+      with: { family: { columns: { name: true, contactName: true } } },
     });
     if (!student) throw new NotFoundException('Student not found');
 
@@ -478,7 +481,10 @@ export class ReportsService {
     const total = rows.filter(r => r.status !== 'scheduled').length;
 
     return {
-      student: { id: student.id, name: `${student.firstName} ${student.lastName}`, family: student.family },
+      student: {
+        id: student.id, name: `${student.firstName} ${student.lastName}`,
+        family: student.family ? { name: student.family.contactName?.trim() || student.family.name } : null,
+      },
       period: { from, to },
       rows,
       summary: { present, total, attendanceRate: total > 0 ? Math.round((present / total) * 100) : null },

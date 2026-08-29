@@ -24,7 +24,7 @@ const PdfDownloadButton = dynamic(
 interface InvoiceDetail {
   id: string; number: string; status: string; total: number; issuedOn: string; dueDate: string;
   mode: string; notes: string | null; balanceForward: number;
-  family: { id: string; name: string; email: string | null } | null;
+  family: { id: string; name: string; contactName: string | null; email: string | null } | null;
   lineItems: {
     id: string; description: string; amount: number; lessonId: string | null;
     date: string | null; startsAt: string | null; duration: number | null;
@@ -173,7 +173,7 @@ export default function InvoiceDetailPage() {
     notes:           invoice.notes,
     payUrl:          typeof window !== 'undefined' ? `${window.location.origin}/pay/${invoice.id}` : undefined,
     family:    invoice.family
-      ? { name: invoice.family.name, email: invoice.family.email, address: familyAddress }
+      ? { name: invoice.family.contactName?.trim() || invoice.family.name, email: invoice.family.email, address: familyAddress }
       : null,
     lineItems: invoice.lineItems.map(li => ({
       id:          li.id,
@@ -215,7 +215,7 @@ export default function InvoiceDetailPage() {
 
       <PageHeader
         title={`Invoice ${invoice.number}`}
-        subtitle={invoice.family?.name}
+        subtitle={invoice.family?.contactName?.trim() || invoice.family?.name}
         action={
           <div className="flex items-center gap-2">
             <PdfDownloadButton invoice={pdfInvoice} org={org} logoSrc={logoSrc} />
@@ -232,7 +232,7 @@ export default function InvoiceDetailPage() {
                   // the only way back is raising a new invoice. One click on a
                   // page full of harmless buttons (Send, Download) was too easy
                   // to hit by mistake.
-                  if (!confirm(`Void invoice ${invoice.number}? This removes ${formatMoney(invoice.total)} from ${invoice.family?.name ?? 'the family'}'s balance immediately and can't be undone — to bill them again you'll need to raise a new invoice.`)) return;
+                  if (!confirm(`Void invoice ${invoice.number}? This removes ${formatMoney(invoice.total)} from ${invoice.family?.contactName?.trim() || invoice.family?.name || 'the family'}'s balance immediately and can't be undone — to bill them again you'll need to raise a new invoice.`)) return;
                   action('void');
                 }}
                 disabled={actioning}
