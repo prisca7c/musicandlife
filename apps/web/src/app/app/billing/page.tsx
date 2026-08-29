@@ -26,7 +26,7 @@ const SECTION_ITEMS = [
 
 interface Invoice {
   id: string; number: string; status: string; total: number; issuedOn: string; dueDate: string;
-  mode: string; family: { id: string; name: string } | null;
+  mode: string; family: { id: string; name: string; contactName: string | null } | null;
 }
 interface Family {
   id: string; name: string; contactName?: string | null;
@@ -489,7 +489,7 @@ export default function BillingPage() {
                 {!isFamilyPortal && (
                   <td>
                     {i.family
-                      ? <Link href={`/app/families/${i.family.id}`} className="hover:underline" style={{ color: 'var(--txt2)' }}>{i.family.name}</Link>
+                      ? <Link href={`/app/families/${i.family.id}`} className="hover:underline" style={{ color: 'var(--txt2)' }}>{familyLabel(i.family)}</Link>
                       : '—'}
                   </td>
                 )}

@@ -24,7 +24,7 @@ import { useRole } from '@/lib/use-role';
 interface StudentDetail {
   id: string; firstName: string; lastName: string; status: string;
   dob: string | null; email: string | null; notes: string | null;
-  family: { id: string; name: string; phone: string | null; email: string | null } | null;
+  family: { id: string; name: string; contactName: string | null; phone: string | null; email: string | null } | null;
   enrollments: {
     id: string; instrument: string; lessonType: string; status: string; rate: number;
     trialRate: number | null;
@@ -638,7 +638,7 @@ export default function StudentDetailPage() {
         <BackButton label="Students" fallbackHref="/app/students" />
       </div>
 
-      <PageHeader title={`${student.firstName} ${student.lastName}`} subtitle={student.family?.name}
+      <PageHeader title={`${student.firstName} ${student.lastName}`} subtitle={student.family?.contactName?.trim() || student.family?.name}
         action={
           <span className="inline-flex items-center gap-2.5">
             <Badge variant={student.status}>{student.status}</Badge>
@@ -700,7 +700,7 @@ export default function StudentDetailPage() {
                   <dt style={{ color: 'var(--txt3)' }}>Name</dt>
                   <dd><Link href={`/app/families/${student.family.id}`}
                     className="font-semibold hover:underline" style={{ color: 'var(--sage-dk)' }}>
-                    {student.family.name}
+                    {student.family.contactName?.trim() || student.family.name}
                   </Link></dd>
                 </div>
                 {student.family.phone && (

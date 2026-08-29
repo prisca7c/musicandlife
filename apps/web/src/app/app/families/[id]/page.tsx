@@ -119,7 +119,7 @@ function AutoInvoicingSettingsModal({ open, onClose, family, onSaved }: {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={`Auto-invoicing settings — ${family.name}`}>
+    <Modal open={open} onClose={onClose} title={`Auto-invoicing settings — ${family.contactName?.trim() || family.name}`}>
       {error && (
         <div className="mb-4 text-sm rounded-xl px-4 py-3"
           style={{ background: 'var(--coral-lt)', color: 'var(--coral)', border: '1px solid #FCA5A5' }}>
@@ -349,8 +349,8 @@ function MergeFamilyModal({ open, onClose, targetId, targetName, onMerged }: {
   open: boolean; onClose: () => void; targetId: string; targetName: string; onMerged: () => void;
 }) {
   const [search, setSearch] = useState('');
-  const [results, setResults] = useState<{ id: string; name: string }[]>([]);
-  const [picked, setPicked] = useState<{ id: string; name: string } | null>(null);
+  const [results, setResults] = useState<{ id: string; name: string; contactName: string | null }[]>([]);
+  const [picked, setPicked] = useState<{ id: string; name: string; contactName: string | null } | null>(null);
   const [merging, setMerging] = useState(false);
   const [error, setError] = useState('');
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
@@ -358,7 +358,7 @@ function MergeFamilyModal({ open, onClose, targetId, targetName, onMerged }: {
   useEffect(() => {
     if (!open || !search.trim()) { setResults([]); return; }
     const q = search;
-    apiFetch<{ id: string; name: string }[]>(`/families?search=${encodeURIComponent(q)}`, { token: tok() })
+    apiFetch<{ id: string; name: string; contactName: string | null }[]>(`/families?search=${encodeURIComponent(q)}`, { token: tok() })
       .then(rows => setResults(rows.filter(r => r.id !== targetId).slice(0, 8)))
       .catch(() => setResults([]));
   }, [search, open, targetId]);
@@ -388,7 +388,7 @@ function MergeFamilyModal({ open, onClose, targetId, targetName, onMerged }: {
               <button key={r.id} onClick={() => setPicked(r)}
                 className="w-full text-left text-sm px-3 py-2 rounded-lg border hover:bg-[var(--surf)]"
                 style={{ borderColor: 'var(--bd2)', color: 'var(--txt)' }}>
-                {r.name}
+                {r.contactName?.trim() || r.name}
               </button>
             ))}
             {search.trim() && results.length === 0 && (
@@ -399,8 +399,8 @@ function MergeFamilyModal({ open, onClose, targetId, targetName, onMerged }: {
       ) : (
         <div className="space-y-4">
           <p className="text-sm" style={{ color: 'var(--txt)' }}>
-            Merge <strong>{picked.name}</strong> into <strong>{targetName}</strong>? All of {picked.name}&apos;s students,
-            guardians, invoices and balance move to {targetName}, and {picked.name} is deleted.
+            Merge <strong>{picked.contactName?.trim() || picked.name}</strong> into <strong>{targetName}</strong>? All of {picked.contactName?.trim() || picked.name}&apos;s students,
+            guardians, invoices and balance move to {targetName}, and {picked.contactName?.trim() || picked.name} is deleted.
           </p>
           <p className="text-xs" style={{ color: 'var(--coral)' }}>This can&apos;t be undone.</p>
           {error && <p className="text-sm text-[var(--coral)]">{error}</p>}
@@ -452,14 +452,14 @@ export default function FamilyDetailPage() {
   return (
     <div>
       {family && <AddStudentModal open={showAddStudent} onClose={() => setShowAddStudent(false)}
-        familyId={family.id} familyName={family.name} onCreated={load} />}
+        familyId={family.id} familyName={family.contactName || family.name} onCreated={load} />}
       {family && <CreateInvoiceModal open={showCreateInvoice} onClose={() => setShowCreateInvoice(false)}
         familyId={family.id} familyName={family.contactName || family.name} invoiceMode={family.invoiceMode}
         students={family.students} onCreated={load} />}
       {family && <AutoInvoicingSettingsModal open={showInvoicingSettings} onClose={() => setShowInvoicingSettings(false)}
         family={family} onSaved={load} />}
       {family && <MergeFamilyModal open={showMerge} onClose={() => setShowMerge(false)}
-        targetId={family.id} targetName={family.name} onMerged={load} />}
+        targetId={family.id} targetName={family.contactName || family.name} onMerged={load} />}
       <EditFamilyModal open={showEditFamily} onClose={() => setShowEditFamily(false)} familyId={family.id} onSaved={load} />
       <EditStudentModal open={!!editingStudentId} onClose={() => setEditingStudentId(null)} studentId={editingStudentId} onSaved={load} />
 

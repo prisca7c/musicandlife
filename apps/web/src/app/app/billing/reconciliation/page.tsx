@@ -20,7 +20,7 @@ const SECTION_ITEMS = [
 
 interface Claim {
   id: string; amount: number; reference: string; status: string; createdAt: string;
-  family: { id: string; name: string } | null;
+  family: { id: string; name: string; contactName: string | null } | null;
   invoice: { id: string; number: string; total: number; status: string } | null;
 }
 interface BankTxn {
@@ -234,7 +234,7 @@ export default function ReconciliationPage() {
             <tbody>
               {claims.map((c) => (
                 <tr key={c.id} className="border-t" style={{ borderColor: 'var(--bd)' }}>
-                  <td className="p-3">{c.family?.name ?? '—'}</td>
+                  <td className="p-3">{c.family?.contactName?.trim() || c.family?.name || '—'}</td>
                   <td className="p-3 font-mono text-xs">{c.reference}</td>
                   <td className="p-3">{c.invoice?.number ?? '—'}</td>
                   <td className="p-3 text-right font-semibold">{money(c.amount)}</td>
@@ -249,7 +249,7 @@ export default function ReconciliationPage() {
                         // statement line"), so a mis-click here books money that was never verified
                         // against the actual statement. Every other action of this consequence in
                         // the app confirms first.
-                        if (window.confirm(`Record a payment of ${money(c.amount)} for ${c.family?.name ?? 'this family'}? No matching bank line was found — only confirm if you've verified this payment actually arrived.`)) {
+                        if (window.confirm(`Record a payment of ${money(c.amount)} for ${c.family?.contactName?.trim() || c.family?.name || 'this family'}? No matching bank line was found — only confirm if you've verified this payment actually arrived.`)) {
                           act(`/reconciliation/claims/${c.id}/confirm`);
                         }
                       }}
