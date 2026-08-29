@@ -38,7 +38,7 @@ const s = StyleSheet.create({
 });
 
 export interface AttendancePDFData {
-  student: { name: string; family: { name: string } | null };
+  student: { name: string; family: { name: string; contactName?: string | null } | null };
   period: { from: string; to: string };
   rows: { id: string; date: string; time: string; teacher: string; instrument: string; duration: number; isTrial: boolean; status: string; attendanceLabel: string }[];
   summary: { present: number; total: number; attendanceRate: number | null };
@@ -51,7 +51,7 @@ export function AttendancePDF({ data }: { data: AttendancePDFData }) {
         <View style={s.header}>
           <View>
             <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 11, color: '#111' }}>{data.student.name}</Text>
-            {data.student.family && <Text style={{ fontSize: 9, color: '#777', marginTop: 2 }}>{data.student.family.name}</Text>}
+            {data.student.family && <Text style={{ fontSize: 9, color: '#777', marginTop: 2 }}>{data.student.family.contactName?.trim() || data.student.family.name}</Text>}
             <View style={s.summaryRow}>
               <View style={s.summaryBox}>
                 <Text style={s.summaryNum}>{data.summary.present}</Text>

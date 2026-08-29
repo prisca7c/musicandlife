@@ -174,6 +174,11 @@ export interface InvoicePDFData {
   payUrl?: string;
   family: {
     name: string;
+    // Optional — most callers already resolve contactName before handing
+    // data to this template, but a future caller passing a raw family row
+    // through shouldn't silently regress to the auto-generated "LastName
+    // Family" label. See rendering below.
+    contactName?: string | null;
     email: string | null;
     address?: string | null;
   } | null;
@@ -272,7 +277,9 @@ export function InvoicePDF({
           </View>
           <View style={s.toBlock}>
             <Text style={s.blockLabel}>Bill To:</Text>
-            {invoice.family?.name  && <Text style={s.blockLine}>{invoice.family.name}</Text>}
+            {invoice.family && (invoice.family.contactName?.trim() || invoice.family.name) && (
+              <Text style={s.blockLine}>{invoice.family.contactName?.trim() || invoice.family.name}</Text>
+            )}
             {invoice.family?.address && (
               invoice.family.address.split(',').map((line, i) => (
                 <Text key={i} style={s.blockLine}>{line.trim()}</Text>

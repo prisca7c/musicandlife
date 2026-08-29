@@ -223,7 +223,7 @@ export class InvoiceSchedulerWorker {
     this.logger.log(`Invoice scheduler scan: ${generated} invoices generated, ${previewByOrg.size} org(s) previewed`);
   }
 
-  private async sendPreviewSummary(orgId: string, familiesDue: { name: string }[]) {
+  private async sendPreviewSummary(orgId: string, familiesDue: { name: string; contactName: string | null }[]) {
     const admins = await this.db.db.query.memberships.findMany({
       where: and(eq(memberships.organizationId, orgId), eq(memberships.baseRole, 'admin')),
       with: { user: { columns: { email: true } } },
@@ -239,7 +239,7 @@ export class InvoiceSchedulerWorker {
     // renders live in the admin's inbox — stored HTML injection. Same class as
     // the message sender-name fix (#176).
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const body = `<ul>${familiesDue.map(f => `<li>${esc(f.name)}</li>`).join('')}</ul>`;
+    const body = `<ul>${familiesDue.map(f => `<li>${esc(f.contactName?.trim() || f.name)}</li>`).join('')}</ul>`;
     for (const email of adminEmails) {
       await this.notifications.trigger('invoice.preview_summary', {
         orgId, email,

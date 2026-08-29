@@ -27,7 +27,7 @@ interface BankTxn {
   id: string; bookedOn: string; amount: number;
   reference: string | null; description: string | null; status: string;
 }
-interface FamilyOption { id: string; name: string }
+interface FamilyOption { id: string; name: string; contactName: string | null }
 
 interface ImportSummary {
   imported: number; duplicates: number;
@@ -187,7 +187,7 @@ export default function ReconciliationPage() {
                       <SearchableSelect
                         value=""
                         onChange={(familyId) => { if (familyId) act(`/reconciliation/unmatched/${t.id}/assign`, { familyId }); }}
-                        options={families.map((f) => ({ value: f.id, label: f.name }))}
+                        options={families.map((f) => ({ value: f.id, label: f.contactName?.trim() || f.name }))}
                         placeholder="Select family…"
                       />
                       <button
