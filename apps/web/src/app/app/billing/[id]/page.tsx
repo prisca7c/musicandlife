@@ -171,7 +171,12 @@ export default function InvoiceDetailPage() {
     issuedOn:        invoice.issuedOn,
     dueDate:         invoice.dueDate,
     notes:           invoice.notes,
-    payUrl:          typeof window !== 'undefined' ? `${window.location.origin}/pay/${invoice.id}` : undefined,
+    // The public pay page only resolves sent/paid invoices (drafts aren't
+    // finalised, voids are cancelled) — printing this link on a draft PDF
+    // would bake in a "Pay Online" button that 404s until someone remembers
+    // to hit Send, even though the PDF itself was already downloaded.
+    payUrl:          typeof window !== 'undefined' && (invoice.status === 'sent' || invoice.status === 'paid')
+      ? `${window.location.origin}/pay/${invoice.id}` : undefined,
     family:    invoice.family
       ? { name: invoice.family.contactName?.trim() || invoice.family.name, email: invoice.family.email, address: familyAddress }
       : null,
