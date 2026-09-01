@@ -10,7 +10,7 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/badge';
 import { Modal } from '@/components/modal';
 import { BackButton } from '@/components/back-button';
-import { Mail, Phone, Home } from 'lucide-react';
+import { Mail, Phone, Home, Trash2 } from 'lucide-react';
 import { InvoicingSettingsFields, readInvoicingSettingsForm } from '@/components/invoicing-settings-fields';
 import { invoiceStatusLabel, invoiceStatusColor } from '@/lib/invoice-status';
 import { EditFamilyModal } from '@/components/edit-family-modal';
@@ -215,6 +215,14 @@ function AddStudentModal({ open, onClose, familyId, familyName, onCreated }: {
 }
 
 // Create invoice — family pre-filled
+type InvoiceUiMode = 'monthly_statement' | 'per_lesson' | 'termly' | 'custom';
+const MODE_TABS: { key: InvoiceUiMode; label: string }[] = [
+  { key: 'per_lesson',        label: 'Per lesson' },
+  { key: 'monthly_statement', label: 'Monthly' },
+  { key: 'termly',            label: 'Termly' },
+  { key: 'custom',            label: 'Custom' },
+];
+
 function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, students, onCreated }: {
   open: boolean; onClose: () => void; familyId: string; familyName: string; invoiceMode: string | null;
   students: { id: string; firstName: string; lastName: string; enrollments: { id: string; instrument: string; status: string }[] }[];
@@ -222,6 +230,7 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
 }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [mode, setMode] = useState<InvoiceUiMode>(invoiceMode === 'per_lesson' ? 'per_lesson' : 'monthly_statement');
   const [terms, setTerms] = useState<{ id: string; name: string; startsOn: string; endsOn: string }[]>([]);
   const [termId, setTermId] = useState('');
   const lastMonthStart = new Date(); lastMonthStart.setDate(1); lastMonthStart.setMonth(lastMonthStart.getMonth()-1);
@@ -229,6 +238,7 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
   const [periodStart, setPeriodStart] = useState(lastMonthStart.toISOString().split('T')[0]!);
   const [periodEnd, setPeriodEnd] = useState(lastMonthEnd.toISOString().split('T')[0]!);
   const [enrollmentId, setEnrollmentId] = useState('');
+  const [lineItems, setLineItems] = useState<{ description: string; amount: string }[]>([{ description: '', amount: '' }]);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
   const todayStr = new Date().toISOString().split('T')[0]!;
 
@@ -237,7 +247,13 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
     .map(e => ({ id: e.id, label: `${s.firstName} — ${e.instrument.charAt(0).toUpperCase() + e.instrument.slice(1)}` })));
 
   useEffect(() => {
-    if (open) apiFetch<{ id: string; name: string; startsOn: string; endsOn: string }[]>('/terms', { token: tok() }).then(setTerms).catch(() => {});
+    if (open) {
+      apiFetch<{ id: string; name: string; startsOn: string; endsOn: string }[]>('/terms', { token: tok() }).then(setTerms).catch(() => {});
+      setMode(invoiceMode === 'per_lesson' ? 'per_lesson' : 'monthly_statement');
+      setTermId(''); setEnrollmentId(''); setError('');
+      setLineItems([{ description: '', amount: '' }]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   function pickTerm(id: string) {
@@ -255,14 +271,28 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
     setPeriodStart(start.toISOString().split('T')[0]!);
     setPeriodEnd(end.toISOString().split('T')[0]!);
   }
+  function addLineItem() {
+    setLineItems(items => [...items, { description: '', amount: '' }]);
+  }
+  function removeLineItem(idx: number) {
+    setLineItems(items => items.filter((_, i) => i !== idx));
+  }
+  function updateLineItem(idx: number, field: 'description' | 'amount', value: string) {
+    setLineItems(items => items.map((item, i) => i === idx ? { ...item, [field]: value } : item));
+  }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault(); setSaving(true); setError('');
+    e.preventDefault();
+    if (mode === 'termly' && !termId) { setError('Please select a term'); return; }
+    setSaving(true); setError('');
     const f = new FormData(e.currentTarget);
     try {
+      const apiMode = mode === 'custom' ? 'per_lesson' : mode === 'termly' ? 'monthly_statement' : mode;
       const inv = await apiFetch<{id:string}>('/invoices', { method: 'POST', token: tok(), body: JSON.stringify({
-        familyId, mode: f.get('mode'), termId: termId || undefined,
+        familyId, mode: apiMode, termId: termId || undefined,
         periodStart: periodStart || undefined, periodEnd: periodEnd || undefined,
+        // Custom invoices are manual-only — don't auto-pull the period's lessons.
+        itemizeLessons: mode !== 'custom',
         notes: f.get('notes') || undefined,
         enrollmentId: enrollmentId || undefined,
         // A picked date range always includes whatever falls in it — a future
@@ -270,6 +300,20 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
         // too", not just the ones that already happened.
         includeFuture: true,
       })});
+
+      if (mode === 'custom' && lineItems.some(l => l.description && l.amount)) {
+        for (const item of lineItems) {
+          if (!item.description || !item.amount) continue;
+          await apiFetch(`/invoices/${inv.id}/line-items`, {
+            method: 'POST', token: tok(),
+            body: JSON.stringify({
+              description: item.description,
+              amount: Math.round(parseFloat(item.amount) * 100),
+            }),
+          });
+        }
+      }
+
       onCreated(); onClose();
       window.location.href = `/app/billing/${inv.id}`;
     } catch (err) { setError(err instanceof Error ? err.message : 'Error'); }
@@ -287,37 +331,92 @@ function CreateInvoiceModal({ open, onClose, familyId, familyName, invoiceMode, 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="ui-label">Mode</label>
-          <select name="mode" defaultValue={invoiceMode ?? 'monthly_statement'} className="ui-input mb-2">
-            <option value="monthly_statement">Monthly statement</option>
-            <option value="per_lesson">Per lesson</option>
-          </select>
-          <div className="flex gap-2 mb-2">
-            <button type="button" onClick={pickDay} className="ui-btn-ghost text-xs px-2.5 py-1">Today</button>
-            <button type="button" onClick={pickMonth} className="ui-btn-ghost text-xs px-2.5 py-1">This month</button>
-            {terms.length > 0 && (
-              <select value={termId} onChange={e => pickTerm(e.target.value)} className="ui-input text-xs py-1">
-                <option value="">Term…</option>
-                {terms.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            )}
+          <div className="flex gap-1 p-1 rounded-xl border border-[var(--bd)] mb-2" style={{ background: 'var(--bg2)' }}>
+            {MODE_TABS.map(m => (
+              <button
+                key={m.key} type="button"
+                onClick={() => { setMode(m.key); if (m.key !== 'termly') setTermId(''); }}
+                className="flex-1 text-sm py-1.5 rounded-lg font-semibold transition-all"
+                style={{
+                  background: mode === m.key ? 'white' : 'transparent',
+                  color: mode === m.key ? 'var(--txt)' : 'var(--txt4)',
+                  boxShadow: mode === m.key ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="ui-label">Period start</label>
-              <input name="periodStart" type="date" value={periodStart}
-                onChange={e => { setPeriodStart(e.target.value); setTermId(''); }} className="ui-input" />
-            </div>
-            <div>
-              <label className="ui-label">Period end</label>
-              <input name="periodEnd" type="date" value={periodEnd}
-                onChange={e => { setPeriodEnd(e.target.value); setTermId(''); }} className="ui-input" />
-            </div>
-          </div>
+
+          {mode === 'termly' ? (
+            <select value={termId} onChange={e => pickTerm(e.target.value)} required className="ui-input mb-2">
+              <option value="">Select a term…</option>
+              {terms.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          ) : mode !== 'custom' && (
+            <>
+              <div className="flex gap-2 mb-2">
+                <button type="button" onClick={pickDay} className="ui-btn-ghost text-xs px-2.5 py-1">Today</button>
+                <button type="button" onClick={pickMonth} className="ui-btn-ghost text-xs px-2.5 py-1">This month</button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="ui-label">Period start</label>
+                  <input name="periodStart" type="date" value={periodStart}
+                    onChange={e => setPeriodStart(e.target.value)} className="ui-input" />
+                </div>
+                <div>
+                  <label className="ui-label">Period end</label>
+                  <input name="periodEnd" type="date" value={periodEnd}
+                    onChange={e => setPeriodEnd(e.target.value)} className="ui-input" />
+                </div>
+              </div>
+            </>
+          )}
           {/* A picked date range always bills whatever falls in it — including
               upcoming lessons that haven't happened yet if the range reaches
               into the future — with no separate opt-in needed. */}
         </div>
-        {classOptions.length > 1 && (
+        {mode === 'custom' ? (
+          <div>
+            <label className="ui-label">Line items <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <div className="space-y-2">
+              {lineItems.map((item, idx) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <input
+                    value={item.description}
+                    onChange={e => updateLineItem(idx, 'description', e.target.value)}
+                    placeholder="Description"
+                    className="ui-input flex-1"
+                  />
+                  <div className="relative shrink-0 w-28">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium" style={{ color: 'var(--txt3)' }}>£</span>
+                    <input
+                      value={item.amount}
+                      onChange={e => updateLineItem(idx, 'amount', e.target.value)}
+                      type="number" min="0.01" max="100000" step="0.01"
+                      placeholder="0.00"
+                      className="ui-input w-full"
+                      style={{ paddingLeft: '1.5rem' }}
+                    />
+                  </div>
+                  {lineItems.length > 1 && (
+                    <button type="button" onClick={() => removeLineItem(idx)}
+                      className="shrink-0 p-1.5 rounded-lg hover:bg-[var(--coral-lt)] transition-colors"
+                      style={{ color: 'var(--coral)' }}>
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button type="button" onClick={addLineItem}
+                className="text-sm font-semibold hover:underline"
+                style={{ color: 'var(--sage)' }}>
+                + Add line item
+              </button>
+            </div>
+          </div>
+        ) : classOptions.length > 1 && (
           <div>
             <label className="ui-label">Class</label>
             <select value={enrollmentId} onChange={e => setEnrollmentId(e.target.value)} className="ui-input">

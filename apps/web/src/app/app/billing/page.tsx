@@ -45,10 +45,18 @@ function familyLabel(f: Family): string {
   return kids ? `${who} (${kids})` : who;
 }
 
+type InvoiceUiMode = 'monthly_statement' | 'per_lesson' | 'termly' | 'custom';
+const MODE_TABS: { key: InvoiceUiMode; label: string }[] = [
+  { key: 'per_lesson',        label: 'Per lesson' },
+  { key: 'monthly_statement', label: 'Monthly' },
+  { key: 'termly',            label: 'Termly' },
+  { key: 'custom',            label: 'Custom' },
+];
+
 function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [families, setFamilies] = useState<Family[]>([]);
   const [familyId, setFamilyId] = useState('');
-  const [mode, setMode] = useState<'monthly_statement' | 'per_lesson' | 'custom'>('monthly_statement');
+  const [mode, setMode] = useState<InvoiceUiMode>('monthly_statement');
   const [lineItems, setLineItems] = useState<LineItem[]>([{ description: '', amount: '' }]);
   const [splitByClass, setSplitByClass] = useState(false);
   const [terms, setTerms] = useState<Term[]>([]);
@@ -90,9 +98,10 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!familyId) { setError('Please select a family'); return; }
+    if (mode === 'termly' && !termId) { setError('Please select a term'); return; }
     setSaving(true); setError('');
     try {
-      const apiMode = mode === 'custom' ? 'per_lesson' : mode;
+      const apiMode = mode === 'custom' ? 'per_lesson' : mode === 'termly' ? 'monthly_statement' : mode;
       const start = periodStart || undefined;
       const end = periodEnd || undefined;
 
@@ -101,7 +110,13 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
       // custom (manual line items) flow, which has no lessons to split.
       if (splitByClass && mode !== 'custom') {
         const res = await apiFetch<{ invoices: unknown[] }>('/invoices/split-by-class', {
-          method: 'POST', token: tok(), body: JSON.stringify({ familyId, mode: apiMode, periodStart: start, periodEnd: end, termId: termId || undefined }),
+          method: 'POST', token: tok(), body: JSON.stringify({
+            familyId, mode: apiMode, periodStart: start, periodEnd: end, termId: termId || undefined,
+            // A picked date range or term always bills whatever falls in it,
+            // including lessons that haven't happened yet — same as the
+            // combined-statement path below.
+            includeFuture: true,
+          }),
         });
         if (!res.invoices?.length) throw new Error('No unbilled lessons in this period to invoice.');
         onCreated(); onClose();
@@ -118,6 +133,7 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
           periodStart: start,
           periodEnd: end,
           notes: (e.currentTarget.elements.namedItem('notes') as HTMLTextAreaElement)?.value || undefined,
+          includeFuture: true,
         }),
       });
 
@@ -158,31 +174,14 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
           />
         </div>
 
-        {mode !== 'custom' && terms.length > 0 && (
-          <div>
-            <label className="ui-label">Term</label>
-            <SearchableSelect
-              options={terms.map(t => ({ value: t.id, label: t.name }))}
-              value={termId}
-              onChange={pickTerm}
-              placeholder="No term — use dates below…"
-              emptyLabel="No term — use dates below"
-            />
-          </div>
-        )}
-
         {/* Mode tabs */}
         <div>
           <label className="ui-label">Type</label>
           <div className="flex gap-1 p-1 rounded-xl border border-[var(--bd)]" style={{ background: 'var(--bg2)' }}>
-            {([
-              { key: 'monthly_statement', label: 'Monthly' },
-              { key: 'per_lesson',        label: 'Per lesson' },
-              { key: 'custom',            label: 'Custom amount' },
-            ] as const).map(m => (
+            {MODE_TABS.map(m => (
               <button
                 key={m.key} type="button"
-                onClick={() => setMode(m.key)}
+                onClick={() => { setMode(m.key); if (m.key !== 'termly') setTermId(''); }}
                 className="flex-1 text-sm py-1.5 rounded-lg font-semibold transition-all"
                 style={{
                   background: mode === m.key ? 'white' : 'transparent',
@@ -196,17 +195,29 @@ function CreateInvoiceModal({ open, onClose, onCreated }: { open: boolean; onClo
           </div>
         </div>
 
-        {mode !== 'custom' && (
+        {mode === 'termly' && (
+          <div>
+            <label className="ui-label">Term <span style={{ color: 'var(--coral)' }}>*</span></label>
+            <SearchableSelect
+              options={terms.map(t => ({ value: t.id, label: t.name }))}
+              value={termId}
+              onChange={pickTerm}
+              placeholder="Select a term…"
+            />
+          </div>
+        )}
+
+        {mode !== 'custom' && mode !== 'termly' && (
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="ui-label">Period start</label>
               <input name="periodStart" type="date" className="ui-input" value={periodStart}
-                onChange={e => { setPeriodStart(e.target.value); setTermId(''); }} />
+                onChange={e => setPeriodStart(e.target.value)} />
             </div>
             <div>
               <label className="ui-label">Period end</label>
               <input name="periodEnd" type="date" className="ui-input" value={periodEnd}
-                onChange={e => { setPeriodEnd(e.target.value); setTermId(''); }} />
+                onChange={e => setPeriodEnd(e.target.value)} />
             </div>
           </div>
         )}
