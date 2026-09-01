@@ -124,6 +124,16 @@ export class SchedulingController {
     return this.scheduling.deleteLessonSeries(user.orgId, id, until, { role: user.role, userId: user.userId });
   }
 
+  // Whole-day hard delete for an unexpected closure — admin only, no
+  // per-lesson cancellation email (the business already tells families
+  // directly). See SchedulingService.deleteLessonsForDay's doc comment for
+  // why this refuses any date after today.
+  @Delete('lessons/day/:date')
+  @Roles('admin')
+  deleteLessonsForDay(@CurrentUser() user: RequestUser, @Param('date') date: string) {
+    return this.scheduling.deleteLessonsForDay(user.orgId, date, { role: user.role, userId: user.userId });
+  }
+
   // ─── Availability-driven booking ──────────────────────────────────────────
   // Bookable 15-min slots for a teacher on a date (inside their hours, conflict-free).
   @Get('scheduling/available-slots')

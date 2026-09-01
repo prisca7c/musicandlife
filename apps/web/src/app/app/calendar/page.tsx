@@ -1825,6 +1825,7 @@ export default function CalendarPage() {
   const [slotDate, setSlotDate] = useState<string | undefined>();
   const [slotTime, setSlotTime] = useState<string | undefined>();
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
+  const [deletingDay, setDeletingDay] = useState(false);
   const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
 
   const weekStart = getWeekStart(anchorDate);
@@ -2074,6 +2075,11 @@ export default function CalendarPage() {
   const todayStr = formatDate(new Date());
   const anchorStr = formatDate(anchorDate);
   const isAnchorToday = anchorStr === todayStr;
+  // "Delete all lessons today" only makes sense for an unexpected closure
+  // happening now or already past — a future date risks the nightly
+  // recurrence worker silently recreating the lessons before the closure
+  // day arrives (matches the backend's own refusal for the same reason).
+  const isAnchorPastOrToday = anchorStr <= todayStr;
 
   // teacher columns for day view: assigned teachers + an "Unassigned" bucket if
   // needed. A teacher filter narrows to that one column.
@@ -2085,6 +2091,35 @@ export default function CalendarPage() {
       .map(s => ({ id: s.id, name: `${s.firstName} ${s.lastName}` })),
     ...(hasUnassigned ? [{ id: null, name: 'Unassigned' }] : []),
   ];
+
+  // Whole-day hard delete for an unexpected closure — no per-lesson
+  // cancellation email goes out (the business already tells families
+  // directly through its own channel); the lessons simply cease to exist,
+  // so they drop off every calendar/portal view and can never appear on an
+  // invoice. Deliberately separate from Cancel, which is for a single lesson
+  // and does notify.
+  async function deleteAllLessonsToday() {
+    if (dayLessonsToday.length === 0) return;
+    if (!confirm(
+      `Permanently delete all ${dayLessonsToday.length} lesson${dayLessonsToday.length !== 1 ? 's' : ''} on ${dayLabel}? `
+      + `This removes them entirely across every calendar and family/student view — no cancellation email is sent (make sure your own closure notice has already gone out). There's no undo.`,
+    )) return;
+    setDeletingDay(true);
+    try {
+      const res = await apiFetch<{ deleted: number; skipped: { lessonId: string; student: string | null; reason: string }[] }>(
+        `/lessons/day/${anchorStr}`, { method: 'DELETE', token: tok() },
+      );
+      load();
+      if (res.skipped.length > 0) {
+        alert(
+          `Deleted ${res.deleted} lesson${res.deleted !== 1 ? 's' : ''}. `
+          + `${res.skipped.length} skipped (${res.skipped.map(s => `${s.student ?? 'a lesson'}: ${s.reason}`).join('; ')}) — cancel ${res.skipped.length !== 1 ? 'those' : 'it'} instead.`,
+        );
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not delete the day’s lessons');
+    } finally { setDeletingDay(false); }
+  }
 
   // Elastic per-hour heights, shared by every column in the view so their hour
   // gridlines still line up — a busy hour in any one column grows the whole
@@ -2251,6 +2286,15 @@ export default function CalendarPage() {
           })()}
         </div>
         <div className="flex items-center gap-2">
+          {isManagement && view === 'day' && isAnchorPastOrToday && dayLessonsToday.length > 0 && (
+            <button onClick={deleteAllLessonsToday} disabled={deletingDay}
+              className="text-sm rounded-[10px] px-4 py-2 font-semibold transition-colors disabled:opacity-50"
+              style={{ border: '1.5px solid #FCA5A5', color: 'var(--coral)', background: '#fff' }}
+              title="For an unexpected closure — permanently deletes every lesson today, no cancellation email sent">
+              <Trash2 size={14} className="inline -mt-0.5 mr-1" />
+              {deletingDay ? 'Deleting…' : 'Delete all lessons today'}
+            </button>
+          )}
           {isManagement && (
             <button onClick={() => setShowAssign(true)} className="ui-btn-ghost">
               <Users size={15} /> Assign students
