@@ -486,7 +486,7 @@ export class BillingService {
       columns: { id: true },
     });
     const eligible = await this.getEligibleLessons(
-      orgId, famStudents.map(s => s.id), dto.periodStart, dto.periodEnd,
+      orgId, famStudents.map(s => s.id), dto.periodStart, dto.periodEnd, dto.includeFuture,
     );
     if (eligible.length === 0) {
       throw new BadRequestException('No unbilled lessons in this period to invoice.');
