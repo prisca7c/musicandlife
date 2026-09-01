@@ -193,6 +193,13 @@ export class InvoiceSchedulerWorker {
             mode: family.invoiceMode === 'per_lesson' ? 'per_lesson' : 'monthly_statement',
             periodStart,
             periodEnd,
+            // A prepaid family's period is the CURRENT/upcoming month or interval —
+            // almost entirely 'scheduled' lessons, not 'completed', at the moment
+            // this cron fires. Explicit here (getEligibleLessons already defaults
+            // to including future lessons) so this stays correct even if that
+            // default ever changes — this is an unattended job with no one to
+            // notice a silently-empty auto-emailed invoice.
+            includeFuture: true,
           });
           generated++;
 

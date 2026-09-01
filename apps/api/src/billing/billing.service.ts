@@ -301,16 +301,23 @@ export class BillingService {
     return inv!;
   }
 
-  // The family's completed lessons that haven't been billed on any invoice yet,
-  // within the optional period, earliest-first. Shared by the combined statement
-  // and the per-class split so the two can never disagree about what's eligible.
+  // The family's unbilled lessons within the optional period, earliest-first.
+  // Shared by the combined statement and the per-class split so the two can
+  // never disagree about what's eligible.
   //
-  // `includeFuture` also admits lessons that haven't happened yet ('scheduled'/
-  // 'makeup') — for invoicing ahead of time. This is safe against double-charging:
-  // a lesson-linked invoice line is documentation only (billLessonDirectly's
-  // money model — see its doc comment), the real ledger debit is always posted
-  // by attendance's postAutoCharge when the lesson is actually marked present,
-  // regardless of whether it was invoiced before or after that happens.
+  // Defaults to admitting lessons that haven't happened yet ('scheduled'/
+  // 'makeup') alongside 'completed' ones — a period or term that reaches into
+  // the future obviously means "bill the upcoming lessons in it too", not
+  // just the ones that already happened. This is safe against
+  // double-charging: a lesson-linked invoice line is documentation only
+  // (billLessonDirectly's money model — see its doc comment), the real
+  // ledger debit is always posted by attendance's postAutoCharge when the
+  // lesson is actually marked present, regardless of whether it was invoiced
+  // before or after that happens. Pass includeFuture: false to explicitly
+  // restrict to completed-only (no current caller does — this exists as an
+  // escape hatch, not the default, precisely because forgetting to opt IN to
+  // future lessons was the bug: a term that hadn't started yet invoiced as
+  // empty).
   private async getEligibleLessons(
     orgId: string, studentIds: string[], periodStart?: string, periodEnd?: string, includeFuture?: boolean,
   ) {
@@ -320,7 +327,7 @@ export class BillingService {
       where: and(
         eq(lessons.organizationId, orgId),
         inArray(lessons.studentId, studentIds),
-        includeFuture ? inArray(lessons.status, ['completed', 'scheduled', 'makeup']) : eq(lessons.status, 'completed'),
+        includeFuture === false ? eq(lessons.status, 'completed') : inArray(lessons.status, ['completed', 'scheduled', 'makeup']),
       ),
       with: {
         teacher: { columns: { firstName: true, lastName: true } },
