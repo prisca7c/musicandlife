@@ -20,6 +20,11 @@ async function sendInvoiceTo(family: Family): Promise<void> {
   // A one-off send doesn't need the family's invoicing settings configured —
   // fall back to monthly statement for this single invoice without touching
   // the family's own (possibly still-unset) mode.
+  //
+  // No period given, so this bills every unbilled lesson ever scheduled for
+  // the family — including ones that haven't happened yet (the backend
+  // defaults to including future lessons unless told not to; there's no
+  // "past only" mode here, matching every other invoicing entry point).
   const inv = await apiFetch<{ id: string }>('/invoices', {
     method: 'POST', token: tok(),
     body: JSON.stringify({ familyId: family.id, mode: family.invoiceMode ?? 'monthly_statement', itemizeLessons: true }),
