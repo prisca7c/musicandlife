@@ -286,7 +286,19 @@ export class BillingService {
     // as an empty £0 shell — e.g. a family's weekly lessons never appeared. The
     // "custom amount" flow passes itemizeLessons=false to stay manual-only.
     if (itemizeLessons !== false) {
-      await this.generateLessonLineItems(orgId, inv!.id, dto.familyId, dto.periodStart, dto.periodEnd, dto.enrollmentId, dto.includeFuture);
+      const written = await this.generateLessonLineItems(orgId, inv!.id, dto.familyId, dto.periodStart, dto.periodEnd, dto.enrollmentId, dto.includeFuture);
+      // Nothing eligible — every lesson in this period is either already on
+      // another invoice or doesn't exist yet. Silently leaving behind an
+      // empty £0 draft is indistinguishable from the feature being broken
+      // (this is exactly what a term whose lessons were already billed on an
+      // older draft looked like). Drop the shell and say why instead —
+      // matches createInvoicesPerClass's guard for the same situation.
+      if (written === 0) {
+        await this.db.db.delete(invoices).where(eq(invoices.id, inv!.id));
+        throw new BadRequestException(
+          'No unbilled lessons in this period to invoice — they may already be on another invoice, or none are scheduled yet.',
+        );
+      }
       // generateLessonLineItems updates invoices.total to the itemised amount, but
       // `inv` is the pre-itemisation snapshot (total = the £0 insert default). Re-read
       // so callers see the real total — same as createInvoicesPerClass does. Without
@@ -459,14 +471,14 @@ export class BillingService {
   private async generateLessonLineItems(
     orgId: string, invoiceId: string, familyId: string,
     periodStart?: string, periodEnd?: string, enrollmentId?: string, includeFuture?: boolean,
-  ) {
+  ): Promise<number> {
     const famStudents = await this.db.db.query.students.findMany({
       where: and(eq(students.organizationId, orgId), eq(students.familyId, familyId)),
       columns: { id: true },
     });
     let eligible = await this.getEligibleLessons(orgId, famStudents.map(s => s.id), periodStart, periodEnd, includeFuture);
     if (enrollmentId) eligible = eligible.filter(l => l.enrollmentId === enrollmentId);
-    await this.writeLessonLineItems(orgId, invoiceId, eligible);
+    return this.writeLessonLineItems(orgId, invoiceId, eligible);
   }
 
   /**
