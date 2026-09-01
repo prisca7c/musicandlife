@@ -358,13 +358,18 @@ export class BillingService {
       columns: { lessonId: true },
       with: { invoice: { columns: { status: true } } },
     });
-    // A voided invoice's line items are kept for history but its charge was
-    // reversed, so its lessons are NOT billed — they must stay eligible, or
-    // voiding an invoice to reissue it would leave those lessons permanently
-    // un-billable and the corrected invoice would come out empty.
+    // Only a lesson on a SENT or PAID invoice is actually billed to the
+    // family — a draft is just a draft (nothing has gone out, and the family
+    // has never seen it), so it must NOT block that lesson from also
+    // appearing on a different draft. Staff routinely build a few draft
+    // invoices to compare before picking one to send; only once an invoice
+    // is issued does its lessons become spoken-for. A voided invoice's
+    // charge was reversed, so its lessons stay eligible too — otherwise
+    // voiding an invoice to reissue it would leave them permanently
+    // un-billable.
     const billedLessonIds = new Set(
       alreadyBilled
-        .filter(i => i.invoice?.status !== 'void')
+        .filter(i => i.invoice?.status === 'sent' || i.invoice?.status === 'paid')
         .map(i => i.lessonId),
     );
 
