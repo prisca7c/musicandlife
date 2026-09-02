@@ -37,7 +37,22 @@ export class SenderAdapter extends EmailPort {
     this.defaultFrom = process.env.EMAIL_FROM ?? 'Music & Life <no-reply@musiclife.studio>';
   }
 
+  /**
+   * Temporary kill switch: set SENDER_DISABLED=true to stop all outbound
+   * Sender activity (both sends and contact adds) without touching wiring or
+   * credentials. Checked per-call (not just at construction) so it takes
+   * effect on the next request after the env var changes, no redeploy needed
+   * for platforms that hot-reload env vars, and a simple restart otherwise.
+   */
+  private get disabled(): boolean {
+    return process.env.SENDER_DISABLED === 'true';
+  }
+
   async send(opts: SendEmailOptions): Promise<void> {
+    if (this.disabled) {
+      this.logger.warn(`SENDER_DISABLED: skipped email "${opts.subject}" to ${opts.to}`);
+      return;
+    }
     const toList = Array.isArray(opts.to) ? opts.to : [opts.to];
     const from = parseAddress(opts.from ?? this.defaultFrom);
 
@@ -125,6 +140,10 @@ export class SenderAdapter extends EmailPort {
    * the account with no group.
    */
   async addContact(opts: AddContactOptions): Promise<void> {
+    if (this.disabled) {
+      this.logger.warn(`SENDER_DISABLED: skipped adding contact ${opts.email}`);
+      return;
+    }
     const groups = this.groupsFor(opts.audience);
     const parts = (opts.name ?? '').trim().split(/\s+/).filter(Boolean);
     const firstname = parts.shift();
