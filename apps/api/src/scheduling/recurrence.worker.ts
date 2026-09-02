@@ -23,7 +23,7 @@ export class RecurrenceWorker {
     await withAdvisoryLock(this.db.db, RecurrenceWorker.LOCK_KEY, async () => {
       const r = await this.scheduling.materializeAllRecurring();
       this.logger.log(
-        `Recurrence scan: ${r.created} lessons created, ${r.skippedExisting} already existed, ${r.skippedConflicts} conflicts skipped`,
+        `Recurrence scan: ${r.created} lessons created, ${r.skippedExisting} already existed, ${r.skippedConflicts} conflicts skipped, ${r.skippedClosed} skipped for a closure day`,
       );
     });
   }

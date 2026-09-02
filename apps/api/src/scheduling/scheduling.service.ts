@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { eq, and, gte, lte, ne, or, isNull, inArray, sql } from 'drizzle-orm';
-import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, organizations, enrollments, users, invoiceLineItems, invoices, payrollItems } from '@music-life/db';
+import { lessons, rescheduleRequests, lessonRequests, lessonCredits, availability, blockedTime, students, staffMembers, guardians, organizations, enrollments, users, invoiceLineItems, invoices, payrollItems, closureDates } from '@music-life/db';
 import type { Db } from '@music-life/db';
 import { DbService } from '../db/db.service';
 import type { CreateLessonDto } from './dto/create-lesson.dto';
@@ -456,7 +456,7 @@ export class SchedulingService {
     enrollmentId: string,
     opts?: { weeks?: number; fromDate?: string },
     actor?: Actor,
-  ): Promise<{ created: number; skippedExisting: number; skippedConflicts: number; through: string; weeks: number }> {
+  ): Promise<{ created: number; skippedExisting: number; skippedConflicts: number; skippedClosed: number; through: string; weeks: number }> {
     const weeks = Math.min(Math.max(opts?.weeks ?? RECURRENCE_WINDOW_WEEKS, 1), 520);
 
     const enrollment = await this.db.db.query.enrollments.findFirst({
@@ -560,10 +560,24 @@ export class SchedulingService {
       if (!bySlot.has(slot)) bySlot.set(slot, { id: l.id, stamped: !!l.seriesSlotAt });
     }
 
-    let created = 0, skippedExisting = 0, skippedConflicts = 0;
+    // Whole-studio closures (see closureDates doc comment) — a date an admin
+    // deliberately emptied out via the bulk day-delete. Small table, org-wide,
+    // so one unfiltered fetch is cheaper than a per-occurrence query.
+    const closed = new Set(
+      (await this.db.db.query.closureDates.findMany({
+        where: eq(closureDates.organizationId, orgId),
+        columns: { date: true },
+      })).map((c) => c.date),
+    );
+
+    let created = 0, skippedExisting = 0, skippedConflicts = 0, skippedClosed = 0;
     for (const naive of occurrences) {
       const instant = parseZonedDateTime(naive, tz);
       if (endCap && instant.getTime() > endCap.getTime()) break; // occurrences are ascending
+      if (closed.has(formatInZone(instant, tz, { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-CA'))) {
+        skippedClosed++;
+        continue;
+      }
       const hit = bySlot.get(instant.getTime());
       if (hit) {
         skippedExisting++;
@@ -600,7 +614,7 @@ export class SchedulingService {
     // reporting the full windowEnd regardless, telling the booker their
     // series ran weeks further than it actually does.
     const through = endCap && endCap.getTime() < windowEnd.getTime() ? endCap : windowEnd;
-    return { created, skippedExisting, skippedConflicts, through: through.toISOString(), weeks };
+    return { created, skippedExisting, skippedConflicts, skippedClosed, through: through.toISOString(), weeks };
   }
 
   /**
@@ -608,7 +622,7 @@ export class SchedulingService {
    * schedule. Used by the daily RecurrenceWorker. `orgId` scopes the scan (tests
    * pass a throwaway org); omitted = all orgs.
    */
-  async materializeAllRecurring(orgId?: string): Promise<{ created: number; skippedExisting: number; skippedConflicts: number }> {
+  async materializeAllRecurring(orgId?: string): Promise<{ created: number; skippedExisting: number; skippedConflicts: number; skippedClosed: number }> {
     const active = await this.db.db.query.enrollments.findMany({
       where: orgId
         ? and(eq(enrollments.status, 'active'), eq(enrollments.organizationId, orgId))
@@ -634,15 +648,15 @@ export class SchedulingService {
       for (const r of rows) inactiveTeachers.add(r.id);
     }
 
-    let created = 0, skippedExisting = 0, skippedConflicts = 0;
+    let created = 0, skippedExisting = 0, skippedConflicts = 0, skippedClosed = 0;
     for (const e of active) {
       const rule = e.scheduleRule as { weekday?: string; startTime?: string } | null;
       if (!rule?.weekday || !rule?.startTime) continue;
       if (e.teacherId && inactiveTeachers.has(e.teacherId)) continue;
       const r = await this.materializeEnrollment(e.organizationId, e.id);
-      created += r.created; skippedExisting += r.skippedExisting; skippedConflicts += r.skippedConflicts;
+      created += r.created; skippedExisting += r.skippedExisting; skippedConflicts += r.skippedConflicts; skippedClosed += r.skippedClosed;
     }
-    return { created, skippedExisting, skippedConflicts };
+    return { created, skippedExisting, skippedConflicts, skippedClosed };
   }
 
   async updateLesson(orgId: string, id: string, dto: UpdateLessonDto) {
@@ -902,12 +916,6 @@ export class SchedulingService {
     if (actor.role !== 'admin') throw new ForbiddenException('Only an admin can delete a whole day of lessons.');
 
     const tz = await this.getOrgTimezone(this.db.db, orgId);
-    const todayStr = formatInZone(new Date(), tz, { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-CA');
-    if (date > todayStr) {
-      throw new BadRequestException(
-        'Only today or an earlier date can be bulk-deleted — a future date risks the nightly recurrence worker silently recreating the lessons before the closure day arrives. Cancel individual lessons instead for a closure you know about in advance.',
-      );
-    }
     const dayStart = parseZonedDateTime(`${date}T00:00:00`, tz);
     const dayEnd = parseZonedDateTime(`${date}T23:59:59`, tz);
 
@@ -940,6 +948,16 @@ export class SchedulingService {
       });
       deleted++;
     }
+
+    // Record the closure so the nightly recurrence worker never regenerates a
+    // weekly series' slot on this date (see closureDates' doc comment and
+    // materializeEnrollment's `closed` check) — without this, deleting a
+    // FUTURE date would just have the lessons reappear before the closure
+    // day arrives. Harmless no-op for a past/today date, which the worker
+    // was never going to touch anyway.
+    await this.db.db.insert(closureDates)
+      .values({ organizationId: orgId, date, createdBy: actor.userId })
+      .onConflictDoNothing();
 
     return { deleted, skipped };
   }

@@ -2075,11 +2075,7 @@ export default function CalendarPage() {
   const todayStr = formatDate(new Date());
   const anchorStr = formatDate(anchorDate);
   const isAnchorToday = anchorStr === todayStr;
-  // "Delete all lessons today" only makes sense for an unexpected closure
-  // happening now or already past — a future date risks the nightly
-  // recurrence worker silently recreating the lessons before the closure
-  // day arrives (matches the backend's own refusal for the same reason).
-  const isAnchorPastOrToday = anchorStr <= todayStr;
+  const isAnchorFuture = anchorStr > todayStr;
 
   // teacher columns for day view: assigned teachers + an "Unassigned" bucket if
   // needed. A teacher filter narrows to that one column.
@@ -2092,17 +2088,21 @@ export default function CalendarPage() {
     ...(hasUnassigned ? [{ id: null, name: 'Unassigned' }] : []),
   ];
 
-  // Whole-day hard delete for an unexpected closure — no per-lesson
-  // cancellation email goes out (the business already tells families
-  // directly through its own channel); the lessons simply cease to exist,
-  // so they drop off every calendar/portal view and can never appear on an
-  // invoice. Deliberately separate from Cancel, which is for a single lesson
-  // and does notify.
+  // Whole-day hard delete for a closure — no per-lesson cancellation email
+  // goes out (the business already tells families directly through its own
+  // channel); the lessons simply cease to exist, so they drop off every
+  // calendar/portal view and can never appear on an invoice. Deliberately
+  // separate from Cancel, which is for a single lesson and does notify.
+  // Works for a future date too — the backend records the closure so the
+  // nightly recurrence worker won't regenerate a weekly series' slot there.
   async function deleteAllLessonsToday() {
     if (dayLessonsToday.length === 0) return;
+    const futureNote = isAnchorFuture
+      ? ' This date is also marked closed, so a weekly recurring lesson won’t be regenerated there overnight.'
+      : '';
     if (!confirm(
       `Permanently delete all ${dayLessonsToday.length} lesson${dayLessonsToday.length !== 1 ? 's' : ''} on ${dayLabel}? `
-      + `This removes them entirely across every calendar and family/student view — no cancellation email is sent (make sure your own closure notice has already gone out). There's no undo.`,
+      + `This removes them entirely across every calendar and family/student view — no cancellation email is sent (make sure your own closure notice has already gone out).${futureNote} There's no undo.`,
     )) return;
     setDeletingDay(true);
     try {
@@ -2286,13 +2286,13 @@ export default function CalendarPage() {
           })()}
         </div>
         <div className="flex items-center gap-2">
-          {isManagement && view === 'day' && isAnchorPastOrToday && dayLessonsToday.length > 0 && (
+          {isManagement && view === 'day' && dayLessonsToday.length > 0 && (
             <button onClick={deleteAllLessonsToday} disabled={deletingDay}
               className="text-sm rounded-[10px] px-4 py-2 font-semibold transition-colors disabled:opacity-50"
               style={{ border: '1.5px solid #FCA5A5', color: 'var(--coral)', background: '#fff' }}
-              title="For an unexpected closure — permanently deletes every lesson today, no cancellation email sent">
+              title="For a closure — permanently deletes every lesson this day, no cancellation email sent. A future date is also marked closed so it won't regenerate.">
               <Trash2 size={14} className="inline -mt-0.5 mr-1" />
-              {deletingDay ? 'Deleting…' : 'Delete all lessons today'}
+              {deletingDay ? 'Deleting…' : isAnchorToday ? 'Delete all lessons today' : 'Delete all lessons this day'}
             </button>
           )}
           {isManagement && (

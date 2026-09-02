@@ -145,6 +145,25 @@ export const lessonRequests = pgTable(
   (t) => [index('lesson_requests_org_status_idx').on(t.organizationId, t.status)],
 );
 
+// A whole-studio closure for one calendar day (e.g. an unexpected shop
+// closure). Bulk-deleting a FUTURE day's lessons inserts a row here so the
+// nightly recurrence worker's occurrence loop knows to skip regenerating a
+// weekly series' slot on this date, instead of silently recreating what was
+// just deleted before the closure day arrives. A same-day-or-past deletion
+// doesn't need one — the worker never generates into the past anyway.
+export const closureDates = pgTable(
+  'closure_dates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    date: date('date').notNull(),
+    reason: text('reason'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('closure_dates_org_date_idx').on(t.organizationId, t.date)],
+);
+
 export const attendance = pgTable(
   'attendance',
   {
