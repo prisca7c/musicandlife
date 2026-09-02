@@ -1,14 +1,14 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { ForbiddenException } from '@nestjs/common';
 import { SchedulingService } from '../src/scheduling/scheduling.service';
 
 /**
- * Bulk-delete every lesson on one day, for an unexpected closure. Admin only,
+ * Bulk-delete every lesson on one day, for a closure. Admin only,
  * hard-deletes (not cancel — no notification email goes out, since the
- * business already tells families directly), and refuses a future date
- * because the nightly recurrence worker's dedup only checks whether a
- * `lessons` row currently occupies a slot in its rolling window — a lesson
- * deleted ahead of its date would just be silently recreated before the
- * closure day arrives.
+ * business already tells families directly). Works for a future date too:
+ * it records a closureDates row so the nightly recurrence worker's
+ * occurrence loop (see scheduling-materialize-skips-closed-date.spec.ts)
+ * knows not to regenerate a weekly series' slot there, instead of the
+ * deleted lessons silently reappearing before the closure day arrives.
  */
 
 const ADMIN = { role: 'admin', userId: 'admin-1' } as const;
@@ -16,6 +16,7 @@ const TEACHER = { role: 'teacher', userId: 'tea-1' } as const;
 
 function make(lessons: { id: string; startsAt: Date; attendance: unknown; student: unknown }[], billedIds: Set<string> = new Set()) {
   const deleteCalls: string[] = [];
+  const insertCalls: { table: string; values: unknown }[] = [];
   const txn = jest.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn({
     update: () => ({ set: () => ({ where: async () => undefined }) }),
     delete: () => ({ where: async () => { deleteCalls.push('deleted'); } }),
@@ -27,6 +28,12 @@ function make(lessons: { id: string; startsAt: Date; attendance: unknown; studen
   const db = {
     db: {
       transaction: txn,
+      insert: (table: unknown) => ({
+        values: (values: unknown) => {
+          insertCalls.push({ table: String(table), values });
+          return { onConflictDoNothing: async () => undefined };
+        },
+      }),
       query: {
         lessons: { findMany: async () => lessons },
         invoiceLineItems: { findFirst: async () => {
@@ -38,20 +45,13 @@ function make(lessons: { id: string; startsAt: Date; attendance: unknown; studen
   };
   const svc = new SchedulingService(db as never, null as never, { reverseAndClearAttendance: jest.fn() } as never);
   Object.assign(svc as object, { getOrgTimezone: async () => 'Europe/London' });
-  return { svc, txn, deleteCalls };
+  return { svc, txn, deleteCalls, insertCalls };
 }
 
 describe('SchedulingService.deleteLessonsForDay', () => {
   it('refuses a non-admin actor', async () => {
     const { svc } = make([]);
     await expect(svc.deleteLessonsForDay('org-1', '2020-01-01', TEACHER)).rejects.toBeInstanceOf(ForbiddenException);
-  });
-
-  it('refuses a future date without querying any lessons', async () => {
-    const { svc, txn } = make([{ id: 'les-1', startsAt: new Date(), attendance: null, student: null }]);
-    const farFuture = new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0]!;
-    await expect(svc.deleteLessonsForDay('org-1', farFuture, ADMIN)).rejects.toBeInstanceOf(BadRequestException);
-    expect(txn).not.toHaveBeenCalled();
   });
 
   it('deletes clean lessons and skips an already-billed one, with no notification path involved', async () => {
@@ -80,6 +80,7 @@ describe('SchedulingService.deleteLessonsForDay', () => {
           update: () => ({ set: () => ({ where: async () => undefined }) }),
           delete: () => ({ where: async () => undefined }),
         })),
+        insert: () => ({ values: () => ({ onConflictDoNothing: async () => undefined }) }),
         query: {
           lessons: { findMany: async () => lessons },
           invoiceLineItems: { findFirst: async () => undefined },
@@ -93,5 +94,15 @@ describe('SchedulingService.deleteLessonsForDay', () => {
 
     expect(result.deleted).toBe(1);
     expect(reverseAndClearAttendance).toHaveBeenCalledWith('org-1', 'les-attended', expect.anything());
+  });
+
+  it('records a closure for the date, including for a future date, so the recurrence worker skips it', async () => {
+    const farFuture = new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0]!;
+    const { svc, insertCalls } = make([]);
+
+    const result = await svc.deleteLessonsForDay('org-1', farFuture, ADMIN);
+
+    expect(result).toEqual({ deleted: 0, skipped: [] });
+    expect(insertCalls).toEqual([{ table: expect.any(String), values: { organizationId: 'org-1', date: farFuture, createdBy: 'admin-1' } }]);
   });
 });
