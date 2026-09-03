@@ -26,6 +26,8 @@ interface FamilyDetail {
   invoiceFormat: 'condensed' | 'normal' | 'expanded'; includePreviousBalance: boolean;
   autoEmailInvoice: boolean; invoiceFooterNote: string | null;
   resourceAccessPaidUntil: string | null;
+  emailRemindersEnabled: boolean;
+  emailBookingConfirmationsEnabled: boolean;
   students: {
     id: string; firstName: string; lastName: string; status: string; unpaidBilled: number;
     enrollments: {
@@ -96,6 +98,62 @@ function ResourceAccessCard({ family, onSaved }: { family: FamilyDetail; onSaved
           </div>
         </dl>
       )}
+    </div>
+  );
+}
+
+// Per-family email preferences — off doesn't mean "not booked/reminded" (the
+// lesson still gets created and the 24h reminder still fires on schedule); it
+// only skips the OUTBOUND EMAIL for that event. Anyone with a portal login
+// still sees it there, so nothing is actually lost, just not sent to an inbox
+// that (for some families) never gets checked.
+function NotificationPrefsCard({ family, onSaved }: { family: FamilyDetail; onSaved: () => void }) {
+  const [saving, setSaving] = useState<'reminders' | 'booking' | null>(null);
+  const tok = () => document.cookie.match(/access_token=([^;]+)/)?.[1];
+
+  async function toggle(field: 'emailRemindersEnabled' | 'emailBookingConfirmationsEnabled', current: boolean, which: 'reminders' | 'booking') {
+    setSaving(which);
+    try {
+      await apiFetch(`/families/${family.id}`, {
+        method: 'PATCH', token: tok(), body: JSON.stringify({ [field]: !current }),
+      });
+      onSaved();
+    } catch (err) { console.error(err); }
+    finally { setSaving(null); }
+  }
+
+  const Row = ({ label, hint, on, onClick, busy }: { label: string; hint: string; on: boolean; onClick: () => void; busy: boolean }) => (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <div className="font-medium">{label}</div>
+        <div className="text-xs mt-0.5" style={{ color: 'var(--txt4)' }}>{hint}</div>
+      </div>
+      <button
+        type="button" onClick={onClick} disabled={busy} aria-pressed={on}
+        aria-label={`${label}: ${on ? 'on' : 'off'}`}
+        className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors disabled:opacity-50
+          ${on ? 'bg-[var(--sage-lt)] border-[var(--sage-md)] text-[var(--sage)]' : 'bg-white border-[var(--bd2)] text-[var(--txt4)]'}`}
+      >
+        {busy ? '…' : on ? 'On' : 'Off'}
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
+      <h2 className="font-bold mb-4 text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Email preferences</h2>
+      <div className="space-y-4 text-sm">
+        <Row
+          label="Booking confirmations" hint='"A lesson has been booked for you" — sent to this family/student only.'
+          on={family.emailBookingConfirmationsEnabled} busy={saving === 'booking'}
+          onClick={() => toggle('emailBookingConfirmationsEnabled', family.emailBookingConfirmationsEnabled, 'booking')}
+        />
+        <Row
+          label="Lesson reminders (24h before)" hint="The day-before reminder email."
+          on={family.emailRemindersEnabled} busy={saving === 'reminders'}
+          onClick={() => toggle('emailRemindersEnabled', family.emailRemindersEnabled, 'reminders')}
+        />
+      </div>
     </div>
   );
 }
@@ -653,6 +711,7 @@ export default function FamilyDetailPage() {
             </dl>
           </div>
           <ResourceAccessCard family={family} onSaved={load} />
+          <NotificationPrefsCard family={family} onSaved={load} />
           {family.guardians.length > 0 && (
             <div className="bg-white rounded-2xl border p-5" style={{ borderColor: 'var(--bd)' }}>
               <h2 className="font-bold mb-4 text-sm uppercase tracking-wider" style={{ color: 'var(--txt3)' }}>Guardians</h2>

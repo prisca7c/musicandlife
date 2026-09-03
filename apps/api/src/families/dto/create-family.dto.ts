@@ -90,4 +90,13 @@ export class CreateFamilyDto {
   @IsOptional()
   @IsDateString()
   resourceAccessPaidUntil?: string;
+
+  // ─── Notification preferences ─────────────────────────────────────────────
+  @IsOptional()
+  @IsBoolean()
+  emailRemindersEnabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  emailBookingConfirmationsEnabled?: boolean;
 }

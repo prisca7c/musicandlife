@@ -1,0 +1,1 @@
+ALTER TABLE "families" ADD COLUMN "email_booking_confirmations_enabled" boolean DEFAULT true NOT NULL;
