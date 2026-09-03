@@ -57,6 +57,13 @@ export const families = pgTable(
     // form). When false, the 24h reminder worker skips this family entirely.
     // Defaults true so existing families keep getting reminders as before.
     emailRemindersEnabled: boolean('email_reminders_enabled').notNull().default(true),
+    // Separate from emailRemindersEnabled: some families (older parents who
+    // rarely check email) want the studio to skip the "a lesson has been
+    // booked for you" confirmation email specifically, while still getting
+    // the 24h reminder the day before (which is the one that actually
+    // matters for showing up). The lesson itself is always created either
+    // way — this only controls whether the confirmation email goes out.
+    emailBookingConfirmationsEnabled: boolean('email_booking_confirmations_enabled').notNull().default(true),
     // Secret that authorises the family's read-only .ics lesson feed. The URL is
     // the only credential a calendar app can present, so this is a capability
     // token: unguessable, per-family, and revocable by regenerating it. Null

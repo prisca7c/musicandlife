@@ -359,7 +359,7 @@ export class SchedulingService {
       this.db.db.query.students.findFirst({
         where: eq(students.id, lesson.studentId),
         columns: { firstName: true, lastName: true, studentUserId: true, email: true },
-        with: { family: { columns: { id: true, email: true } } },
+        with: { family: { columns: { id: true, email: true, emailBookingConfirmationsEnabled: true } } },
       }),
       lesson.teacherId
         ? this.db.db.query.staffMembers.findFirst({
@@ -377,10 +377,22 @@ export class SchedulingService {
         })
       : [];
 
-    const recipientUserIds = new Set<string>();
-    if (teacher?.userId) recipientUserIds.add(teacher.userId);
-    if (student.studentUserId) recipientUserIds.add(student.studentUserId);
-    for (const g of familyGuardians) recipientUserIds.add(g.userId);
+    // A family can opt the STUDENT SIDE out of this specific email (some are
+    // older parents who never check email) while the lesson still gets booked
+    // and still shows up in-app for anyone with a portal login — only the
+    // teacher's copy is unaffected by this flag, since it isn't the family's
+    // preference to set.
+    const familyWantsEmail = student.family?.emailBookingConfirmationsEnabled ?? true;
+
+    const teacherUserIds = new Set<string>();
+    if (teacher?.userId) teacherUserIds.add(teacher.userId);
+    const familyUserIds = new Set<string>();
+    if (student.studentUserId) familyUserIds.add(student.studentUserId);
+    for (const g of familyGuardians) familyUserIds.add(g.userId);
+    // A teacher who's also a guardian (small studio, e.g. teaching their own
+    // kid) gets their teacher copy only — avoids double-triggering the same
+    // user once as "always email" and once as "family preference applies".
+    for (const id of teacherUserIds) familyUserIds.delete(id);
 
     const tz = await this.getOrgTimezone(this.db.db, orgId);
     const when = formatInZone(lesson.startsAt, tz, {
@@ -392,23 +404,35 @@ export class SchedulingService {
     const body = `${studentName}'s lesson with ${teacherName} is now on ${when} (${lesson.duration} min).`;
 
     const emailedAlready = new Set<string>();
-    for (const userId of recipientUserIds) {
-      const recipientUser = await this.db.db.query.users.findFirst({ where: eq(users.id, userId), columns: { email: true } });
+    for (const [userId, sendEmail] of [
+      ...[...teacherUserIds].map((id) => [id, true] as const),
+      ...[...familyUserIds].map((id) => [id, familyWantsEmail] as const),
+    ]) {
+      const recipientUser = sendEmail
+        ? await this.db.db.query.users.findFirst({ where: eq(users.id, userId), columns: { email: true } })
+        : null;
       const email = recipientUser?.email?.trim().toLowerCase();
       if (email) emailedAlready.add(email);
+      // email omitted entirely when the family opted out — trigger() still
+      // writes the in-app notification (keyed off userId alone) so it's
+      // logged in the portal, it just never reaches an inbox.
       await this.notifications.trigger('lesson.booked', {
-        orgId, userId, email: recipientUser?.email, body,
+        orgId, userId, email: sendEmail ? recipientUser?.email : undefined, body,
       });
     }
 
     // Plain contact emails with no portal login — dedupe against the accounts
     // already emailed above so a family using the same address for both isn't
-    // sent the confirmation twice.
-    const bareEmails = [student.family?.email, student.email]
-      .map((e) => e?.trim().toLowerCase())
-      .filter((e): e is string => !!e && !emailedAlready.has(e));
-    for (const email of new Set(bareEmails)) {
-      await this.notifications.trigger('lesson.booked', { orgId, email, body });
+    // sent the confirmation twice. Skipped entirely when opted out: there's no
+    // portal account to log an in-app notification against, so there'd be
+    // nothing left for this to do but send an email.
+    if (familyWantsEmail) {
+      const bareEmails = [student.family?.email, student.email]
+        .map((e) => e?.trim().toLowerCase())
+        .filter((e): e is string => !!e && !emailedAlready.has(e));
+      for (const email of new Set(bareEmails)) {
+        await this.notifications.trigger('lesson.booked', { orgId, email, body });
+      }
     }
   }
 
