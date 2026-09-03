@@ -332,7 +332,6 @@ export class SchedulingService {
     });
 
     if (opts?.notify !== false) {
-      this.notifyBooked(orgId, lesson).catch((e) => this.logger.warn(`lesson.booked notify failed: ${e}`));
       // The hourly reminder worker only ever catches a lesson starting 24-25h
       // out — a lesson booked with less than 24h's notice would otherwise never
       // get a reminder at all (its window has already passed by the time the
@@ -342,74 +341,6 @@ export class SchedulingService {
       }
     }
     return lesson;
-  }
-
-  /**
-   * In-app + email notification when a lesson is put on the calendar by staff
-   * (the admin "Add lesson" dialog, or confirming a lesson request, or a
-   * family self-booking). Reaches the teacher, every portal LOGIN the
-   * student's family has (guardians + the student's own account, if any),
-   * AND the family's plain contact email/the student's own email even when
-   * neither has a login — a family that books and pays without ever
-   * creating a portal account still gets a confirmation, it just won't also
-   * get an in-app banner (there's no account to show one in).
-   */
-  private async notifyBooked(orgId: string, lesson: { id: string; studentId: string; teacherId: string | null; startsAt: Date; duration: number }) {
-    const [student, teacher] = await Promise.all([
-      this.db.db.query.students.findFirst({
-        where: eq(students.id, lesson.studentId),
-        columns: { firstName: true, lastName: true, studentUserId: true, email: true },
-        with: { family: { columns: { id: true, email: true } } },
-      }),
-      lesson.teacherId
-        ? this.db.db.query.staffMembers.findFirst({
-            where: eq(staffMembers.id, lesson.teacherId),
-            columns: { firstName: true, lastName: true, userId: true },
-          })
-        : Promise.resolve(null),
-    ]);
-    if (!student) return;
-
-    const familyGuardians = student.family
-      ? await this.db.db.query.guardians.findMany({
-          where: eq(guardians.familyId, student.family.id),
-          columns: { userId: true },
-        })
-      : [];
-
-    const recipientUserIds = new Set<string>();
-    if (teacher?.userId) recipientUserIds.add(teacher.userId);
-    if (student.studentUserId) recipientUserIds.add(student.studentUserId);
-    for (const g of familyGuardians) recipientUserIds.add(g.userId);
-
-    const tz = await this.getOrgTimezone(this.db.db, orgId);
-    const when = formatInZone(lesson.startsAt, tz, {
-      weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
-    });
-    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const studentName = esc(`${student.firstName} ${student.lastName}`);
-    const teacherName = teacher ? esc(`${teacher.firstName} ${teacher.lastName}`) : 'a teacher';
-    const body = `${studentName}'s lesson with ${teacherName} is now on ${when} (${lesson.duration} min).`;
-
-    const emailedAlready = new Set<string>();
-    for (const userId of recipientUserIds) {
-      const recipientUser = await this.db.db.query.users.findFirst({ where: eq(users.id, userId), columns: { email: true } });
-      const email = recipientUser?.email?.trim().toLowerCase();
-      if (email) emailedAlready.add(email);
-      await this.notifications.trigger('lesson.booked', {
-        orgId, userId, email: recipientUser?.email, body,
-      });
-    }
-
-    // Plain contact emails with no portal login — dedupe against the accounts
-    // already emailed above so a family using the same address for both isn't
-    // sent the confirmation twice.
-    const bareEmails = [student.family?.email, student.email]
-      .map((e) => e?.trim().toLowerCase())
-      .filter((e): e is string => !!e && !emailedAlready.has(e));
-    for (const email of new Set(bareEmails)) {
-      await this.notifications.trigger('lesson.booked', { orgId, email, body });
-    }
   }
 
   // A same-day/next-day booking's reminder window (24-25h before start) has
@@ -1884,7 +1815,7 @@ export class SchedulingService {
         duration: req.duration,
         isTrialLesson,
         notes: req.notes ?? undefined,
-      }); // default notify: true — fires notifyBooked (teacher + family portal users), same as any other confirmed request
+      }); // opts.notify still gates the immediate 24h reminder below — no "lesson booked" confirmation email fires anymore
       await this.db.db.update(lessonRequests)
         .set({ createdLessonId: lesson.id })
         .where(eq(lessonRequests.id, id));
